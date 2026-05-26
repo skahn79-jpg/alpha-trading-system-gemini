@@ -45,7 +45,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-const KIS_BASE = "https://https://openapi.koreainvestment.com:9443"; // 실전투자
+const KIS_BASE = "https://openapi.koreainvestment.com:9443"; // 실전투자
 
 let ACCESS_TOKEN = null;
 let TOKEN_EXPIRES_AT = null;
