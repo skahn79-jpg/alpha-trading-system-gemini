@@ -1,0 +1,39 @@
+# ALPHA TRADING SYSTEM — Render 배포 설정
+# Render.com → New Web Service → GitHub 저장소 연결 → 자동 감지
+
+services:
+  - type: web
+    name: alpha-trading-server
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install
+    startCommand: node server.js
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      - key: PORT
+        value: 10000
+
+      - key: KIS_APP_KEY
+        sync: false
+
+      - key: KIS_APP_SECRET
+        sync: false
+
+      - key: DART_API_KEY
+        sync: false
+
+      - key: GEMINI_API_KEY
+        sync: false
+
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+
+      - key: ALLOWED_ORIGIN
+        sync: false
+
+    healthCheckPath: /api/health
+    autoDeploy: true
