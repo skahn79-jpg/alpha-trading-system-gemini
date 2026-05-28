@@ -17,6 +17,8 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 const { analyzeCandles } = require("./analysis.js");
 const { fetchNpsChanges, fetchNpsForStock } = require("./dart.js");
 const { judgeBatch, computeStats, computeWeights, scoreSignal } = require("./simulation.js");
@@ -576,6 +578,287 @@ app.post("/api/ai/analyze", async (req, res) => {
 });
 
 
+
+// ── 서버 저장형 가격 알림 + Telegram 발송 ─────────────────────
+// 웹앱이 닫혀 있어도 Render Cron Job이 /api/alerts/check 를 호출하면 조건을 감시하고 Telegram으로 발송합니다.
+// 환경변수:
+//   TELEGRAM_BOT_TOKEN = BotFather에서 발급받은 봇 토큰
+//   TELEGRAM_CHAT_ID   = 메시지를 받을 개인/그룹 chat_id
+//   ALERT_CHECK_SECRET = 선택사항. 설정 시 /api/alerts/check?secret=... 로 호출해야 합니다.
+const ALERTS_FILE = process.env.ALERTS_FILE || path.join(__dirname, "alerts.json");
+
+function readServerAlerts() {
+  try {
+    if (!fs.existsSync(ALERTS_FILE)) return [];
+    const raw = fs.readFileSync(ALERTS_FILE, "utf-8");
+    const data = JSON.parse(raw || "[]");
+    return Array.isArray(data) ? data : [];
+  } catch (err) {
+    console.error("[alerts/read]", err.message);
+    return [];
+  }
+}
+
+function writeServerAlerts(alerts) {
+  fs.writeFileSync(ALERTS_FILE, JSON.stringify(alerts, null, 2), "utf-8");
+}
+
+function normalizeServerAlert(input) {
+  const type = String(input.type || "priceAbove");
+  const code = String(input.code || "").trim();
+  const target = Number(input.target || 0);
+
+  if (!code || !/^\d{6}$/.test(code)) {
+    throw new Error("종목코드 6자리가 필요합니다.");
+  }
+
+  if (type !== "ma20Touch" && (!Number.isFinite(target) || target <= 0)) {
+    throw new Error("목표가/손절가 기준 단가가 필요합니다.");
+  }
+
+  return {
+    id: input.id || `srv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    code,
+    name: String(input.name || code),
+    type,
+    target: type === "ma20Touch" ? 0 : target,
+    source: input.source || "WEB",
+    message: input.message || "",
+    active: input.active !== false,
+    triggered: Boolean(input.triggered),
+    lastSentAt: input.lastSentAt || null,
+    createdAt: input.createdAt || new Date().toLocaleString("ko-KR"),
+  };
+}
+
+async function sendTelegramMessage(text) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+
+  if (!token || !chatId) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHAT_ID 환경변수가 없습니다.",
+    };
+  }
+
+  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  const { data } = await axios.post(url, {
+    chat_id: chatId,
+    text,
+    parse_mode: "HTML",
+    disable_web_page_preview: true,
+  }, {
+    timeout: 8000,
+    headers: { "Content-Type": "application/json" },
+  });
+
+  return data;
+}
+
+function buildTelegramAlertText(alert, quote, basis) {
+  const price = Number(quote.price || 0);
+  const rate = Number(quote.changeRate || 0);
+  const typeLabel =
+    alert.type === "priceAbove" ? "목표가 이상 도달" :
+    alert.type === "priceBelow" ? "손절가 이하 이탈" :
+    alert.type === "ma20Touch" ? "20일선 도달" :
+    alert.type;
+
+  return [
+    "🚨 <b>ALPHA 가격 알림</b>",
+    "",
+    `<b>${alert.name}(${alert.code})</b>`,
+    `조건: ${typeLabel}`,
+    `기준: ${alert.type === "ma20Touch" ? "20일선 ±1%" : Number(alert.target).toLocaleString("ko-KR") + "원"}`,
+    `현재가: ${price.toLocaleString("ko-KR")}원`,
+    `등락률: ${rate >= 0 ? "+" : ""}${rate.toFixed(2)}%`,
+    `판정: ${basis}`,
+    "",
+    alert.message ? `메모: ${alert.message}` : "",
+    `발송시각: ${new Date().toLocaleString("ko-KR")}`,
+  ].filter(Boolean).join("\n");
+}
+
+async function getQuoteForAlert(code) {
+  const quote = await kisGet(
+    "/uapi/domestic-stock/v1/quotations/inquire-price",
+    "FHKST01010100",
+    { FID_COND_MRKT_DIV_CODE: "J", FID_INPUT_ISCD: code }
+  );
+
+  const o = quote.output || {};
+  const rate = parseFloat(o.prdy_ctrt || 0);
+  return {
+    code,
+    name: o.hts_kor_isnm || code,
+    price: parseInt(o.stck_prpr || 0),
+    changeRate: rate,
+    changeStr: `${rate >= 0 ? "+" : ""}${rate.toFixed(2)}%`,
+    ma20: parseFloat(o.d20_esdg) || 0,
+  };
+}
+
+function evaluateServerAlert(alert, quote) {
+  const price = Number(quote.price || 0);
+  const target = Number(alert.target || 0);
+  const ma20 = Number(quote.ma20 || 0);
+
+  if (alert.type === "priceAbove") {
+    return {
+      hit: price >= target,
+      basis: `${price.toLocaleString("ko-KR")} >= ${target.toLocaleString("ko-KR")}`,
+    };
+  }
+
+  if (alert.type === "priceBelow") {
+    return {
+      hit: price <= target,
+      basis: `${price.toLocaleString("ko-KR")} <= ${target.toLocaleString("ko-KR")}`,
+    };
+  }
+
+  if (alert.type === "ma20Touch") {
+    const hit = ma20 > 0 ? Math.abs(price - ma20) / ma20 <= 0.01 : false;
+    return {
+      hit,
+      basis: ma20 > 0
+        ? `${price.toLocaleString("ko-KR")} ≒ 20일선 ${Math.round(ma20).toLocaleString("ko-KR")}`
+        : "20일선 데이터 없음",
+    };
+  }
+
+  return { hit: false, basis: "지원하지 않는 조건" };
+}
+
+app.get("/api/alerts", (req, res) => {
+  res.json({
+    ok: true,
+    count: readServerAlerts().length,
+    alerts: readServerAlerts(),
+  });
+});
+
+app.post("/api/alerts", (req, res) => {
+  try {
+    const alertItem = normalizeServerAlert(req.body || {});
+    const alerts = readServerAlerts();
+
+    const exists = alerts.some((a) =>
+      a.code === alertItem.code &&
+      a.type === alertItem.type &&
+      Number(a.target) === Number(alertItem.target) &&
+      a.active !== false
+    );
+
+    if (!exists) {
+      alerts.push(alertItem);
+      writeServerAlerts(alerts);
+    }
+
+    res.json({
+      ok: true,
+      exists,
+      alert: exists ? alerts.find((a) => a.code === alertItem.code && a.type === alertItem.type && Number(a.target) === Number(alertItem.target)) : alertItem,
+      count: alerts.length,
+    });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.delete("/api/alerts/:id", (req, res) => {
+  const alerts = readServerAlerts();
+  const next = alerts.filter((a) => String(a.id) !== String(req.params.id));
+  writeServerAlerts(next);
+  res.json({ ok: true, deleted: alerts.length - next.length, count: next.length });
+});
+
+app.post("/api/alerts/telegram/test", async (req, res) => {
+  try {
+    const text = req.body?.text || "✅ ALPHA 텔레그램 알림 테스트입니다.";
+    const result = await sendTelegramMessage(text);
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(err.response?.status || 500).json({
+      ok: false,
+      error: err.message,
+      detail: err.response?.data || null,
+    });
+  }
+});
+
+app.get("/api/alerts/check", async (req, res) => {
+  try {
+    const secret = process.env.ALERT_CHECK_SECRET;
+    if (secret && req.query.secret !== secret) {
+      return res.status(401).json({ ok: false, error: "Invalid secret" });
+    }
+
+    const alerts = readServerAlerts();
+    const next = [];
+    const results = [];
+
+    for (const alert of alerts) {
+      if (alert.active === false) {
+        next.push(alert);
+        continue;
+      }
+
+      // 이미 발송된 알림은 중복 발송하지 않습니다. 다시 쓰려면 웹앱에서 새 알림으로 등록합니다.
+      if (alert.triggered) {
+        next.push(alert);
+        results.push({ id: alert.id, code: alert.code, skipped: "already_triggered" });
+        continue;
+      }
+
+      try {
+        const quote = await getQuoteForAlert(alert.code);
+        const evalResult = evaluateServerAlert(alert, quote);
+
+        if (evalResult.hit) {
+          const message = buildTelegramAlertText({ ...alert, name: alert.name || quote.name }, quote, evalResult.basis);
+          const tg = await sendTelegramMessage(message);
+          const updated = {
+            ...alert,
+            triggered: true,
+            lastSentAt: new Date().toISOString(),
+            lastPrice: quote.price,
+            lastBasis: evalResult.basis,
+          };
+          next.push(updated);
+          results.push({ id: alert.id, code: alert.code, hit: true, telegram: tg });
+        } else {
+          next.push({ ...alert, lastCheckedAt: new Date().toISOString(), lastPrice: quote.price, lastBasis: evalResult.basis });
+          results.push({ id: alert.id, code: alert.code, hit: false, basis: evalResult.basis });
+        }
+      } catch (err) {
+        next.push(alert);
+        results.push({
+          id: alert.id,
+          code: alert.code,
+          error: err.message,
+          kisError: err.response?.data || null,
+        });
+      }
+    }
+
+    writeServerAlerts(next);
+
+    res.json({
+      ok: true,
+      checked: alerts.length,
+      sent: results.filter((r) => r.hit).length,
+      results,
+      time: new Date().toISOString(),
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+
 // ── 해외주식 / 크립토 실시간 시세 ─────────────────────────────
 // 별도 API 키 없이 Yahoo Finance chart endpoint를 프록시로 사용합니다.
 // 프론트 호출:
@@ -698,6 +981,9 @@ app.listen(PORT, () => {
 ║  GET /api/us/quote/:symbol        미국주식 실시간     ║
 ║  GET /api/crypto/quote/:symbol    크립토 실시간       ║
 ║  GET /api/search?q=               종목 검색           ║
+║  GET /api/alerts                  서버 알림 목록      ║
+║  POST /api/alerts                 서버 알림 등록      ║
+║  GET /api/alerts/check            조건 감시/텔레그램  ║
 ║                                                      ║
 ║  [국민연금 - DART]                                   ║
 ║  GET /api/nps?days=60             국민연금 변동 종목  ║

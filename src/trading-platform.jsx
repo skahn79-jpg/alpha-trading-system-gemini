@@ -85,6 +85,65 @@ const KOREAN_STOCK_CATALOG = [
   { code: "011210", name: "현대위아", tag: "자동차부품", sector: "자동차" },
   { code: "012330", name: "현대모비스", tag: "자동차부품", sector: "자동차" },
   { code: "161390", name: "한국타이어앤테크놀로지", tag: "타이어", sector: "자동차" },
+
+  // ── KOSDAQ 검색 보강 리스트 ─────────────────────────────
+  // 일부 KOSDAQ 종목은 KIS 검색 API/프론트 기본 목록에 없으면 종목명 검색이 되지 않아
+  // 대표 KOSDAQ 종목을 로컬 카탈로그에 추가합니다.
+  { code: "028300", name: "HLB", tag: "바이오", sector: "바이오" },
+  { code: "145020", name: "휴젤", tag: "바이오", sector: "바이오" },
+  { code: "214150", name: "클래시스", tag: "미용의료기기", sector: "의료기기" },
+  { code: "214450", name: "파마리서치", tag: "바이오/미용", sector: "바이오" },
+  { code: "058470", name: "리노공업", tag: "반도체", sector: "반도체" },
+  { code: "039030", name: "이오테크닉스", tag: "반도체장비", sector: "반도체" },
+  { code: "036930", name: "주성엔지니어링", tag: "반도체장비", sector: "반도체" },
+  { code: "240810", name: "원익IPS", tag: "반도체장비", sector: "반도체" },
+  { code: "064760", name: "티씨케이", tag: "반도체소재", sector: "반도체" },
+  { code: "095340", name: "ISC", tag: "반도체부품", sector: "반도체" },
+  { code: "089030", name: "테크윙", tag: "반도체장비", sector: "반도체" },
+  { code: "067310", name: "하나마이크론", tag: "반도체후공정", sector: "반도체" },
+  { code: "222800", name: "심텍", tag: "PCB", sector: "전자부품" },
+  { code: "101490", name: "에스앤에스텍", tag: "반도체소재", sector: "반도체" },
+  { code: "319660", name: "피에스케이", tag: "반도체장비", sector: "반도체" },
+  { code: "036540", name: "SFA반도체", tag: "반도체후공정", sector: "반도체" },
+  { code: "005290", name: "동진쎄미켐", tag: "반도체소재", sector: "반도체" },
+  { code: "046890", name: "서울반도체", tag: "LED", sector: "전자부품" },
+  { code: "078600", name: "대주전자재료", tag: "2차전지소재", sector: "2차전지" },
+  { code: "121600", name: "나노신소재", tag: "2차전지소재", sector: "2차전지" },
+  { code: "348370", name: "엔켐", tag: "2차전지소재", sector: "2차전지" },
+  { code: "025900", name: "동화기업", tag: "2차전지/소재", sector: "소재" },
+  { code: "131970", name: "두산테스나", tag: "반도체테스트", sector: "반도체" },
+  { code: "277810", name: "레인보우로보틱스", tag: "로봇", sector: "로봇" },
+  { code: "108490", name: "로보티즈", tag: "로봇", sector: "로봇" },
+  { code: "090360", name: "로보스타", tag: "로봇", sector: "로봇" },
+  { code: "042000", name: "카페24", tag: "이커머스", sector: "인터넷" },
+  { code: "067160", name: "SOOP", tag: "플랫폼", sector: "인터넷" },
+  { code: "035760", name: "CJ ENM", tag: "미디어", sector: "미디어" },
+  { code: "060250", name: "NHN KCP", tag: "결제", sector: "핀테크" },
+  { code: "293490", name: "카카오게임즈", tag: "게임", sector: "게임" },
+  { code: "122870", name: "와이지엔터테인먼트", tag: "엔터", sector: "엔터" },
+  { code: "376300", name: "디어유", tag: "엔터플랫폼", sector: "엔터" },
+  { code: "053800", name: "안랩", tag: "보안", sector: "소프트웨어" },
+  { code: "096530", name: "씨젠", tag: "진단키트", sector: "바이오" },
+  { code: "237690", name: "에스티팜", tag: "바이오", sector: "바이오" },
+  { code: "068760", name: "셀트리온제약", tag: "바이오", sector: "바이오" },
+  { code: "141080", name: "리가켐바이오", tag: "바이오", sector: "바이오" },
+  { code: "000250", name: "삼천당제약", tag: "제약", sector: "바이오" },
+  { code: "214370", name: "케어젠", tag: "바이오", sector: "바이오" },
+  { code: "086900", name: "메디톡스", tag: "바이오", sector: "바이오" },
+  { code: "048410", name: "현대바이오", tag: "바이오", sector: "바이오" },
+  { code: "206650", name: "유바이오로직스", tag: "백신", sector: "바이오" },
+  { code: "140410", name: "메지온", tag: "바이오", sector: "바이오" },
+  { code: "095700", name: "제넥신", tag: "바이오", sector: "바이오" },
+  { code: "085660", name: "차바이오텍", tag: "바이오", sector: "바이오" },
+  { code: "084990", name: "헬릭스미스", tag: "바이오", sector: "바이오" },
+  { code: "007390", name: "네이처셀", tag: "바이오", sector: "바이오" },
+  { code: "215600", name: "신라젠", tag: "바이오", sector: "바이오" },
+  { code: "323990", name: "박셀바이오", tag: "바이오", sector: "바이오" },
+  { code: "144510", name: "지씨셀", tag: "바이오", sector: "바이오" },
+  { code: "195940", name: "HK이노엔", tag: "제약", sector: "바이오" },
+  { code: "052020", name: "에스티큐브", tag: "바이오", sector: "바이오" },
+  { code: "215200", name: "메가스터디교육", tag: "교육", sector: "교육" },
+  { code: "089980", name: "상아프론테크", tag: "소재", sector: "소재" },
 ];
 
 const GLOBAL_TICKERS = [
@@ -351,6 +410,244 @@ const styles = `
 }
 .label-guide{stroke-width:1.4;stroke-dasharray:3 3;opacity:.85}
 
+
+/* === FIX: AI Report Inner Scroll Only === */
+.ai-report-scroll-panel{
+  overflow:visible!important;
+  height:auto!important;
+  max-height:none!important;
+}
+.ai-report-scroll-panel .panel{
+  overflow:visible!important;
+  height:auto!important;
+  max-height:none!important;
+}
+.ai-report-scroll-panel .panel-body{
+  overflow:visible!important;
+  height:auto!important;
+  max-height:none!important;
+}
+.ai-report-result-box{
+  height:360px!important;
+  max-height:360px!important;
+  min-height:260px!important;
+  overflow-y:auto!important;
+  overflow-x:hidden!important;
+  overscroll-behavior:contain!important;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:thin;
+  border:1px solid #1e3445;
+  background:#070b10;
+  padding:16px;
+  color:#d9ecf5;
+  white-space:pre-wrap;
+  word-break:keep-all;
+  overflow-wrap:anywhere;
+  line-height:1.85;
+}
+.ai-report-result-box::-webkit-scrollbar{width:10px}
+.ai-report-result-box::-webkit-scrollbar-track{background:#071018}
+.ai-report-result-box::-webkit-scrollbar-thumb{background:#254357;border-radius:10px}
+.ai-report-result-box::-webkit-scrollbar-thumb:hover{background:#00d9ff}
+.ai-result-full{
+  max-height:none!important;
+  overflow:visible!important;
+}
+.ai-result-full h4{
+  position:sticky;
+  top:0;
+  z-index:2;
+  margin:0 0 10px 0;
+  padding:0 0 8px 0;
+  background:#101923;
+}
+.ai-report-scroll-help{
+  margin-top:8px;
+  color:#6f899a;
+  font-size:12px;
+  line-height:1.5;
+}
+@media(max-width:900px){
+  .ai-report-result-box{
+    height:300px!important;
+    max-height:300px!important;
+    min-height:220px!important;
+  }
+}
+
+
+/* === FINAL FIX: AI Report Content Scroll + Full View Modal === */
+.ai-report-result-box{
+  display:block!important;
+  width:100%!important;
+  box-sizing:border-box!important;
+  height:260px!important;
+  max-height:260px!important;
+  min-height:260px!important;
+  overflow-y:scroll!important;
+  overflow-x:hidden!important;
+  overscroll-behavior:contain!important;
+  -webkit-overflow-scrolling:touch!important;
+  white-space:pre-wrap!important;
+  word-break:keep-all!important;
+  overflow-wrap:anywhere!important;
+  line-height:1.85!important;
+  font-family:inherit!important;
+  font-size:14px!important;
+  color:#d9ecf5!important;
+  background:#070b10!important;
+  border:1px solid #1e3445!important;
+  padding:16px!important;
+  margin:0!important;
+}
+.ai-report-result-box::-webkit-scrollbar{width:12px!important}
+.ai-report-result-box::-webkit-scrollbar-track{background:#071018!important}
+.ai-report-result-box::-webkit-scrollbar-thumb{background:#00a6c8!important;border-radius:10px!important}
+.ai-report-actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 8px}
+.ai-report-actions .btn{min-width:120px}
+.ai-report-modal-backdrop{
+  position:fixed;
+  inset:0;
+  z-index:99999;
+  background:rgba(0,0,0,.78);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:18px;
+}
+.ai-report-modal{
+  width:min(1180px,96vw);
+  height:min(820px,92vh);
+  background:#081018;
+  border:2px solid #00d9ff;
+  box-shadow:0 18px 60px rgba(0,0,0,.75);
+  display:flex;
+  flex-direction:column;
+}
+.ai-report-modal-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:14px 18px;
+  border-bottom:1px solid #1e3445;
+  color:#00d9ff;
+  font-weight:900;
+}
+.ai-report-modal-body{
+  flex:1;
+  overflow-y:scroll;
+  overflow-x:hidden;
+  padding:22px;
+  color:#d9ecf5;
+  line-height:1.9;
+  white-space:pre-wrap;
+  word-break:keep-all;
+  overflow-wrap:anywhere;
+  font-size:15px;
+}
+.ai-report-modal-body::-webkit-scrollbar{width:12px}
+.ai-report-modal-body::-webkit-scrollbar-track{background:#071018}
+.ai-report-modal-body::-webkit-scrollbar-thumb{background:#00a6c8;border-radius:10px}
+.ai-report-close{
+  border:1px solid #00d9ff;
+  background:#00384a;
+  color:#d9ecf5;
+  padding:9px 14px;
+  font-weight:900;
+  cursor:pointer;
+}
+.ai-report-close:hover{background:#005d78}
+@media(max-width:900px){
+  .ai-report-result-box{height:220px!important;max-height:220px!important;min-height:220px!important}
+  .ai-report-modal{width:96vw;height:88vh}
+  .ai-report-modal-body{font-size:14px;padding:16px}
+}
+
+
+/* === PC FIX: AI Report wheel scroll === */
+.ai-report-result-box{
+  height:360px!important;
+  max-height:360px!important;
+  min-height:360px!important;
+  overflow-y:auto!important;
+  overflow-x:hidden!important;
+  overscroll-behavior:auto!important;
+  pointer-events:auto!important;
+  cursor:auto!important;
+  display:block!important;
+}
+.ai-result-full{
+  pointer-events:auto!important;
+}
+.ai-report-wheel-wrapper{
+  max-height:360px!important;
+  height:360px!important;
+  overflow-y:auto!important;
+  overflow-x:hidden!important;
+  border:1px solid #1e3445;
+  background:#070b10;
+  overscroll-behavior:contain;
+  scrollbar-width:thin;
+}
+.ai-report-wheel-wrapper .ai-report-result-box{
+  border:0!important;
+  height:auto!important;
+  max-height:none!important;
+  min-height:100%!important;
+  overflow:visible!important;
+}
+.ai-report-wheel-wrapper::-webkit-scrollbar{width:12px}
+.ai-report-wheel-wrapper::-webkit-scrollbar-track{background:#071018}
+.ai-report-wheel-wrapper::-webkit-scrollbar-thumb{background:#00a6c8;border-radius:10px}
+.ai-report-wheel-wrapper:hover::-webkit-scrollbar-thumb{background:#00d9ff}
+@media(max-width:900px){
+  .ai-report-wheel-wrapper{
+    height:300px!important;
+    max-height:300px!important;
+  }
+}
+
+
+/* === AI Report Price Alert Controls === */
+.ai-alert-card{
+  margin-top:12px;
+  border:1px solid #1e3445;
+  background:#0b1520;
+  padding:14px;
+}
+.ai-alert-title{
+  color:#00d9ff;
+  font-weight:900;
+  margin-bottom:10px;
+}
+.ai-alert-grid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:8px;
+}
+.ai-alert-grid .input,
+.ai-alert-grid .select{
+  width:100%;
+}
+.ai-alert-hint{
+  color:#6f899a;
+  font-size:12px;
+  line-height:1.5;
+  margin-top:8px;
+}
+.ai-alert-toast{
+  margin-top:8px;
+  border:1px solid #00ff8866;
+  background:#00ff8814;
+  color:#00ff88;
+  padding:8px 10px;
+  font-weight:800;
+}
+@media(max-width:900px){
+  .ai-alert-grid{grid-template-columns:1fr 1fr}
+}
+
 `;
 
 function normalizeCode(code) {
@@ -491,6 +788,16 @@ function searchStockCatalog(keyword, currentStocks = []) {
     "삼성전자": ["삼성전자", "삼전"],
     "한미반도체": ["한미반도체", "한미"],
     "POSCO홀딩스": ["posco홀딩스", "포스코홀딩스", "포홀"],
+    "HLB": ["hlb", "에이치엘비"],
+    "리가켐바이오": ["리가켐", "레고켐", "레고켐바이오", "legochem", "ligachem"],
+    "SOOP": ["soop", "숲", "아프리카tv", "아프리카티비"],
+    "JYP Ent.": ["jyp", "jypent", "jyp엔터", "제이와이피"],
+    "CJ ENM": ["cjenm", "씨제이이엔엠", "cj이엔엠"],
+    "NHN KCP": ["nhnkcp", "kcp", "엔에이치엔케이씨피"],
+    "SFA반도체": ["sfa반도체", "에스에프에이반도체"],
+    "에스앤에스텍": ["에스앤에스텍", "sns텍", "s&s tech"],
+    "와이지엔터테인먼트": ["yg", "yg엔터", "와이지", "와이지엔터"],
+    "레인보우로보틱스": ["레인보우", "rainbow robotics"],
   };
 
   const merged = new Map();
@@ -601,7 +908,7 @@ function normalizeHistoryResponse(raw) {
   return normalized.slice(-2600);
 }
 
-function makeFallbackHistory(selected, length = 180) {
+function makeFallbackHistory(selected, length = 180, period = "D") {
   const price = Number(selected?.price || 100000);
   const today = new Date();
 
@@ -615,7 +922,21 @@ function makeFallbackHistory(selected, length = 180) {
     const high = Math.max(open, close) * (1.012 + (i % 5) * 0.0025);
     const low = Math.min(open, close) * (0.988 - (i % 4) * 0.0018);
     const d = new Date(today);
-    d.setDate(today.getDate() - (length - i));
+
+    // 핵심 수정:
+    // 월봉 3Y는 36개월, 월봉 5Y는 60개월처럼 기간 단위에 맞는 날짜를 생성합니다.
+    // 기존에는 fallback 날짜가 일 단위로 생성되어 월봉 3Y 선택 시 최근 36일처럼 보였습니다.
+    if (period === "M") {
+      d.setMonth(today.getMonth() - (length - 1 - i));
+      d.setDate(1);
+    } else if (period === "Y") {
+      d.setFullYear(today.getFullYear() - (length - 1 - i));
+      d.setMonth(0);
+      d.setDate(1);
+    } else {
+      d.setDate(today.getDate() - (length - 1 - i));
+    }
+
     return {
       date: d.toISOString().slice(0, 10),
       open: Math.round(open),
@@ -725,6 +1046,13 @@ function countByPeriod(period, range) {
   return 260;
 }
 
+function minChartCandles(period, range) {
+  // 일봉은 최소 60봉을 요구하되, 월봉 3Y는 36봉 자체가 정상 데이터입니다.
+  if (period === "M") return Math.min(36, countByPeriod(period, range));
+  if (period === "Y") return Math.min(3, countByPeriod(period, range));
+  return Math.min(60, countByPeriod(period, range));
+}
+
 
 function calcRSI(data, period = 14) {
   if (!data || data.length <= period) return null;
@@ -829,10 +1157,10 @@ function calculateGogojeoSignal(candles, options = {}) {
 
   const data = candles.slice(-lookback);
 
-  if (data.length < 60) {
+  if (data.length < 24) {
     return {
       status: "ERROR",
-      message: "데이터가 부족합니다. 최소 60봉 이상 필요합니다."
+      message: "데이터가 부족합니다. 최소 24봉 이상 필요합니다."
     };
   }
 
@@ -1060,8 +1388,8 @@ function lastN(data, n) {
 }
 
 function calculateMaPullbackSignal(candles) {
-  if (!candles || candles.length < 60) {
-    return { status: "ERROR", signalName: "이동평균 눌림", score: 0, grade: "제외", message: "최소 60봉 이상 필요합니다." };
+  if (!candles || candles.length < 24) {
+    return { status: "ERROR", signalName: "이동평균 눌림", score: 0, grade: "제외", message: "최소 24봉 이상 필요합니다." };
   }
 
   const last = candles[candles.length - 1];
@@ -1114,8 +1442,8 @@ function calculateMaPullbackSignal(candles) {
 }
 
 function calculateBollingerSqueezeSignal(candles) {
-  if (!candles || candles.length < 60) {
-    return { status: "ERROR", signalName: "볼린저 수축", score: 0, grade: "제외", message: "최소 60봉 이상 필요합니다." };
+  if (!candles || candles.length < 24) {
+    return { status: "ERROR", signalName: "볼린저 수축", score: 0, grade: "제외", message: "최소 24봉 이상 필요합니다." };
   }
 
   const closes = candles.map((d) => Number(d.close));
@@ -1171,8 +1499,8 @@ function calculateBollingerSqueezeSignal(candles) {
 }
 
 function calculateVolumeBreakoutSignal(candles) {
-  if (!candles || candles.length < 60) {
-    return { status: "ERROR", signalName: "거래량 돌파", score: 0, grade: "제외", message: "최소 60봉 이상 필요합니다." };
+  if (!candles || candles.length < 24) {
+    return { status: "ERROR", signalName: "거래량 돌파", score: 0, grade: "제외", message: "최소 24봉 이상 필요합니다." };
   }
 
   const last = candles[candles.length - 1];
@@ -1215,8 +1543,8 @@ function calculateVolumeBreakoutSignal(candles) {
 }
 
 function calculateRsiReversalSignal(candles) {
-  if (!candles || candles.length < 60) {
-    return { status: "ERROR", signalName: "RSI 반등", score: 0, grade: "제외", message: "최소 60봉 이상 필요합니다." };
+  if (!candles || candles.length < 24) {
+    return { status: "ERROR", signalName: "RSI 반등", score: 0, grade: "제외", message: "최소 24봉 이상 필요합니다." };
   }
 
   const last = candles[candles.length - 1];
@@ -1318,6 +1646,7 @@ function techniqueDescription(key) {
 
 async function fetchChartHistory(code, period = "D", range = "1Y", selected = null) {
   const count = countByPeriod(period, range);
+  const minNeeded = minChartCandles(period, range);
   const paths = [
     `/api/chart/${code}?period=${period}&count=${count}&range=${range}&analyze=1`,
     `/api/history/${code}?period=${period}&count=${count}&range=${range}`,
@@ -1327,12 +1656,23 @@ async function fetchChartHistory(code, period = "D", range = "1Y", selected = nu
   for (const path of paths) {
     try {
       const data = normalizeHistoryResponse(await fetchJson(path));
-      if (data.length >= 60) return { data, source: path, fallback: false };
-      if (data.length >= 10) {
-        const pad = makeFallbackHistory({ ...selected, price: data[data.length - 1]?.close || selected?.price }, Math.max(60, count - data.length));
+
+      // 핵심 수정:
+      // 월봉 3Y는 36봉이 정상입니다. 기존처럼 60봉 미만을 오류/보강 처리하지 않습니다.
+      if (data.length >= minNeeded) {
+        return { data: data.slice(-count), source: path, fallback: false };
+      }
+
+      if (data.length >= Math.min(10, minNeeded)) {
+        const padCount = Math.max(0, count - data.length);
+        const pad = makeFallbackHistory(
+          { ...selected, price: data[data.length - 1]?.close || selected?.price },
+          padCount,
+          period
+        );
         return {
-          data: [...pad.slice(0, Math.max(0, 60 - data.length)), ...data],
-          source: `${path} + 보강데이터`,
+          data: [...pad, ...data].slice(-count),
+          source: `${path} + 기간보강`,
           fallback: true,
         };
       }
@@ -1341,7 +1681,11 @@ async function fetchChartHistory(code, period = "D", range = "1Y", selected = nu
     }
   }
 
-  return { data: makeFallbackHistory(selected, Math.max(60, Math.min(count, 180))), source: "fallback-generated", fallback: true };
+  return {
+    data: makeFallbackHistory(selected, count, period),
+    source: `fallback-generated-${period}-${range}`,
+    fallback: true,
+  };
 }
 
 
@@ -1604,7 +1948,7 @@ function LeftPanel({ stocks, quotes, selectedCode, setSelectedCode, reload, load
 
     addStock({
       code,
-      name: newStock.name.trim() || resolved.name || code,
+      name: newStock.name.trim() || resolved.name || getStockName(code, code, stocks),
       tag: newStock.tag.trim() || resolved.tag || resolved.sector || "사용자추가",
       sector: resolved.sector || newStock.tag.trim() || resolved.tag || "사용자추가",
     });
@@ -1666,7 +2010,7 @@ function LeftPanel({ stocks, quotes, selectedCode, setSelectedCode, reload, load
           )}
 
           {newStock.query && !matches.length && !newStock.code && (
-            <div className="search-empty">등록된 검색 결과가 없습니다. 종목명을 더 정확히 입력하거나 6자리 코드를 입력하세요.</div>
+            <div className="search-empty">검색 결과가 없습니다. 코스닥 일부 종목은 6자리 코드로 먼저 추가하면 이후 자동 저장됩니다.</div>
           )}
 
           <div className="add-stock-grid">
@@ -1682,7 +2026,7 @@ function LeftPanel({ stocks, quotes, selectedCode, setSelectedCode, reload, load
       </div>
       <div className="panel">
         <div className="panel-title">연결 상태</div>
-        <div className="panel-body sub">API 서버:<br /><b>{API_BASE}</b><br /><br />국내 시세는 KIS API 기준입니다.<br />미국 주식/코인은 현재 DEMO 표기입니다.</div>
+        <div className="panel-body sub">API 서버:<br /><b>{API_BASE}</b><br /><br />국내 시세는 KIS API 기준입니다.<br />미국 주식/코인은 Render API 연결 시 실시간으로 표시됩니다.</div>
       </div>
     </div>
   );
@@ -1755,7 +2099,7 @@ ${WEIGHTS.map((w) => `- ${w.name}: ×${w.weight}, 최근 적중률 ${w.hit}%`).j
 - 20선/60선 위치, 거래량 평균 대비 증가, RSI 과열 여부를 함께 확인합니다.
 - 추격 매수보다 종가 돌파, 저가 유지, 거래량 동반 여부를 조건으로 제시합니다.
 
-전체 답변은 1,200자 이내, 완결된 문장으로 작성하세요.
+전체 답변은 2,500자 이내로 작성하되, 반드시 ①~⑥ 항목을 모두 완결된 문장으로 끝까지 작성하세요. 중간에 문장이 끊기면 안 됩니다.
 
 ① 종합 판단
 ② 매수 조건
@@ -1817,6 +2161,55 @@ PER/PBR: ${per} / ${pbr}
 관망 전략: 고고저 빗각선 또는 20일선 기준 확인 전까지 대기.`;
 }
 
+
+function parseFirstPriceFromText(text, labels = []) {
+  const src = String(text || "");
+  for (const label of labels) {
+    const escaped = String(label).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`${escaped}[^0-9]{0,20}([0-9][0-9,]{2,})\\s*원?`, "i");
+    const m = src.match(re);
+    if (m) {
+      const n = Number(String(m[1]).replace(/,/g, ""));
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  }
+  const any = src.match(/([0-9][0-9,]{3,})\s*원/g);
+  if (any?.length) {
+    const n = Number(any[0].replace(/[^0-9]/g, ""));
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
+
+function upsertAlphaAlert(alertItem) {
+  const current = loadLS("alpha_alerts", []);
+  const exists = current.some((a) =>
+    String(a.code) === String(alertItem.code) &&
+    String(a.type) === String(alertItem.type) &&
+    Number(a.target) === Number(alertItem.target)
+  );
+  const next = exists ? current : [...current, alertItem];
+  saveLS("alpha_alerts", next);
+  try {
+    window.dispatchEvent(new CustomEvent("alpha-alerts-updated", { detail: next }));
+  } catch {}
+  return { next, exists };
+}
+
+async function saveAlertToServer(alertItem) {
+  try {
+    const data = await fetchJson("/api/alerts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(alertItem),
+    });
+    return { ok: true, data };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+
 function AiReport({ selected, stocks }) {
   const name = getStockName(selected?.code, selected?.name, stocks);
   const defaultPrompt = `${name}(${selected?.code}) 단기/스윙 분석 리포트 생성`;
@@ -1827,6 +2220,10 @@ function AiReport({ selected, stocks }) {
   const [err, setErr] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [alertType, setAlertType] = useState("priceAbove");
+  const [alertPrice, setAlertPrice] = useState("");
+  const [alertMsg, setAlertMsg] = useState("");
 
   useEffect(() => {
     setPrompt(defaultPrompt);
@@ -1835,6 +2232,10 @@ function AiReport({ selected, stocks }) {
     setChat([]);
     setErr("");
     setNotice("");
+    setReportOpen(false);
+    setAlertType("priceAbove");
+    setAlertPrice("");
+    setAlertMsg("");
   }, [defaultPrompt]);
 
   const applyAnswer = (answer, isFollowup) => {
@@ -1844,6 +2245,65 @@ function AiReport({ selected, stocks }) {
     } else {
       setResult(answer);
       setChat([{ role: "ai", text: answer }]);
+      const targetGuess = parseFirstPriceFromText(answer, ["1차 목표가", "목표가", "돌파 매수 조건"]);
+      if (targetGuess) setAlertPrice(String(targetGuess));
+    }
+  };
+
+  const getSuggestedAlertPrice = (type = alertType) => {
+    const price = Number(selected?.price || 0);
+    const low = Number(selected?.low || 0);
+    const high = Number(selected?.high || 0);
+    const ma20 = Number(selected?.ma20 || 0);
+
+    if (type === "priceAbove") {
+      return parseFirstPriceFromText(result, ["1차 목표가", "목표가", "돌파 매수 조건"]) ||
+        (high ? Math.round(high * 1.01) : price ? Math.round(price * 1.04) : "");
+    }
+    if (type === "priceBelow") {
+      return parseFirstPriceFromText(result, ["손절 기준", "손절가", "손절"]) ||
+        (low ? Math.round(low * 0.985) : price ? Math.round(price * 0.96) : "");
+    }
+    if (type === "ma20Touch") return ma20 || 0;
+    return "";
+  };
+
+  const setSuggestedAlert = (type) => {
+    setAlertType(type);
+    setAlertPrice(String(getSuggestedAlertPrice(type)));
+  };
+
+  const saveAiAlert = async (type = alertType, targetValue = alertPrice) => {
+    const code = selected?.code;
+    const target = Number(String(targetValue).replace(/,/g, ""));
+    if (!code) return alert("선택된 종목이 없습니다.");
+    if (type !== "ma20Touch" && (!Number.isFinite(target) || target <= 0)) {
+      return alert("알림 기준 단가를 입력하세요.");
+    }
+
+    const alertItem = {
+      id: Date.now(),
+      code,
+      name,
+      type,
+      target: type === "ma20Touch" ? 0 : target,
+      source: "AI 리포트",
+      message:
+        type === "priceAbove"
+          ? `${name}(${code}) 목표가 ${fmtPrice(target)}원 이상 도달 알림`
+          : type === "priceBelow"
+            ? `${name}(${code}) 손절가 ${fmtPrice(target)}원 이하 이탈 알림`
+            : `${name}(${code}) 20일선 도달 알림`,
+      createdAt: new Date().toLocaleString("ko-KR"),
+    };
+
+    const { exists } = upsertAlphaAlert(alertItem);
+    const server = await saveAlertToServer(alertItem);
+
+    if (server.ok) {
+      setAlertMsg(exists ? "이미 동일한 알림이 있습니다. 서버 알림도 확인했습니다." : "알림 센터와 서버 텔레그램 감시에 등록했습니다.");
+    } else {
+      setAlertMsg(exists ? `이미 동일한 알림이 있습니다. 서버 저장 실패: ${server.error}` : `브라우저 알림은 등록, 서버 저장 실패: ${server.error}`);
     }
   };
 
@@ -1864,11 +2324,24 @@ function AiReport({ selected, stocks }) {
         body: JSON.stringify({
           prompt: finalPrompt,
           systemPrompt:
-            "당신은 15년 경력의 주식 트레이딩 분석가입니다. 사용자의 질문을 반복하지 말고 종목 데이터와 학습 가중치를 반영해 한국어로 답변하세요.",
+            "당신은 15년 경력의 주식 트레이딩 분석가입니다. 사용자의 질문을 반복하지 말고 종목 데이터와 학습 가중치를 반영해 한국어로 답변하세요. 답변은 ①~⑥ 항목을 모두 끝까지 완성하세요.",
+          maxTokens: 3000,
         }),
       });
 
-      const answer = data.text || data.result || JSON.stringify(data, null, 2);
+      let answer = data.text || data.result || JSON.stringify(data, null, 2);
+
+      const tooShort =
+        !isFollowup &&
+        (!answer || answer.trim().length < 450 || !answer.includes("⑥"));
+      if (tooShort) {
+        answer = `${answer || ""}
+
+---
+[로컬 보강 분석]
+${buildLocalAnalysis(selected, stocks, "AI 응답이 짧거나 일부 항목이 누락되어 로컬 분석을 보강했습니다.")}`;
+      }
+
       applyAnswer(answer, isFollowup);
     } catch (e) {
       const msg = e.message || String(e);
@@ -1907,9 +2380,82 @@ function AiReport({ selected, stocks }) {
         {result && (
           <div className="ai-result-full">
             <h4>분석 결과 전체</h4>
-            <pre className="ai-result-scrollbox">{result}</pre>
+            <div className="ai-report-actions">
+              <button className="btn" type="button" onClick={() => setReportOpen(true)}>
+                분석 결과 크게보기
+              </button>
+              <button className="btn" type="button" onClick={() => navigator.clipboard?.writeText(result)}>
+                결과 복사
+              </button>
+            </div>
+            <div
+              className="ai-report-wheel-wrapper"
+              onWheel={(e) => {
+                const el = e.currentTarget;
+                const atTop = el.scrollTop <= 0;
+                const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+                if ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBottom)) {
+                  e.stopPropagation();
+                }
+              }}
+            >
+              <pre className="ai-report-result-box">
+{result}
+              </pre>
+            </div>
+            <div className="ai-report-scroll-help">
+              위 검은 박스 안에서만 스크롤됩니다. 내용이 길면 “분석 결과 크게보기”로 전체 화면에서 확인하세요.
+            </div>
           </div>
         )}
+        {result && (
+          <div className="ai-alert-card">
+            <div className="ai-alert-title">AI 리포트 기반 가격 알림</div>
+            <div className="ai-alert-grid">
+              <select className="select" value={alertType} onChange={(e) => {
+                setAlertType(e.target.value);
+                setAlertPrice(String(getSuggestedAlertPrice(e.target.value)));
+              }}>
+                <option value="priceAbove">목표가 이상 도달</option>
+                <option value="priceBelow">손절가 이하 이탈</option>
+                <option value="ma20Touch">20일선 도달</option>
+              </select>
+              <input
+                className="input"
+                type="number"
+                placeholder="알림 기준 단가"
+                value={alertPrice}
+                onChange={(e) => setAlertPrice(e.target.value)}
+                disabled={alertType === "ma20Touch"}
+              />
+              <button className="btn" type="button" onClick={() => setSuggestedAlert(alertType)}>
+                AI 제안가 불러오기
+              </button>
+              <button className="btn" type="button" onClick={() => saveAiAlert()}>
+                알림 설정
+              </button>
+            </div>
+            <div className="ai-alert-grid" style={{ marginTop: 8 }}>
+              <button className="btn" type="button" onClick={() => saveAiAlert("priceAbove", getSuggestedAlertPrice("priceAbove"))}>
+                목표가 알림 즉시등록
+              </button>
+              <button className="btn" type="button" onClick={() => saveAiAlert("priceBelow", getSuggestedAlertPrice("priceBelow"))}>
+                손절가 알림 즉시등록
+              </button>
+              <button className="btn" type="button" onClick={() => saveAiAlert("ma20Touch", 0)}>
+                20일선 알림 등록
+              </button>
+              <button className="btn" type="button" onClick={() => setAlertMsg("")}>
+                메시지 지우기
+              </button>
+            </div>
+            {alertMsg && <div className="ai-alert-toast">{alertMsg}</div>}
+            <div className="ai-alert-hint">
+              알림은 브라우저와 서버에 함께 저장됩니다. 서버에 저장된 알림은 Render Cron이 /api/alerts/check를 호출하면 웹앱이 닫혀 있어도 Telegram으로 발송됩니다.
+            </div>
+          </div>
+        )}
+
         {result && (
           <>
             <div style={{ height: 12 }} />
@@ -1932,6 +2478,19 @@ function AiReport({ selected, stocks }) {
                 <b>{m.role === "user" ? "질문" : "답변"}</b><br />{m.text}
               </div>
             ))}
+          </div>
+        )}
+        {reportOpen && (
+          <div className="ai-report-modal-backdrop" onClick={() => setReportOpen(false)}>
+            <div className="ai-report-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="ai-report-modal-head">
+                <span>분석 결과 전체 보기</span>
+                <button className="ai-report-close" type="button" onClick={() => setReportOpen(false)}>
+                  돌아가기
+                </button>
+              </div>
+              <pre className="ai-report-modal-body">{result}</pre>
+            </div>
           </div>
         )}
       </div>
@@ -2026,12 +2585,35 @@ function AlertCenter({ quotes, stocks }) {
   const [alerts, setAlerts] = useState(() => loadLS("alpha_alerts", []));
   const [form, setForm] = useState({ code: stocks[0]?.code || "005930", type: "priceAbove", target: "" });
   useEffect(() => saveLS("alpha_alerts", alerts), [alerts]);
-  const addAlert = () => {
+  useEffect(() => {
+    const sync = () => setAlerts(loadLS("alpha_alerts", []));
+    window.addEventListener("alpha-alerts-updated", sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener("alpha-alerts-updated", sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+  const addAlert = async () => {
     const target = Number(form.target);
     if (!form.code || Number.isNaN(target) || form.target === "") return alert("종목과 기준값을 입력하세요.");
     const stock = stocks.find((s) => s.code === form.code);
-    setAlerts((p) => [...p, { id: Date.now(), code: form.code, name: stock?.name || form.code, type: form.type, target, createdAt: new Date().toLocaleString("ko-KR") }]);
+    const alertItem = { id: Date.now(), code: form.code, name: stock?.name || form.code, type: form.type, target, source: "알림 센터", createdAt: new Date().toLocaleString("ko-KR") };
+    setAlerts((p) => [...p, alertItem]);
+    await saveAlertToServer(alertItem);
     setForm({ code: stocks[0]?.code || "005930", type: "priceAbove", target: "" });
+  };
+
+  const refreshServerAlerts = async () => {
+    try {
+      const data = await fetchJson("/api/alerts");
+      if (Array.isArray(data.alerts)) {
+        setAlerts(data.alerts);
+        saveLS("alpha_alerts", data.alerts);
+      }
+    } catch (err) {
+      alert(`서버 알림 조회 실패: ${err.message || err}`);
+    }
   };
   const evalAlert = (a) => {
     const q = quotes[a.code] || {}, price = Number(q.price || 0), rate = Number(q.changeRate || 0), score = calcSignal(q).score, target = Number(a.target || 0);
@@ -2047,7 +2629,7 @@ function AlertCenter({ quotes, stocks }) {
   const rows = alerts.map(evalAlert), hitCount = rows.filter((r) => r.hit).length;
   return (
     <div className="panel">
-      <div className="panel-title"><span>알림 센터 — 조건 충족 자동 판정</span><span className={hitCount ? "tag yellow" : "tag green"}>{hitCount ? `${hitCount}건 충족` : "대기 중"}</span></div>
+      <div className="panel-title"><span>알림 센터 — 조건 충족 자동 판정 / AI 리포트 연동</span><span className={hitCount ? "tag yellow" : "tag green"}>{hitCount ? `${hitCount}건 충족` : "대기 중"}</span></div>
       <div className="panel-body">
         <div className="form-grid">
           <select className="select" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })}>{stocks.map((s) => <option key={s.code} value={s.code}>{s.name} ({s.code})</option>)}</select>
@@ -2056,6 +2638,7 @@ function AlertCenter({ quotes, stocks }) {
           </select>
           <input className="input" type="number" placeholder="기준값, 20일선은 0 입력" value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })} />
           <button className="btn" onClick={addAlert}>등록</button>
+          <button className="btn" onClick={refreshServerAlerts}>서버 알림 새로고침</button>
         </div>
         <table className="data-table"><thead><tr><th>상태</th><th>종목</th><th>조건</th><th>현재 판정</th><th>현재가</th><th>등락률</th><th>AI점수</th><th>삭제</th></tr></thead>
           <tbody>{rows.map((r) => <tr key={r.id}><td>{r.hit ? <span className="tag yellow">충족</span> : <span className="tag">대기</span>}</td><td>{getStockName(r.code, r.name, stocks)} ({r.code})</td><td>{r.label} {r.target}</td><td>{r.basis}</td><td>{fmtPrice(r.q.price)}</td><td className={Number(r.q.changeRate || 0) >= 0 ? "up" : "down"}>{fmtRate(r.q.changeRate)}</td><td>{r.score}</td><td><button className="btn red small" onClick={() => setAlerts((p) => p.filter((v) => v.id !== r.id))}>삭제</button></td></tr>)}
@@ -2199,10 +2782,10 @@ const loadExtendedGogo = async () => {
     setHistoryState((prev) => ({ ...prev, loading: true }));
     try {
       const res = await fetchChartHistory(code, period, range, selected);
-      const data = res.data.length ? res.data : makeFallbackHistory(selected);
+      const data = res.data.length ? res.data : makeFallbackHistory(selected, countByPeriod(period, range), period);
       setHistoryState({ ...res, data, loading: false, fallback: res.fallback || !res.data.length });
     } catch {
-      setHistoryState({ data: makeFallbackHistory(selected), source: "fallback", fallback: true, loading: false });
+      setHistoryState({ data: makeFallbackHistory(selected, countByPeriod(period, range), period), source: "fallback", fallback: true, loading: false });
     }
   };
 
@@ -2217,12 +2800,12 @@ const loadExtendedGogo = async () => {
     fetchChartHistory(code, period, range, selected)
       .then((res) => {
         if (!alive) return;
-        const data = res.data.length ? res.data : makeFallbackHistory(selected);
+        const data = res.data.length ? res.data : makeFallbackHistory(selected, countByPeriod(period, range), period);
         setHistoryState({ ...res, data, loading: false, fallback: res.fallback || !res.data.length });
       })
       .catch(() => {
         if (!alive) return;
-        setHistoryState({ data: makeFallbackHistory(selected), source: "fallback", fallback: true, loading: false });
+        setHistoryState({ data: makeFallbackHistory(selected, countByPeriod(period, range), period), source: "fallback", fallback: true, loading: false });
       });
 
     return () => {
@@ -2230,7 +2813,7 @@ const loadExtendedGogo = async () => {
     };
   }, [selected?.code, selected?.price, period, range]);
 
-  const rawDataRaw = historyState.data.length ? historyState.data : makeFallbackHistory(selected);
+  const rawDataRaw = historyState.data.length ? historyState.data : makeFallbackHistory(selected, countByPeriod(period, range), period);
   const rawData = [...rawDataRaw].sort((a, b) => {
     const at = parseChartDateValue(a.date, 0);
     const bt = parseChartDateValue(b.date, 0);
