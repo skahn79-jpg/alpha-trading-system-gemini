@@ -45,10 +45,28 @@ app.use(cors({
 }));
 app.use(express.json());
 
-const KIS_BASE = "https://openapi.koreainvestment.com:9443"; // 실전투자
+const KIS_BASE = process.env.KIS_BASE_URL || "https://openapi.koreainvestment.com:9443"; // 실전투자
 
 let ACCESS_TOKEN = null;
 let TOKEN_EXPIRES_AT = null;
+
+function buildKisErrorPayload(err, label = "KIS") {
+  return {
+    ok: false,
+    label,
+    error: err.message,
+    status: err.response?.status || 500,
+    kisError: err.response?.data || null,
+    url: err.config?.url || null,
+    params: err.config?.params || null,
+    method: err.config?.method || null,
+    hint:
+      err.response?.status === 403
+        ? "KIS 403 오류입니다. APP_KEY/APP_SECRET, 실전·모의 URL, TR_ID, 요청 파라미터, 계정 권한을 확인하세요."
+        : "KIS 요청 중 오류가 발생했습니다.",
+  };
+}
+
 
 // ── 토큰 자동 발급/갱신 ──────────────────────────────────────────
 async function getAccessToken() {
@@ -56,16 +74,26 @@ async function getAccessToken() {
   if (ACCESS_TOKEN && TOKEN_EXPIRES_AT && now < TOKEN_EXPIRES_AT) {
     return ACCESS_TOKEN;
   }
+
+  if (!process.env.KIS_APP_KEY || !process.env.KIS_APP_SECRET) {
+    throw new Error("KIS_APP_KEY 또는 KIS_APP_SECRET 환경변수가 없습니다.");
+  }
+
   console.log("[KIS] 토큰 발급 중...");
-  const res = await axios.post(`${KIS_BASE}/oauth2/tokenP`, {
-    grant_type: "client_credentials",
-    appkey: process.env.KIS_APP_KEY,
-    appsecret: process.env.KIS_APP_SECRET,
-  });
-  ACCESS_TOKEN = res.data.access_token;
-  TOKEN_EXPIRES_AT = now + (res.data.expires_in - 60) * 1000;
-  console.log("[KIS] 토큰 발급 완료");
-  return ACCESS_TOKEN;
+  try {
+    const res = await axios.post(`${KIS_BASE}/oauth2/tokenP`, {
+      grant_type: "client_credentials",
+      appkey: process.env.KIS_APP_KEY,
+      appsecret: process.env.KIS_APP_SECRET,
+    });
+    ACCESS_TOKEN = res.data.access_token;
+    TOKEN_EXPIRES_AT = now + (Number(res.data.expires_in || 86400) - 60) * 1000;
+    console.log("[KIS] 토큰 발급 완료");
+    return ACCESS_TOKEN;
+  } catch (err) {
+    console.error("[KIS token error]", buildKisErrorPayload(err, "KIS_TOKEN"));
+    throw err;
+  }
 }
 
 async function kisGet(path, trId, params) {
@@ -90,12 +118,12 @@ async function fetchDailyCandles(code, count = 130) {
     "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
     "FHKST03010100",
     {
-      fid_cond_mrkt_div_code: "J",
-      fid_input_iscd: code,
-      fid_input_date_1: "",
-      fid_input_date_2: "",
-      fid_period_div_code: "D",
-      fid_org_adj_prc: "1",
+      FID_COND_MRKT_DIV_CODE: "J",
+      FID_INPUT_ISCD: code,
+      FID_INPUT_DATE_1: "",
+      FID_INPUT_DATE_2: "",
+      FID_PERIOD_DIV_CODE: "D",
+      FID_ORG_ADJ_PRC: "1",
     }
   );
   return (data.output2 || []).slice(0, count).map((c) => ({
@@ -125,9 +153,9 @@ app.get("/api/index", async (req, res) => {
   try {
     const [kospi, kosdaq] = await Promise.all([
       kisGet("/uapi/domestic-stock/v1/quotations/inquire-index-price", "FHPUP02100000",
-        { fid_cond_mrkt_div_code: "U", fid_input_iscd: "0001" }),
+        { FID_COND_MRKT_DIV_CODE: "U", FID_INPUT_ISCD: "0001" }),
       kisGet("/uapi/domestic-stock/v1/quotations/inquire-index-price", "FHPUP02100000",
-        { fid_cond_mrkt_div_code: "U", fid_input_iscd: "1001" }),
+        { FID_COND_MRKT_DIV_CODE: "U", FID_INPUT_ISCD: "1001" }),
     ]);
     const fmt = (d, name) => {
       const o = d.output;
@@ -159,7 +187,7 @@ app.get("/api/quote/:code", async (req, res) => {
     const quotePromise = kisGet(
       "/uapi/domestic-stock/v1/quotations/inquire-price",
       "FHKST01010100",
-      { fid_cond_mrkt_div_code: "J", fid_input_iscd: code }
+      { FID_COND_MRKT_DIV_CODE: "J", FID_INPUT_ISCD: code }
     );
     const dailyPromise = lite ? Promise.resolve(null) : fetchDailyCandles(code, 130);
     const [quoteData, candles] = await Promise.all([quotePromise, dailyPromise]);
@@ -203,8 +231,9 @@ app.get("/api/quote/:code", async (req, res) => {
 
     res.json(base);
   } catch (err) {
-    console.error("[quote]", err.response?.data || err.message);
-    res.status(500).json({ error: err.message });
+    const payload = buildKisErrorPayload(err, "KIS_QUOTE");
+    console.error("[quote]", payload);
+    res.status(payload.status || 500).json(payload);
   }
 });
 
@@ -218,12 +247,12 @@ app.get("/api/chart/:code", async (req, res) => {
       "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
       "FHKST03010100",
       {
-        fid_cond_mrkt_div_code: "J",
-        fid_input_iscd: req.params.code,
-        fid_input_date_1: "",
-        fid_input_date_2: "",
-        fid_period_div_code: period,
-        fid_org_adj_prc: "1",
+        FID_COND_MRKT_DIV_CODE: "J",
+        FID_INPUT_ISCD: req.params.code,
+        FID_INPUT_DATE_1: "",
+        FID_INPUT_DATE_2: "",
+        FID_PERIOD_DIV_CODE: period,
+        FID_ORG_ADJ_PRC: "1",
       }
     );
     const candles = (data.output2 || []).slice(0, parseInt(count)).map((c) => ({
@@ -249,8 +278,9 @@ app.get("/api/chart/:code", async (req, res) => {
 
     res.json(result);
   } catch (err) {
-    console.error("[chart]", err.response?.data || err.message);
-    res.status(500).json({ error: err.message });
+    const payload = buildKisErrorPayload(err, "KIS_CHART");
+    console.error("[chart]", payload);
+    res.status(payload.status || 500).json(payload);
   }
 });
 
@@ -271,8 +301,9 @@ app.get("/api/analyze/:code", async (req, res) => {
       analysis,
     });
   } catch (err) {
-    console.error("[analyze-endpoint]", err.response?.data || err.message);
-    res.status(500).json({ error: err.message });
+    const payload = buildKisErrorPayload(err, "KIS_ANALYZE");
+    console.error("[analyze-endpoint]", payload);
+    res.status(payload.status || 500).json(payload);
   }
 });
 
@@ -290,7 +321,7 @@ app.get("/api/quotes", async (req, res) => {
         const quote = await kisGet(
           "/uapi/domestic-stock/v1/quotations/inquire-price",
           "FHKST01010100",
-          { fid_cond_mrkt_div_code: "J", fid_input_iscd: trimmed }
+          { FID_COND_MRKT_DIV_CODE: "J", FID_INPUT_ISCD: trimmed }
         );
         let analysis = null;
         if (withAnalysis) {
@@ -469,6 +500,82 @@ app.post("/api/sim/score", (req, res) => {
 });
 
 
+
+// ── Gemini AI 분석 프록시 ─────────────────────────────────────
+// POST /api/ai/analyze
+// body: { prompt, systemPrompt, maxTokens }
+// GEMINI_API_KEY 또는 GOOGLE_API_KEY가 없으면 503을 반환합니다.
+app.post("/api/ai/analyze", async (req, res) => {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({
+        ok: false,
+        error: "GEMINI_API_KEY 또는 GOOGLE_API_KEY가 서버 환경변수에 없습니다.",
+        fallback: true,
+      });
+    }
+
+    const prompt = String(req.body?.prompt || "").trim();
+    const systemPrompt = String(req.body?.systemPrompt || "").trim();
+    const maxTokens = Math.min(Number(req.body?.maxTokens || 1200), 3000);
+
+    if (!prompt) {
+      return res.status(400).json({ ok: false, error: "prompt가 비어 있습니다." });
+    }
+
+    const model = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    const body = {
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              text: systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt,
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        maxOutputTokens: maxTokens,
+        temperature: 0.35,
+      },
+    };
+
+    const { data } = await axios.post(url, body, {
+      timeout: 20000,
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const text =
+      data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("\n").trim() ||
+      "";
+
+    res.json({
+      ok: true,
+      text,
+      raw: data,
+    });
+  } catch (err) {
+    const status = err.response?.status || 500;
+    console.error("[ai/analyze]", {
+      message: err.message,
+      status,
+      data: err.response?.data,
+    });
+    res.status(status).json({
+      ok: false,
+      error: err.message,
+      status,
+      detail: err.response?.data || null,
+      fallback: true,
+    });
+  }
+});
+
+
 // ── 해외주식 / 크립토 실시간 시세 ─────────────────────────────
 // 별도 API 키 없이 Yahoo Finance chart endpoint를 프록시로 사용합니다.
 // 프론트 호출:
@@ -535,6 +642,41 @@ app.get("/api/crypto/quote/:symbol", async (req, res) => {
     console.error("[crypto/quote]", err.message);
     res.status(502).json({ error: err.message });
   }
+});
+
+
+
+
+app.get("/api/kis/health", async (req, res) => {
+  res.json({
+    ok: true,
+    kisBase: KIS_BASE,
+    hasAppKey: Boolean(process.env.KIS_APP_KEY),
+    hasAppSecret: Boolean(process.env.KIS_APP_SECRET),
+    tokenCached: Boolean(ACCESS_TOKEN),
+    tokenExpiresAt: TOKEN_EXPIRES_AT ? new Date(TOKEN_EXPIRES_AT).toISOString() : null,
+    time: new Date().toISOString(),
+  });
+});
+
+app.get("/api/global/health", async (req, res) => {
+  const checks = {};
+  try {
+    checks.NVDA = await fetchYahooQuote("NVDA");
+  } catch (e) {
+    checks.NVDA = { error: e.message };
+  }
+  try {
+    checks.BTC = await fetchYahooQuote("BTC-USD");
+  } catch (e) {
+    checks.BTC = { error: e.message };
+  }
+  res.json({
+    ok: true,
+    routes: ["/api/us/quote/:symbol", "/api/crypto/quote/:symbol"],
+    checks,
+    time: new Date().toISOString(),
+  });
 });
 
 
