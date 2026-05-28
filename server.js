@@ -45,7 +45,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-const KIS_BASE = "https://openapi.koreainvestment.com:9443"; // 실전투자
+const KIS_BASE = "https://openapi.kis.or.kr"; // 실전투자
 
 let ACCESS_TOKEN = null;
 let TOKEN_EXPIRES_AT = null;
@@ -469,71 +469,74 @@ app.post("/api/sim/score", (req, res) => {
 });
 
 
-// ── Gemini AI 분석 프록시 ───────────────────────────────────────
-// POST /api/ai/analyze
-// body: { prompt, systemPrompt?, maxTokens? }
-// 브라우저에 API Key를 노출하지 않도록 Render 서버에서 Gemini를 대리 호출합니다.
-app.post("/api/ai/analyze", async (req, res) => {
+// ── 해외주식 / 크립토 실시간 시세 ─────────────────────────────
+// 별도 API 키 없이 Yahoo Finance chart endpoint를 프록시로 사용합니다.
+// 프론트 호출:
+//   GET /api/us/quote/NVDA
+//   GET /api/crypto/quote/BTC
+async function fetchYahooQuote(symbol) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1m`;
+  const { data } = await axios.get(url, {
+    timeout: 8000,
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+      "Accept": "application/json",
+    },
+  });
+
+  const result = data?.chart?.result?.[0];
+  const meta = result?.meta || {};
+  const closeArr = result?.indicators?.quote?.[0]?.close || [];
+  const timestamps = result?.timestamp || [];
+  const lastClose = [...closeArr].reverse().find((v) => Number.isFinite(Number(v)));
+  const price = Number(meta.regularMarketPrice ?? meta.postMarketPrice ?? lastClose ?? 0);
+  const prevClose = Number(meta.chartPreviousClose ?? meta.previousClose ?? 0);
+  const change = prevClose ? price - prevClose : 0;
+  const changeRate = prevClose ? (change / prevClose) * 100 : 0;
+  const lastTs = timestamps.length ? timestamps[timestamps.length - 1] * 1000 : Date.now();
+
+  return {
+    symbol,
+    price,
+    change,
+    changeRate,
+    changeStr: `${changeRate >= 0 ? "+" : ""}${changeRate.toFixed(2)}%`,
+    currency: meta.currency || "USD",
+    marketState: meta.marketState || "",
+    time: new Date(lastTs).toISOString(),
+    source: "Yahoo Finance",
+  };
+}
+
+app.get("/api/us/quote/:symbol", async (req, res) => {
   try {
-    const prompt = String(req.body?.prompt || "").trim();
-    const systemPrompt = String(req.body?.systemPrompt || "").trim();
-    const maxTokens = Math.min(parseInt(req.body?.maxTokens || "1200", 10) || 1200, 3000);
-
-    if (!prompt) {
-      return res.status(400).json({ error: "prompt가 비어 있습니다." });
+    const raw = String(req.params.symbol || "").trim().toUpperCase();
+    if (!/^[A-Z.]{1,10}$/.test(raw)) {
+      return res.status(400).json({ error: "Invalid US symbol" });
     }
-
-    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-    if (!apiKey) {
-      return res.status(503).json({
-        error: "GEMINI_API_KEY가 서버 환경변수에 설정되지 않았습니다. Render Environment에 키를 추가하세요.",
-      });
-    }
-
-    const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-    const finalPrompt = `${systemPrompt || "당신은 주식·경제 분석 보조 역할을 수행합니다. 과장된 확정 표현을 피하고, 데이터 기반으로 단계형 판단을 제시하세요."}
-
-[사용자 요청]
-${prompt}`;
-
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-    const aiRes = await axios.post(
-      geminiUrl,
-      {
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: finalPrompt }],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.35,
-          maxOutputTokens: maxTokens,
-        },
-      },
-      {
-        headers: { "Content-Type": "application/json" },
-        timeout: 30000,
-      }
-    );
-
-    const text =
-      aiRes.data?.candidates?.[0]?.content?.parts
-        ?.map((p) => p.text || "")
-        .join("")
-        .trim() || "Gemini 분석 결과가 비어 있습니다.";
-
-    res.json({ ok: true, provider: "gemini", model, text });
+    const quote = await fetchYahooQuote(raw);
+    res.json(quote);
   } catch (err) {
-    console.error("[gemini/ai/analyze]", err.response?.data || err.message);
-    res.status(err.response?.status || 500).json({
-      ok: false,
-      error: err.response?.data?.error?.message || err.message || "Gemini 분석 호출 실패",
-      detail: err.response?.data || undefined,
-    });
+    console.error("[us/quote]", err.message);
+    res.status(502).json({ error: err.message });
   }
 });
+
+app.get("/api/crypto/quote/:symbol", async (req, res) => {
+  try {
+    const raw = String(req.params.symbol || "").trim().toUpperCase();
+    if (!/^[A-Z]{2,10}$/.test(raw)) {
+      return res.status(400).json({ error: "Invalid crypto symbol" });
+    }
+    const yahooSymbol = raw.endsWith("-USD") ? raw : `${raw}-USD`;
+    const quote = await fetchYahooQuote(yahooSymbol);
+    res.json({ ...quote, symbol: raw });
+  } catch (err) {
+    console.error("[crypto/quote]", err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
 
 // ── 서버 시작 ─────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
@@ -550,6 +553,8 @@ app.listen(PORT, () => {
 ║  GET /api/chart/:code?period=D    차트 + 분석         ║
 ║  GET /api/analyze/:code           분석만              ║
 ║  GET /api/quotes?codes=           복수 시세           ║
+║  GET /api/us/quote/:symbol        미국주식 실시간     ║
+║  GET /api/crypto/quote/:symbol    크립토 실시간       ║
 ║  GET /api/search?q=               종목 검색           ║
 ║                                                      ║
 ║  [국민연금 - DART]                                   ║
@@ -560,16 +565,11 @@ app.listen(PORT, () => {
 ║  POST /api/sim/judge              시그널 자동 채점    ║
 ║  POST /api/sim/stats              누적 통계 + 가중치  ║
 ║  POST /api/sim/score              신규 시그널 점수    ║
-║  POST /api/ai/analyze            AI 분석 프록시      ║
 ╠══════════════════════════════════════════════════════╣
 ║  분석: 경제명탐정 4·5주차 + 독개미 + 스펙터 통합     ║
 ║  자가학습: 시그널 채점 → 신호별 가중치 자동 조정     ║
 ╚══════════════════════════════════════════════════════╝
   `);
-  if (!process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
-    console.log("⚠️  GEMINI_API_KEY 미설정 — /api/ai/analyze 엔드포인트는 503을 반환합니다.");
-    console.log("   Render Environment에 GEMINI_API_KEY=... 추가하세요.\n");
-  }
   if (!process.env.DART_API_KEY) {
     console.log("⚠️  DART_API_KEY 미설정 — /api/nps 엔드포인트 비활성");
     console.log("   .env에 DART_API_KEY=... 추가하세요.\n");
