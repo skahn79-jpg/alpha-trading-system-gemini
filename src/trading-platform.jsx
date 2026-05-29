@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 
 /**
  * ALPHA TRADING SYSTEM — 통합 확장 버전
@@ -147,12 +147,19 @@ const KOREAN_STOCK_CATALOG = [
 ];
 
 const GLOBAL_TICKERS = [
-  { symbol: "NVDA", name: "NVIDIA", type: "us" },
-  { symbol: "TSLA", name: "Tesla", type: "us" },
-  { symbol: "AAPL", name: "Apple", type: "us" },
-  { symbol: "MSFT", name: "Microsoft", type: "us" },
-  { symbol: "BTC", name: "Bitcoin", type: "crypto" },
-  { symbol: "ETH", name: "Ethereum", type: "crypto" },
+  { symbol: "NVDA", name: "NVIDIA", type: "us", sector: "AI 반도체" },
+  { symbol: "TSLA", name: "Tesla", type: "us", sector: "전기차" },
+  { symbol: "AAPL", name: "Apple", type: "us", sector: "빅테크" },
+  { symbol: "MSFT", name: "Microsoft", type: "us", sector: "빅테크" },
+  { symbol: "GOOGL", name: "Alphabet", type: "us", sector: "빅테크" },
+  { symbol: "META", name: "Meta Platforms", type: "us", sector: "빅테크" },
+  { symbol: "AMZN", name: "Amazon", type: "us", sector: "이커머스/클라우드" },
+  { symbol: "AMD", name: "AMD", type: "us", sector: "반도체" },
+  { symbol: "AVGO", name: "Broadcom", type: "us", sector: "반도체" },
+  { symbol: "BTC", name: "Bitcoin", type: "crypto", sector: "Crypto" },
+  { symbol: "ETH", name: "Ethereum", type: "crypto", sector: "Crypto" },
+  { symbol: "SOL", name: "Solana", type: "crypto", sector: "Crypto" },
+  { symbol: "XRP", name: "XRP", type: "crypto", sector: "Crypto" },
 ];
 
 const DEMO_TICKERS = [
@@ -648,6 +655,333 @@ const styles = `
   .ai-alert-grid{grid-template-columns:1fr 1fr}
 }
 
+
+/* === Value Screener Scan Controls === */
+.value-scan-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.value-scan-toolbar .btn{min-width:120px}
+.value-scan-status{border:1px solid #1e3445;background:#0b1520;padding:10px 12px;margin:10px 0;color:#8ca6b5;line-height:1.6}
+.value-scan-progress{height:8px;background:#071018;border:1px solid #1e3445;overflow:hidden;margin-top:8px}
+.value-scan-progress-inner{height:100%;background:#00d9ff;transition:width .2s ease}
+.value-scan-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:10px 0}
+.value-scan-summary .mini-kpi{border:1px solid #1e3445;background:#101923;padding:10px;color:#d9ecf5}
+.value-scan-summary .mini-kpi b{display:block;color:#00d9ff;font-size:18px;margin-top:4px}
+@media(max-width:900px){.value-scan-summary{grid-template-columns:1fr 1fr}.value-scan-toolbar .btn{flex:1 1 45%}}
+
+
+/* === Chart Analysis 2.0 UI Upgrade === */
+.chart-pro-toolbar{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:8px;
+  margin:10px 0;
+}
+.chart-pro-chip{
+  border:1px solid #1e3445;
+  background:#0b1520;
+  padding:10px 12px;
+  color:#d9ecf5;
+  font-size:12px;
+  line-height:1.5;
+}
+.chart-pro-chip b{color:#00d9ff}
+.chart-tooltip{
+  position:absolute;
+  pointer-events:none;
+  z-index:20;
+  min-width:190px;
+  border:1px solid #00d9ff;
+  background:rgba(5,12,18,.94);
+  color:#d9ecf5;
+  padding:10px 12px;
+  font-size:12px;
+  line-height:1.55;
+  box-shadow:0 10px 28px rgba(0,0,0,.45);
+}
+.chart-tooltip b{color:#00d9ff}
+.chart-cross-line{stroke:#6f899a;stroke-width:1;stroke-dasharray:4 4;opacity:.75}
+.support-line{stroke:#ffd447;stroke-width:1.4;stroke-dasharray:5 5}
+.resistance-line{stroke:#9b5cff;stroke-width:1.4;stroke-dasharray:5 5}
+.target-line{stroke:#00ff88;stroke-width:1.5;stroke-dasharray:6 4}
+.stop-line{stroke:#ff4466;stroke-width:1.5;stroke-dasharray:6 4}
+.sr-zone-support{fill:#ffd447;opacity:.08}
+.sr-zone-resistance{fill:#9b5cff;opacity:.08}
+.box-zone{fill:#00d9ff;opacity:.055;stroke:#00d9ff;stroke-width:1;stroke-dasharray:6 4}
+.fibo-line{stroke:#6f899a;stroke-width:1;stroke-dasharray:3 5;opacity:.62}
+.chart-svg-wrap{position:relative}
+@media(max-width:900px){
+  .chart-pro-toolbar{grid-template-columns:1fr 1fr}
+  .chart-tooltip{display:none}
+}
+
+
+/* === Mobile UX Fix: selected tab only + compact 2-column stock cards === */
+.mobile-tab-summary{display:none}
+.mobile-nav-label{display:none}
+.left-panel-shell{display:block}
+@media(max-width:900px){
+  .app{min-width:0!important;overflow-x:hidden}
+  .top{padding:22px 14px 18px!important;display:block!important}
+  .top-left{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  .brand{font-size:28px!important;letter-spacing:11px!important}
+  .live{font-size:13px!important;margin-top:8px;white-space:nowrap}
+  .top-right{margin-top:14px;gap:10px;flex-wrap:wrap}
+  .top-right span:last-child{font-size:14px;color:#6f899a}
+  .mobile-current{
+    display:block!important;
+    padding:11px 14px!important;
+    font-size:13px!important;
+    border-top:1px solid #1e3445;
+    border-bottom:1px solid #1e3445;
+  }
+  .mobile-nav-label{
+    display:block;
+    padding:10px 14px 4px;
+    color:#6f899a;
+    font-size:11px;
+    letter-spacing:.8px;
+    background:#071018;
+  }
+  .nav{
+    padding:10px 12px!important;
+    gap:8px!important;
+    scroll-snap-type:x mandatory;
+  }
+  .nav button{
+    min-width:auto!important;
+    padding:12px 20px!important;
+    font-size:13px!important;
+    scroll-snap-align:start;
+  }
+  .ticker{display:none!important}
+  .main{
+    display:block!important;
+    padding:12px!important;
+  }
+  .main > .grid{
+    display:block!important;
+  }
+  .mobile-hide-left{
+    display:none!important;
+  }
+  .left-panel-shell .grid{
+    display:block!important;
+  }
+  .left-panel-shell .panel{
+    margin-bottom:12px;
+  }
+  .left-panel-shell .panel:nth-child(2){
+    display:none!important;
+  }
+  .left-panel-shell .stock-list{
+    display:grid!important;
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    gap:8px!important;
+    max-height:none!important;
+    overflow:visible!important;
+    padding-right:0!important;
+  }
+  .left-panel-shell .stock-btn{
+    min-height:112px!important;
+    padding:10px!important;
+    border-radius:0!important;
+  }
+  .left-panel-shell .stock-top{
+    display:block!important;
+    margin-bottom:8px!important;
+  }
+  .left-panel-shell .stock-name{
+    display:block!important;
+    font-size:15px!important;
+    line-height:1.25!important;
+    margin-bottom:4px!important;
+    white-space:normal!important;
+    word-break:keep-all!important;
+  }
+  .left-panel-shell .stock-top span:last-child{
+    display:block!important;
+    font-size:13px!important;
+    text-align:left!important;
+  }
+  .left-panel-shell .sub{
+    font-size:11px!important;
+    line-height:1.45!important;
+  }
+  .left-panel-shell .add-stock-grid{
+    grid-template-columns:1fr!important;
+  }
+  .screen-shell{
+    margin-top:0!important;
+  }
+  .screen-head{
+    padding:11px 12px!important;
+    margin-bottom:10px!important;
+  }
+  .screen-title{
+    font-size:14px!important;
+  }
+  .screen-desc{
+    display:block;
+    font-size:11px!important;
+  }
+  .card-grid,
+  .kpi-grid,
+  .chart-pro-toolbar,
+  .technique-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    gap:8px!important;
+  }
+  .card,.kpi,.technique-btn{
+    min-height:auto!important;
+    padding:10px!important;
+  }
+  .report-layout{
+    grid-template-columns:1fr!important;
+  }
+  .score-box{
+    height:120px!important;
+  }
+  .grid{
+    gap:10px!important;
+  }
+  .panel-body{
+    padding:12px!important;
+  }
+  .chart-box{
+    height:360px!important;
+    min-height:360px!important;
+  }
+}
+@media(max-width:430px){
+  .left-panel-shell .stock-list{
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  }
+  .left-panel-shell .stock-btn{
+    min-height:108px!important;
+    padding:10px!important;
+  }
+  .left-panel-shell .stock-name{
+    font-size:15px!important;
+  }
+  .left-panel-shell .sub{
+    font-size:11px!important;
+  }
+  .card-grid,
+  .kpi-grid,
+  .chart-pro-toolbar,
+  .technique-grid{
+    grid-template-columns:1fr 1fr!important;
+  }
+}
+
+
+/* === Global US/Crypto Feature UI === */
+.global-grid{display:grid;grid-template-columns:310px 1fr;gap:12px}
+.global-list{display:grid;gap:8px;max-height:540px;overflow:auto;padding-right:2px}
+.global-card{background:#101923;border:1px solid #1e3445;padding:12px;text-align:left;color:#d9ecf5;cursor:pointer}
+.global-card.active{border-color:#00d9ff;background:#00d9ff11;box-shadow:inset 0 0 0 1px #00d9ff44}
+.global-card-top{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.global-symbol{font-weight:900;color:#d9ecf5;font-size:16px}
+.global-name{color:#6f899a;font-size:12px;margin-top:4px}
+.global-price{font-family:monospace;font-size:16px;margin-top:7px}
+.global-form{display:grid;grid-template-columns:1fr .8fr auto;gap:8px;margin-bottom:10px}
+.global-badge{border:1px solid #9b5cff;color:#9b5cff;background:#9b5cff11;padding:3px 6px;font-size:10px;font-weight:900}
+@media(max-width:900px){
+  .global-grid{display:block}
+  .global-list{grid-template-columns:repeat(2,minmax(0,1fr));display:grid;max-height:none;overflow:visible}
+  .global-form{grid-template-columns:1fr 1fr}
+  .global-form .btn{grid-column:1 / -1}
+}
+
+
+/* === Psychology Analysis 1.0 === */
+.psych-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.psych-tab-btn{border:1px solid #1e3445;background:#101923;color:#6f899a;padding:9px 13px;font-weight:900;cursor:pointer}
+.psych-tab-btn.active{border-color:#9b5cff;color:#d9ecf5;background:#9b5cff22;box-shadow:0 0 14px #9b5cff22}
+.psych-panel{border:1px solid #1e3445;background:#081018;margin-top:12px}
+.psych-panel-head{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:12px 14px;border-bottom:1px solid #1e3445}
+.psych-panel-title{color:#9b5cff;font-weight:900;letter-spacing:1px}
+.psych-body{padding:14px}
+.psych-grid{display:grid;grid-template-columns:280px 1fr;gap:12px}
+.psych-card{border:1px solid #1e3445;background:#101923;padding:14px}
+.psych-phase{font-size:20px;font-weight:900;margin:8px 0 10px}
+.psych-desc{line-height:1.75;color:#94a3b8;border-left:3px solid #9b5cff;background:#0b1520;padding:12px;margin-top:10px}
+.psych-bias-list{display:grid;gap:7px;margin-top:12px}
+.psych-bias{display:flex;gap:8px;align-items:center;color:#c7d2fe;font-size:12px}
+.psych-bias::before{content:"";width:7px;height:7px;border-radius:50%;background:#9b5cff;display:inline-block}
+.fear-greed-gauge{position:relative;width:170px;height:102px;margin:2px auto 10px;overflow:hidden}
+.fear-greed-arc{position:absolute;left:0;top:0;width:170px;height:170px;border-radius:50%;background:conic-gradient(from 180deg,#1d4ed8 0deg,#16a34a 36deg,#84cc16 72deg,#f59e0b 108deg,#dc2626 180deg,transparent 180deg);clip-path:inset(0 0 50% 0)}
+.fear-greed-inner{position:absolute;left:31px;top:31px;width:108px;height:108px;border-radius:50%;background:#101923;clip-path:inset(0 0 50% 0)}
+.fear-greed-needle{position:absolute;left:50%;bottom:8px;width:3px;height:68px;background:#f8fafc;transform-origin:bottom center;border-radius:4px;box-shadow:0 0 10px #fff8}
+.fear-greed-center{position:absolute;left:50%;bottom:2px;width:16px;height:16px;margin-left:-8px;border-radius:50%;background:#f8fafc}
+.fear-greed-score{position:absolute;left:0;right:0;bottom:28px;text-align:center;font-size:22px;font-weight:900;color:#f8fafc}
+.psych-meter{margin:10px 0}
+.psych-meter-row{display:flex;justify-content:space-between;gap:10px;color:#6f899a;font-size:12px;margin-bottom:6px}
+.psych-meter-track{height:8px;border-radius:8px;background:#0b1520;overflow:hidden;border:1px solid #1e3445}
+.psych-meter-fill{height:100%;border-radius:8px;transition:width .45s ease}
+.psych-patterns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}
+.psych-pattern{border:1px solid #1e3445;background:#0b1520;padding:10px}
+.psych-learning-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.prediction-buttons{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.prediction-btn{border:1px solid #1e3445;background:#0b1520;padding:14px 8px;font-weight:900;cursor:pointer}
+.prediction-btn.up{color:#00ff88;border-color:#00ff8844;background:#00ff8812}
+.prediction-btn.side{color:#d9ecf5}
+.prediction-btn.down{color:#ff4466;border-color:#ff446644;background:#ff446612}
+.learning-log{max-height:300px;overflow:auto;display:grid;gap:8px}
+.learning-entry{border:1px solid #1e3445;background:#0b1520;padding:10px;font-size:12px}
+.learning-result-btn{border:1px solid #1e3445;background:transparent;color:#6f899a;padding:3px 8px;margin-left:4px;cursor:pointer}
+@media(max-width:900px){
+  .psych-grid,.psych-learning-grid{grid-template-columns:1fr}
+  .psych-patterns{grid-template-columns:1fr}
+  .prediction-buttons{grid-template-columns:1fr 1fr 1fr}
+}
+
+
+/* === Auto Learning Engine === */
+.auto-learning-summary{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:8px;
+  margin:12px 0;
+}
+.auto-learn-card{
+  border:1px solid #1e3445;
+  background:#0b1520;
+  padding:12px;
+}
+.auto-learn-card b{
+  display:block;
+  margin-top:6px;
+  font-size:18px;
+  color:#d9ecf5;
+  font-family:monospace;
+}
+.auto-learn-controls{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:10px;
+}
+.signal-stat-table{
+  width:100%;
+  border-collapse:collapse;
+  font-size:12px;
+}
+.signal-stat-table th,
+.signal-stat-table td{
+  border-bottom:1px solid #1e3445;
+  padding:8px;
+  text-align:left;
+}
+.signal-stat-table th{
+  color:#6f899a;
+  font-weight:800;
+}
+.learning-entry.done{border-color:#00ff8844;background:#00ff8809}
+.learning-entry.pending{border-color:#ffd44744;background:#ffd44709}
+@media(max-width:900px){
+  .auto-learning-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+
 `;
 
 function normalizeCode(code) {
@@ -716,6 +1050,158 @@ function calcSignal(q) {
     color = "#ff4466";
   }
   return { score, tech, action, color };
+}
+
+
+const KOSPI200_SCREEN_UNIVERSE = [
+  { code: "005930", name: "삼성전자", tag: "반도체", sector: "반도체" },
+  { code: "000660", name: "SK하이닉스", tag: "반도체", sector: "반도체" },
+  { code: "005380", name: "현대차", tag: "자동차", sector: "자동차" },
+  { code: "000270", name: "기아", tag: "자동차", sector: "자동차" },
+  { code: "012330", name: "현대모비스", tag: "자동차부품", sector: "자동차" },
+  { code: "005490", name: "POSCO홀딩스", tag: "철강/2차전지", sector: "철강" },
+  { code: "051910", name: "LG화학", tag: "화학/2차전지", sector: "2차전지" },
+  { code: "006400", name: "삼성SDI", tag: "2차전지", sector: "2차전지" },
+  { code: "373220", name: "LG에너지솔루션", tag: "2차전지", sector: "2차전지" },
+  { code: "207940", name: "삼성바이오로직스", tag: "바이오", sector: "바이오" },
+  { code: "068270", name: "셀트리온", tag: "바이오", sector: "바이오" },
+  { code: "035420", name: "NAVER", tag: "플랫폼", sector: "인터넷" },
+  { code: "035720", name: "카카오", tag: "플랫폼", sector: "인터넷" },
+  { code: "105560", name: "KB금융", tag: "금융", sector: "금융" },
+  { code: "055550", name: "신한지주", tag: "금융", sector: "금융" },
+  { code: "086790", name: "하나금융지주", tag: "금융", sector: "금융" },
+  { code: "316140", name: "우리금융지주", tag: "금융", sector: "금융" },
+  { code: "000810", name: "삼성화재", tag: "보험", sector: "금융" },
+  { code: "032830", name: "삼성생명", tag: "보험", sector: "금융" },
+  { code: "033780", name: "KT&G", tag: "소비재", sector: "소비재" },
+  { code: "034730", name: "SK", tag: "지주", sector: "지주" },
+  { code: "017670", name: "SK텔레콤", tag: "통신", sector: "통신" },
+  { code: "030200", name: "KT", tag: "통신", sector: "통신" },
+  { code: "015760", name: "한국전력", tag: "전력", sector: "유틸리티" },
+  { code: "011200", name: "HMM", tag: "해운", sector: "운송" },
+  { code: "010130", name: "고려아연", tag: "비철금속", sector: "소재" },
+  { code: "028260", name: "삼성물산", tag: "지주/건설", sector: "지주" },
+  { code: "018260", name: "삼성에스디에스", tag: "IT서비스", sector: "IT" },
+  { code: "096770", name: "SK이노베이션", tag: "정유/배터리", sector: "에너지" },
+  { code: "011070", name: "LG이노텍", tag: "전자부품", sector: "전기전자" },
+  { code: "009150", name: "삼성전기", tag: "전자부품", sector: "전기전자" },
+  { code: "066570", name: "LG전자", tag: "전기전자", sector: "전기전자" },
+  { code: "003670", name: "포스코퓨처엠", tag: "2차전지", sector: "2차전지" },
+  { code: "011170", name: "롯데케미칼", tag: "화학", sector: "화학" },
+  { code: "010140", name: "삼성중공업", tag: "조선", sector: "조선" },
+  { code: "009540", name: "HD한국조선해양", tag: "조선", sector: "조선" },
+  { code: "329180", name: "HD현대중공업", tag: "조선", sector: "조선" },
+  { code: "267260", name: "HD현대일렉트릭", tag: "전력기기", sector: "전력기기" },
+  { code: "010120", name: "LS ELECTRIC", tag: "전력기기", sector: "전력기기" },
+  { code: "047810", name: "한국항공우주", tag: "방산", sector: "방산" },
+  { code: "064350", name: "현대로템", tag: "방산/철도", sector: "방산" },
+  { code: "012450", name: "한화에어로스페이스", tag: "방산", sector: "방산" },
+  { code: "272210", name: "한화시스템", tag: "방산", sector: "방산" },
+  { code: "042700", name: "한미반도체", tag: "반도체", sector: "반도체" },
+  { code: "161390", name: "한국타이어앤테크놀로지", tag: "타이어", sector: "자동차" },
+  { code: "251270", name: "넷마블", tag: "게임", sector: "게임" },
+  { code: "259960", name: "크래프톤", tag: "게임", sector: "게임" },
+  { code: "352820", name: "하이브", tag: "엔터", sector: "엔터" },
+  { code: "377300", name: "카카오페이", tag: "핀테크", sector: "인터넷" },
+  { code: "323410", name: "카카오뱅크", tag: "은행", sector: "금융" },
+];
+
+const KOSDAQ200_SCREEN_UNIVERSE = [
+  { code: "247540", name: "에코프로비엠", tag: "2차전지", sector: "2차전지" },
+  { code: "086520", name: "에코프로", tag: "2차전지", sector: "2차전지" },
+  { code: "028300", name: "HLB", tag: "바이오", sector: "바이오" },
+  { code: "196170", name: "알테오젠", tag: "바이오", sector: "바이오" },
+  { code: "068760", name: "셀트리온제약", tag: "바이오", sector: "바이오" },
+  { code: "141080", name: "리가켐바이오", tag: "바이오", sector: "바이오" },
+  { code: "000250", name: "삼천당제약", tag: "제약", sector: "바이오" },
+  { code: "145020", name: "휴젤", tag: "바이오", sector: "바이오" },
+  { code: "214450", name: "파마리서치", tag: "바이오/미용", sector: "바이오" },
+  { code: "214150", name: "클래시스", tag: "미용의료기기", sector: "의료기기" },
+  { code: "058470", name: "리노공업", tag: "반도체", sector: "반도체" },
+  { code: "039030", name: "이오테크닉스", tag: "반도체장비", sector: "반도체" },
+  { code: "036930", name: "주성엔지니어링", tag: "반도체장비", sector: "반도체" },
+  { code: "240810", name: "원익IPS", tag: "반도체장비", sector: "반도체" },
+  { code: "064760", name: "티씨케이", tag: "반도체소재", sector: "반도체" },
+  { code: "095340", name: "ISC", tag: "반도체부품", sector: "반도체" },
+  { code: "089030", name: "테크윙", tag: "반도체장비", sector: "반도체" },
+  { code: "067310", name: "하나마이크론", tag: "반도체후공정", sector: "반도체" },
+  { code: "222800", name: "심텍", tag: "PCB", sector: "전자부품" },
+  { code: "101490", name: "에스앤에스텍", tag: "반도체소재", sector: "반도체" },
+  { code: "319660", name: "피에스케이", tag: "반도체장비", sector: "반도체" },
+  { code: "036540", name: "SFA반도체", tag: "반도체후공정", sector: "반도체" },
+  { code: "005290", name: "동진쎄미켐", tag: "반도체소재", sector: "반도체" },
+  { code: "078600", name: "대주전자재료", tag: "2차전지소재", sector: "2차전지" },
+  { code: "121600", name: "나노신소재", tag: "2차전지소재", sector: "2차전지" },
+  { code: "348370", name: "엔켐", tag: "2차전지소재", sector: "2차전지" },
+  { code: "025900", name: "동화기업", tag: "2차전지/소재", sector: "소재" },
+  { code: "131970", name: "두산테스나", tag: "반도체테스트", sector: "반도체" },
+  { code: "277810", name: "레인보우로보틱스", tag: "로봇", sector: "로봇" },
+  { code: "108490", name: "로보티즈", tag: "로봇", sector: "로봇" },
+  { code: "090360", name: "로보스타", tag: "로봇", sector: "로봇" },
+  { code: "042000", name: "카페24", tag: "이커머스", sector: "인터넷" },
+  { code: "067160", name: "SOOP", tag: "플랫폼", sector: "인터넷" },
+  { code: "035760", name: "CJ ENM", tag: "미디어", sector: "미디어" },
+  { code: "060250", name: "NHN KCP", tag: "결제", sector: "핀테크" },
+  { code: "293490", name: "카카오게임즈", tag: "게임", sector: "게임" },
+  { code: "122870", name: "와이지엔터테인먼트", tag: "엔터", sector: "엔터" },
+  { code: "041510", name: "에스엠", tag: "엔터", sector: "엔터" },
+  { code: "035900", name: "JYP Ent.", tag: "엔터", sector: "엔터" },
+  { code: "376300", name: "디어유", tag: "엔터플랫폼", sector: "엔터" },
+  { code: "263750", name: "펄어비스", tag: "게임", sector: "게임" },
+  { code: "112040", name: "위메이드", tag: "게임", sector: "게임" },
+  { code: "053800", name: "안랩", tag: "보안", sector: "소프트웨어" },
+  { code: "096530", name: "씨젠", tag: "진단키트", sector: "바이오" },
+  { code: "237690", name: "에스티팜", tag: "바이오", sector: "바이오" },
+  { code: "214370", name: "케어젠", tag: "바이오", sector: "바이오" },
+  { code: "086900", name: "메디톡스", tag: "바이오", sector: "바이오" },
+  { code: "048410", name: "현대바이오", tag: "바이오", sector: "바이오" },
+  { code: "206650", name: "유바이오로직스", tag: "백신", sector: "바이오" },
+  { code: "140410", name: "메지온", tag: "바이오", sector: "바이오" },
+  { code: "215200", name: "메가스터디교육", tag: "교육", sector: "교육" },
+];
+
+function uniqueUniverse(list) {
+  const map = new Map();
+  list.forEach((s) => {
+    const code = normalizeCode(s.code);
+    if (code.length === 6 && !map.has(code)) map.set(code, { ...s, code });
+  });
+  return Array.from(map.values());
+}
+
+function getValueUniverse(kind, stocks = []) {
+  if (kind === "kospi200") return uniqueUniverse([...KOSPI200_SCREEN_UNIVERSE, ...DEFAULT_STOCKS]);
+  if (kind === "kosdaq200") return uniqueUniverse([...KOSDAQ200_SCREEN_UNIVERSE]);
+  if (kind === "all") return uniqueUniverse([...KOSPI200_SCREEN_UNIVERSE, ...KOSDAQ200_SCREEN_UNIVERSE, ...KOREAN_STOCK_CATALOG]);
+  return uniqueUniverse(stocks);
+}
+
+async function runValueScanUniverse({ universe, baseQuotes = {}, onProgress }) {
+  const rows = [];
+  const concurrency = 8;
+  let done = 0;
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < universe.length) {
+      const s = universe[cursor++];
+      let q = baseQuotes[s.code];
+      try {
+        if (!q || q.error || !q.price) {
+          q = await fetchJson(`/api/quote/${s.code}?lite=1`);
+        }
+      } catch (err) {
+        q = { code: s.code, name: s.name, error: true, errorMessage: err.message || String(err) };
+      }
+      const v = calcValueScore(s, q || {});
+      rows.push({ ...s, q: { ...(q || {}), code: s.code, name: s.name }, ...v });
+      done += 1;
+      if (onProgress) onProgress({ done, total: universe.length, current: s });
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, universe.length) }, () => worker()));
+  return rows.sort((a, b) => b.score - a.score);
 }
 
 function calcValueScore(s, q) {
@@ -1589,6 +2075,762 @@ function calculateRsiReversalSignal(candles) {
   };
 }
 
+
+
+function calcRSISeries(data, period = 14) {
+  if (!Array.isArray(data)) return [];
+  return data.map((_, i) => {
+    if (i < period) return null;
+    const slice = data.slice(i - period, i + 1);
+    let gains = 0;
+    let losses = 0;
+    for (let j = 1; j < slice.length; j++) {
+      const diff = Number(slice[j].close) - Number(slice[j - 1].close);
+      if (diff >= 0) gains += diff;
+      else losses += Math.abs(diff);
+    }
+    const avgGain = gains / period;
+    const avgLoss = losses / period;
+    if (avgLoss === 0) return 100;
+    return Math.round((100 - 100 / (1 + avgGain / avgLoss)) * 10) / 10;
+  });
+}
+
+function detectPsychPatterns(data) {
+  const patterns = [];
+  const n = data?.length || 0;
+  if (n < 24) return patterns;
+
+  for (let i = 8; i < n - 1; i++) {
+    const recent = data.slice(i - 7, i + 1);
+    const lows = recent.map((d) => Number(d.low));
+    const minLow = Math.min(...lows);
+    const maxLow = Math.max(...lows);
+    const close = Number(data[i].close);
+    const prevClose = Number(data[i - 1].close);
+    if (minLow > 0 && (maxLow - minLow) / minLow < 0.025 && close > prevClose * 1.012) {
+      patterns.push({
+        index: i,
+        type: "double_bottom",
+        label: "이중바닥 심리",
+        sentiment: "bullish",
+        confidence: Math.min(92, 68 + Math.round(((close / prevClose) - 1) * 900)),
+        message: "저점 방어가 반복되며 공포 매물이 줄어드는 구조입니다.",
+      });
+    }
+  }
+
+  for (let i = 14; i < n - 1; i++) {
+    const slice = data.slice(i - 12, i + 1);
+    const highs = slice.map((d) => Number(d.high));
+    const peak = Math.max(...highs);
+    const peakIdx = highs.indexOf(peak);
+    if (peakIdx > 3 && peakIdx < 9) {
+      const leftShoulder = Math.max(...highs.slice(0, peakIdx));
+      const rightShoulder = Math.max(...highs.slice(peakIdx + 1));
+      if (peak > 0 && Math.abs(leftShoulder - rightShoulder) / peak < 0.035 && peak > leftShoulder * 1.018) {
+        patterns.push({
+          index: i,
+          type: "head_shoulders",
+          label: "헤드앤숄더 심리",
+          sentiment: "bearish",
+          confidence: 70 + Math.min(18, Math.round(((peak / leftShoulder) - 1) * 350)),
+          message: "추격 매수세가 약해지고 고점 부담이 커지는 구조입니다.",
+        });
+      }
+    }
+  }
+
+  return patterns.slice(-6);
+}
+
+function analyzeMarketPsychology(data, rsiSeries) {
+  const safe = Array.isArray(data) ? data.filter((d) => Number(d.close) > 0) : [];
+  const last = safe[safe.length - 1];
+  if (!last || safe.length < 10) {
+    return {
+      phase: "데이터 부족",
+      phaseColor: "#94a3b8",
+      description: "심리 분석을 위해 최소 10봉 이상의 가격 데이터가 필요합니다.",
+      biases: ["데이터 부족"],
+      fearGreedScore: 50,
+      volumeAnomaly: false,
+      rsiValue: 50,
+      priceChange5: "0.00",
+      action: "관망",
+    };
+  }
+
+  const base = safe[Math.max(0, safe.length - 5)];
+  const prev20 = safe.slice(-20);
+  const avgVol = prev20.reduce((s, d) => s + Number(d.volume || 0), 0) / Math.max(1, prev20.length);
+  const lastRSI = Number([...rsiSeries].reverse().find((v) => v !== null && Number.isFinite(Number(v))) ?? calcRSI(safe, 14) ?? 50);
+  const priceChange5 = base?.open ? ((Number(last.close) - Number(base.open)) / Number(base.open)) * 100 : 0;
+  const volumeAnomaly = avgVol > 0 && Number(last.volume || 0) > avgVol * 1.8;
+
+  let phase = "중립 (관망)";
+  let phaseColor = "#94a3b8";
+  let description = "뚜렷한 방향성 없이 눈치 보기 장세입니다. 거래량 감소와 함께 다음 방향성을 결정하는 변곡점이 형성될 수 있습니다.";
+  let biases = ["현상 유지 편향", "모호성 회피", "군집 행동 대기"];
+  let action = "확인 후 대응";
+
+  if (lastRSI > 75 && priceChange5 > 8) {
+    phase = "극단적 탐욕 (FOMO)";
+    phaseColor = "#ef4444";
+    description = "시장 참여자들이 상승 기회를 놓칠까 두려워 추격 매수하는 구간입니다. 신규 매수는 고점 물림 위험이 커지므로 분할 대응과 손절 기준이 필요합니다.";
+    biases = ["FOMO", "과잉 자신감 편향", "군집 행동"];
+    action = "추격매수 자제";
+  } else if (lastRSI > 60) {
+    phase = "탐욕";
+    phaseColor = "#f97316";
+    description = "낙관론이 우세하며 매수 심리가 강합니다. 단기 추가 상승 가능성은 있으나 과매수 진입을 경계해야 합니다.";
+    biases = ["앵커링 편향", "최근성 편향", "확증 편향"];
+    action = "눌림 확인";
+  } else if (lastRSI < 25 && priceChange5 < -8) {
+    phase = "극단적 공포 (패닉)";
+    phaseColor = "#22c55e";
+    description = "패닉 셀링이 진행 중입니다. 감정 매물이 과도하게 출회되는 구간으로, 거래량 동반 반등이 나오면 중기 기회가 형성될 수 있습니다.";
+    biases = ["손실 회피 편향", "패닉 셀링", "가용성 편향"];
+    action = "분할 관심";
+  } else if (lastRSI < 40) {
+    phase = "공포";
+    phaseColor = "#84cc16";
+    description = "추가 하락 우려로 관망세가 짙습니다. 지지선 부근에서 거래량을 동반한 반등 시그널을 확인할 필요가 있습니다.";
+    biases = ["손실 회피 편향", "현상 유지 편향", "비관론 편향"];
+    action = "반등 확인";
+  }
+
+  const rawScore = lastRSI * 0.62 + priceChange5 * 2.1 + (volumeAnomaly ? 7 : 0) + 18;
+  const fearGreedScore = Math.min(100, Math.max(0, Math.round(rawScore)));
+
+  return {
+    phase,
+    phaseColor,
+    description,
+    biases,
+    fearGreedScore,
+    volumeAnomaly,
+    rsiValue: lastRSI,
+    priceChange5: priceChange5.toFixed(2),
+    action,
+  };
+}
+
+function classifyReturn(returnPct, threshold = 2) {
+  if (returnPct >= threshold) return "up";
+  if (returnPct <= -threshold) return "down";
+  return "side";
+}
+
+function decideAutoPrediction({ psych, activeTechnique, gogoSignal }) {
+  let score = 0;
+  const reasons = [];
+
+  const techScore = Number(activeTechnique?.score || 0);
+  if (techScore >= 75) {
+    score += 24;
+    reasons.push(`${activeTechnique?.name} 강세 점수`);
+  } else if (techScore >= 60) {
+    score += 14;
+    reasons.push(`${activeTechnique?.name} 관심 점수`);
+  } else if (techScore <= 35) {
+    score -= 12;
+    reasons.push(`${activeTechnique?.name} 약세 점수`);
+  }
+
+  if (gogoSignal?.status === "OK" && gogoSignal?.checks?.isBreakout) {
+    score += 18;
+    reasons.push("고고저 돌파");
+  }
+
+  if (psych?.fearGreedScore >= 78) {
+    score -= 18;
+    reasons.push("극단 탐욕/FOMO 경계");
+  } else if (psych?.fearGreedScore >= 65) {
+    score += 7;
+    reasons.push("탐욕 모멘텀");
+  } else if (psych?.fearGreedScore <= 22) {
+    score += 12;
+    reasons.push("극단 공포 반등 후보");
+  } else if (psych?.fearGreedScore <= 38) {
+    score += 7;
+    reasons.push("공포권 반등 감시");
+  }
+
+  if (psych?.volumeAnomaly) {
+    score += 8;
+    reasons.push("거래량 이상 감지");
+  }
+
+  const rsi = Number(psych?.rsiValue || 50);
+  if (rsi >= 75) score -= 12;
+  else if (rsi <= 30) score += 10;
+  else if (rsi >= 55 && rsi <= 68) score += 6;
+
+  let prediction = "side";
+  if (score >= 18) prediction = "up";
+  else if (score <= -12) prediction = "down";
+
+  return {
+    prediction,
+    score,
+    reasons: reasons.length ? reasons : ["중립권 혼조"],
+  };
+}
+
+function buildSignalSet({ psych, activeTechnique, gogoSignal }) {
+  return {
+    technique: activeTechnique?.key || "unknown",
+    techniqueName: activeTechnique?.name || "-",
+    techniqueScore: Number(activeTechnique?.score || 0),
+    gogoBreakout: Boolean(gogoSignal?.status === "OK" && gogoSignal?.checks?.isBreakout),
+    volumeAnomaly: Boolean(psych?.volumeAnomaly),
+    psychologyPhase: psych?.phase || "-",
+    fearGreedScore: Number(psych?.fearGreedScore || 50),
+    rsi: Number(psych?.rsiValue || 50),
+  };
+}
+
+function signalStatKey(entry) {
+  const s = entry.signalSet || {};
+  const keys = [];
+  if (s.technique) keys.push(s.techniqueName || s.technique);
+  if (s.gogoBreakout) keys.push("고고저 돌파");
+  if (s.volumeAnomaly) keys.push("거래량 이상");
+  if (s.psychologyPhase) keys.push(s.psychologyPhase);
+  return keys.slice(0, 3).join(" + ") || "기본 신호";
+}
+
+function usePsychLearningLog() {
+  const [log, setLog] = useState(() => loadLS("alpha_psych_learning_log", []));
+  const [autoEnabled, setAutoEnabled] = useState(() => loadLS("alpha_auto_learning_enabled", true));
+
+  useEffect(() => saveLS("alpha_auto_learning_enabled", autoEnabled), [autoEnabled]);
+
+  const saveLog = useCallback((updater) => {
+    setLog((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      saveLS("alpha_psych_learning_log", next);
+      return next;
+    });
+  }, []);
+
+  const addEntry = useCallback((entry) => {
+    saveLog((prev) => {
+      const next = [{ ...entry, id: Date.now(), mode: entry.mode || "manual", ts: new Date().toISOString() }, ...prev].slice(0, 300);
+      return next;
+    });
+  }, [saveLog]);
+
+  const updateResult = useCallback((id, actual) => {
+    saveLog((prev) => prev.map((e) => e.id === id ? { ...e, actual, correct: e.prediction === actual, status: "done" } : e));
+  }, [saveLog]);
+
+  const addAutoPrediction = useCallback((entry) => {
+    if (!autoEnabled) return { saved: false, reason: "disabled" };
+
+    const code = String(entry.code || "");
+    const baseDate = String(entry.baseDate || "");
+    if (!code || !baseDate) return { saved: false, reason: "missing" };
+
+    let saved = false;
+    saveLog((prev) => {
+      const exists = prev.some((e) =>
+        e.mode === "auto" &&
+        String(e.code) === code &&
+        String(e.baseDate) === baseDate &&
+        Number(e.horizon || 5) === Number(entry.horizon || 5)
+      );
+      if (exists) return prev;
+
+      saved = true;
+      return [{
+        ...entry,
+        id: Date.now(),
+        mode: "auto",
+        status: "pending",
+        actual: undefined,
+        correct: undefined,
+        ts: new Date().toISOString(),
+      }, ...prev].slice(0, 300);
+    });
+
+    return { saved };
+  }, [autoEnabled, saveLog]);
+
+  const evaluateAutoPredictions = useCallback((code, chartData, threshold = 2) => {
+    if (!Array.isArray(chartData) || !chartData.length) return { evaluated: 0 };
+
+    let evaluated = 0;
+    const normalizedCode = String(code || "");
+    const byDate = new Map(chartData.map((d, i) => [String(d.date), { d, i }]));
+
+    saveLog((prev) => {
+      let changed = false;
+      const next = prev.map((entry) => {
+        if (entry.mode !== "auto" || entry.status === "done") return entry;
+        if (String(entry.code) !== normalizedCode) return entry;
+
+        const found = byDate.get(String(entry.baseDate));
+        if (!found) return entry;
+
+        const horizon = Number(entry.horizon || 5);
+        const targetIndex = found.i + horizon;
+        if (targetIndex >= chartData.length) return entry;
+
+        const basePrice = Number(entry.basePrice || found.d.close || 0);
+        const targetPrice = Number(chartData[targetIndex].close || 0);
+        if (!basePrice || !targetPrice) return entry;
+
+        const returnPct = ((targetPrice - basePrice) / basePrice) * 100;
+        const actual = classifyReturn(returnPct, threshold);
+        const correct = actual === entry.prediction;
+        evaluated += 1;
+        changed = true;
+
+        return {
+          ...entry,
+          status: "done",
+          actual,
+          correct,
+          targetDate: chartData[targetIndex].date,
+          targetPrice,
+          returnPct: Number(returnPct.toFixed(2)),
+          evaluatedAt: new Date().toISOString(),
+        };
+      });
+
+      return changed ? next : prev;
+    });
+
+    return { evaluated };
+  }, [saveLog]);
+
+  const clearLearning = useCallback(() => {
+    saveLog([]);
+  }, [saveLog]);
+
+  const done = log.filter((e) => e.status === "done" || e.actual !== undefined);
+  const pending = log.filter((e) => e.mode === "auto" && e.status !== "done");
+  const accuracy = done.length ? Math.round(done.filter((e) => e.correct).length / done.length * 100) : null;
+
+  const signalStats = Object.values(done.reduce((acc, entry) => {
+    const key = signalStatKey(entry);
+    acc[key] = acc[key] || { key, total: 0, hit: 0 };
+    acc[key].total += 1;
+    if (entry.correct) acc[key].hit += 1;
+    return acc;
+  }, {}))
+    .map((x) => ({
+      ...x,
+      rate: x.total ? Math.round((x.hit / x.total) * 100) : 0,
+      weight: x.total >= 3 ? Number((1 + ((x.hit / x.total) - 0.5) * 0.6).toFixed(2)) : 1,
+    }))
+    .sort((a, b) => b.rate - a.rate || b.total - a.total);
+
+  return {
+    log,
+    pending,
+    done,
+    signalStats,
+    addEntry,
+    updateResult,
+    accuracy,
+    addAutoPrediction,
+    evaluateAutoPredictions,
+    clearLearning,
+    autoEnabled,
+    setAutoEnabled,
+  };
+}
+
+
+function FearGreedGauge({ score = 50 }) {
+  const angle = -90 + (Math.max(0, Math.min(100, Number(score))) / 100) * 180;
+  return (
+    <div className="fear-greed-gauge">
+      <div className="fear-greed-arc" />
+      <div className="fear-greed-inner" />
+      <div className="fear-greed-needle" style={{ transform: `rotate(${angle}deg)` }} />
+      <div className="fear-greed-center" />
+      <div className="fear-greed-score">{score}</div>
+    </div>
+  );
+}
+
+function PsychologyPanel({ selected, name, last, psych, patterns, log, pending = [], done = [], signalStats = [], autoPrediction, addEntry, updateResult, accuracy, autoEnabled, setAutoEnabled, clearLearning }) {
+  const [tab, setTab] = useState("psychology");
+
+  const submitPrediction = (prediction) => {
+    if (!last) return;
+    addEntry({
+      code: selected?.code || selected?.symbol,
+      name,
+      price: Number(last.close || selected?.price || 0),
+      phase: psych.phase,
+      rsi: psych.rsiValue,
+      fearGreedScore: psych.fearGreedScore,
+      prediction,
+    });
+  };
+
+  const meters = [
+    {
+      label: "RSI 심리",
+      value: psych.rsiValue,
+      note: psych.rsiValue >= 70 ? "과매수" : psych.rsiValue <= 30 ? "과매도" : "중립",
+      color: psych.rsiValue >= 70 ? "#ef4444" : psych.rsiValue <= 30 ? "#22c55e" : "#a78bfa",
+    },
+    {
+      label: "공포·탐욕",
+      value: psych.fearGreedScore,
+      note: psych.phase,
+      color: psych.phaseColor,
+    },
+    {
+      label: "5봉 가격 변화",
+      value: Math.min(100, Math.max(0, Number(psych.priceChange5) + 50)),
+      note: `${psych.priceChange5}%`,
+      color: Number(psych.priceChange5) >= 0 ? "#00ff88" : "#ff4466",
+    },
+  ];
+
+  return (
+    <div className="psych-panel">
+      <div className="psych-panel-head">
+        <div>
+          <div className="psych-panel-title">심리분석 · {name}</div>
+          <div className="sub">RSI, 5봉 변화율, 거래량 이상, 패턴 심리를 종합합니다.</div>
+        </div>
+        <span className="tag yellow">PSYCHOLOGY</span>
+      </div>
+
+      <div className="psych-body">
+        <div className="psych-tabs">
+          <button className={`psych-tab-btn ${tab === "psychology" ? "active" : ""}`} onClick={() => setTab("psychology")}>🧠 심리분석</button>
+          <button className={`psych-tab-btn ${tab === "learning" ? "active" : ""}`} onClick={() => setTab("learning")}>🎯 자체학습</button>
+        </div>
+
+        {tab === "psychology" && (
+          <div className="psych-grid">
+            <div className="psych-card" style={{ textAlign: "center" }}>
+              <div className="card-title">공포·탐욕 지수</div>
+              <FearGreedGauge score={psych.fearGreedScore} />
+              <div className="psych-phase" style={{ color: psych.phaseColor }}>{psych.phase}</div>
+              <div className="sub">전략: <b>{psych.action}</b></div>
+            </div>
+
+            <div className="psych-card">
+              <div className="card-title">현재 심리 해석</div>
+              <div className="psych-desc" style={{ borderLeftColor: psych.phaseColor }}>{psych.description}</div>
+              <div className="psych-bias-list">
+                {psych.biases.map((b) => <div className="psych-bias" key={b}>{b}</div>)}
+              </div>
+
+              <div style={{ height: 10 }} />
+              {meters.map((m) => (
+                <div className="psych-meter" key={m.label}>
+                  <div className="psych-meter-row"><span>{m.label}</span><b style={{ color: m.color }}>{m.note}</b></div>
+                  <div className="psych-meter-track">
+                    <div className="psych-meter-fill" style={{ width: `${Math.max(0, Math.min(100, Number(m.value)))}%`, background: m.color }} />
+                  </div>
+                </div>
+              ))}
+
+              {psych.volumeAnomaly && (
+                <div className="error" style={{ marginTop: 10, color: "#ffd447", borderColor: "#ffd44766", background: "#ffd44711" }}>
+                  ⚡ 거래량 이상 감지: 평균 대비 180% 이상 거래량입니다. 세력 개입, 뉴스, 공포/탐욕 급변 가능성을 확인하세요.
+                </div>
+              )}
+            </div>
+
+            <div className="psych-card" style={{ gridColumn: "1 / -1" }}>
+              <div className="card-title">감지된 심리 패턴</div>
+              <div className="psych-patterns">
+                {patterns.length ? patterns.map((p, i) => (
+                  <div className="psych-pattern" key={`${p.type}-${i}`}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                      <b className={p.sentiment === "bullish" ? "up" : "down"}>{p.sentiment === "bullish" ? "▲" : "▼"} {p.label}</b>
+                      <span className="sub">{p.confidence}%</span>
+                    </div>
+                    <div className="sub" style={{ marginTop: 6, lineHeight: 1.55 }}>{p.message}</div>
+                  </div>
+                )) : <div className="sub">명확한 심리 패턴은 아직 감지되지 않았습니다.</div>}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === "learning" && (
+          <div className="psych-learning-grid">
+            <div className="psych-card">
+              <div className="card-title">자동학습 엔진 — 자체 조회 기반</div>
+              <div className="sub" style={{ lineHeight: 1.7, marginTop: 8 }}>
+                차트 분석 시점의 AI 예측을 자동 저장하고, 이후 같은 종목의 차트 데이터가 충분히 쌓이면 5봉 후 실제 수익률로 적중 여부를 자동 판정합니다.
+              </div>
+
+              <div className="auto-learning-summary">
+                <div className="auto-learn-card"><span className="sub">대기 중</span><b>{pending.length}</b></div>
+                <div className="auto-learn-card"><span className="sub">판정 완료</span><b>{done.length}</b></div>
+                <div className="auto-learn-card"><span className="sub">정확도</span><b>{accuracy !== null ? `${accuracy}%` : "-"}</b></div>
+                <div className="auto-learn-card"><span className="sub">현재 예측</span><b className={autoPrediction?.prediction === "up" ? "up" : autoPrediction?.prediction === "down" ? "down" : ""}>{autoPrediction?.prediction === "up" ? "상승" : autoPrediction?.prediction === "down" ? "하락" : "횡보"}</b></div>
+              </div>
+
+              <div className="psych-card" style={{ padding: 12, marginTop: 10 }}>
+                <div className="card-title">현재 자동 예측 근거</div>
+                <div className="sub" style={{ marginTop: 7, lineHeight: 1.7 }}>
+                  예측 점수: <b>{autoPrediction?.score ?? 0}</b><br />
+                  근거: {autoPrediction?.reasons?.join(" + ") || "-"}<br />
+                  기준: 5봉 후 수익률 +2% 이상 상승, -2% 이하 하락, 그 외 횡보
+                </div>
+              </div>
+
+              <div className="auto-learn-controls">
+                <button className="btn" onClick={() => setAutoEnabled(!autoEnabled)}>
+                  자동 예측 저장 {autoEnabled ? "ON" : "OFF"}
+                </button>
+                <button className="btn red" onClick={() => {
+                  if (confirm("자동학습 기록을 초기화할까요?")) clearLearning();
+                }}>
+                  학습 초기화
+                </button>
+              </div>
+            </div>
+
+            <div className="psych-card">
+              <div className="card-title">신호별 적중률 / 가중치</div>
+              <div className="sub" style={{ marginTop: 6, lineHeight: 1.6 }}>
+                판정 완료 데이터 기준으로 신호별 적중률과 가중치를 계산합니다. 표본 3건 미만은 가중치 1.00으로 유지합니다.
+              </div>
+              <div style={{ marginTop: 10, overflowX: "auto" }}>
+                <table className="signal-stat-table">
+                  <thead><tr><th>신호 조합</th><th>건수</th><th>적중</th><th>적중률</th><th>가중치</th></tr></thead>
+                  <tbody>
+                    {signalStats.length ? signalStats.slice(0, 8).map((s) => (
+                      <tr key={s.key}>
+                        <td>{s.key}</td>
+                        <td>{s.total}</td>
+                        <td>{s.hit}</td>
+                        <td className={s.rate >= 60 ? "up" : "down"}>{s.rate}%</td>
+                        <td>×{s.weight}</td>
+                      </tr>
+                    )) : <tr><td colSpan="5" className="sub">판정 완료 데이터가 쌓이면 표시됩니다.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="psych-card" style={{ gridColumn: "1 / -1" }}>
+              <div className="card-title">자동 예측 기록</div>
+              <div className="learning-log" style={{ marginTop: 10 }}>
+                {log.length ? log.map((entry) => (
+                  <div className={`learning-entry ${entry.status === "done" ? "done" : "pending"}`} key={entry.id}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                      <b>{entry.name}</b>
+                      <span className="sub">{new Date(entry.ts).toLocaleDateString("ko-KR")}</span>
+                    </div>
+                    <div className="sub" style={{ lineHeight: 1.6 }}>
+                      기준 {entry.baseDate || "-"} · 기준가 {fmtPrice(entry.basePrice || entry.price)} · 예측 {entry.prediction === "up" ? "상승" : entry.prediction === "down" ? "하락" : "횡보"} · 사유 {entry.predictionReason || entry.phase || "-"}
+                    </div>
+                    {entry.status === "done" || entry.actual !== undefined ? (
+                      <div style={{ marginTop: 7 }} className={entry.correct ? "up" : "down"}>
+                        {entry.correct ? "✓ 적중" : "✗ 빗나감"} · 실제 {entry.actual === "up" ? "상승" : entry.actual === "down" ? "하락" : "횡보"} · 수익률 {entry.returnPct ?? "-"}%
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 7 }} className="loading">
+                        판정 대기 · 5봉 후 데이터 확보 시 자동 평가
+                      </div>
+                    )}
+                  </div>
+                )) : <div className="sub">차트 분석을 실행하면 자동 예측 기록이 쌓입니다.</div>}
+              </div>
+            </div>
+          </div>
+        )}      </div>
+    </div>
+  );
+}
+
+
+function calcSupportResistance(candles, lookback = 90) {
+  const data = candles.slice(-lookback);
+  if (data.length < 20) return { support: null, resistance: null, supportZone: null, resistanceZone: null, target: null, stop: null };
+
+  const lows = data.map((d) => Number(d.low)).filter(Boolean);
+  const highs = data.map((d) => Number(d.high)).filter(Boolean);
+  const closes = data.map((d) => Number(d.close)).filter(Boolean);
+  const lastClose = closes[closes.length - 1] || 0;
+  const minLow = Math.min(...lows);
+  const maxHigh = Math.max(...highs);
+  const span = Math.max(1, maxHigh - minLow);
+  const bucketSize = Math.max(1, span / 28);
+
+  const bucket = (price) => Math.round((price - minLow) / bucketSize) * bucketSize + minLow;
+  const lowBuckets = {};
+  const highBuckets = {};
+
+  lows.forEach((p) => {
+    const k = Math.round(bucket(p));
+    lowBuckets[k] = (lowBuckets[k] || 0) + 1;
+  });
+  highs.forEach((p) => {
+    const k = Math.round(bucket(p));
+    highBuckets[k] = (highBuckets[k] || 0) + 1;
+  });
+
+  const supportCandidates = Object.entries(lowBuckets)
+    .map(([price, count]) => ({ price: Number(price), count }))
+    .filter((x) => x.price <= lastClose)
+    .sort((a, b) => b.count - a.count || b.price - a.price);
+
+  const resistanceCandidates = Object.entries(highBuckets)
+    .map(([price, count]) => ({ price: Number(price), count }))
+    .filter((x) => x.price >= lastClose)
+    .sort((a, b) => b.count - a.count || a.price - b.price);
+
+  const support = supportCandidates[0] || { price: Math.min(...lows.slice(-20)), count: 1 };
+  const resistance = resistanceCandidates[0] || { price: Math.max(...highs.slice(-20)), count: 1 };
+
+  const zone = Math.max(1, span * 0.012);
+  return {
+    support,
+    resistance,
+    supportZone: [Math.max(1, support.price - zone), support.price + zone],
+    resistanceZone: [resistance.price - zone, resistance.price + zone],
+    target: Math.round(resistance.price),
+    stop: Math.round(support.price * 0.985),
+    lastClose,
+  };
+}
+
+function calculateSupportResistanceSignal(candles) {
+  if (!candles || candles.length < 24) {
+    return { status: "ERROR", signalName: "지지·저항", score: 0, grade: "제외", message: "최소 24봉 이상 필요합니다." };
+  }
+
+  const sr = calcSupportResistance(candles, 120);
+  const last = candles[candles.length - 1];
+  const close = Number(last.close || 0);
+  const support = Number(sr.support?.price || 0);
+  const resistance = Number(sr.resistance?.price || 0);
+
+  const distSupport = support ? ((close - support) / support) * 100 : 999;
+  const distResistance = resistance ? ((resistance - close) / close) * 100 : 999;
+
+  let score = 35;
+  if (distSupport >= 0 && distSupport <= 3) score += 25;
+  if (distResistance >= 2 && distResistance <= 10) score += 15;
+  if (sr.support?.count >= 3) score += 15;
+  if (sr.resistance?.count >= 3) score += 10;
+
+  let grade = "제외";
+  if (score >= 80) grade = "강한 매수 후보";
+  else if (score >= 65) grade = "관심 종목";
+  else if (score >= 50) grade = "관찰";
+
+  return {
+    status: "OK",
+    signalName: "지지·저항",
+    score,
+    grade,
+    action: distSupport <= 3 ? "지지선 근접 · 반등 확인" : "지지·저항 구간 확인",
+    support,
+    resistance,
+    distSupport: Number(distSupport.toFixed(2)),
+    distResistance: Number(distResistance.toFixed(2)),
+    sr,
+  };
+}
+
+function calculateBoxBreakoutSignal(candles) {
+  if (!candles || candles.length < 24) {
+    return { status: "ERROR", signalName: "박스권 돌파", score: 0, grade: "제외", message: "최소 24봉 이상 필요합니다." };
+  }
+
+  const recent = candles.slice(-40);
+  const prev = recent.slice(0, -1);
+  const last = recent[recent.length - 1];
+  const upper = Math.max(...prev.map((d) => Number(d.high)));
+  const lower = Math.min(...prev.map((d) => Number(d.low)));
+  const close = Number(last.close);
+  const volume = Number(last.volume || 0);
+  const avgVol = prev.reduce((s, d) => s + Number(d.volume || 0), 0) / Math.max(1, prev.length);
+  const widthRate = ((upper - lower) / Math.max(1, close)) * 100;
+  const isTight = widthRate <= 18;
+  const isBreakout = close > upper;
+  const isNearUpper = close >= upper * 0.985;
+  const volOk = avgVol > 0 ? volume >= avgVol * 1.25 : false;
+
+  let score = 30;
+  if (isTight) score += 20;
+  if (isNearUpper) score += 20;
+  if (isBreakout) score += 20;
+  if (volOk) score += 10;
+
+  let grade = "제외";
+  if (score >= 80) grade = "강한 매수 후보";
+  else if (score >= 65) grade = "관심 종목";
+  else if (score >= 50) grade = "관찰";
+
+  return {
+    status: "OK",
+    signalName: "박스권 돌파",
+    score,
+    grade,
+    action: isBreakout ? "박스 상단 돌파" : isNearUpper ? "박스 상단 근접" : "박스권 관찰",
+    upper: Math.round(upper),
+    lower: Math.round(lower),
+    widthRate: Number(widthRate.toFixed(2)),
+    isBreakout,
+    isNearUpper,
+    volOk,
+  };
+}
+
+function calculateGapSignal(candles) {
+  if (!candles || candles.length < 10) {
+    return { status: "ERROR", signalName: "갭/과열", score: 0, grade: "제외", message: "최소 10봉 이상 필요합니다." };
+  }
+  const last = candles[candles.length - 1];
+  const prev = candles[candles.length - 2];
+  const gapRate = ((Number(last.open) - Number(prev.close)) / Math.max(1, Number(prev.close))) * 100;
+  const bodyRate = ((Number(last.close) - Number(last.open)) / Math.max(1, Number(last.open))) * 100;
+  const status = Math.abs(gapRate) >= 2 ? "OK" : "NO_SIGNAL";
+  const score = Math.abs(gapRate) >= 4 ? 70 : Math.abs(gapRate) >= 2 ? 55 : 30;
+  return {
+    status,
+    signalName: "갭/과열",
+    score,
+    grade: score >= 65 ? "관심 종목" : score >= 50 ? "관찰" : "제외",
+    action: gapRate > 0 ? "갭상승 후 지지 확인" : gapRate < 0 ? "갭하락 반등 확인" : "갭 신호 약함",
+    gapRate: Number(gapRate.toFixed(2)),
+    bodyRate: Number(bodyRate.toFixed(2)),
+  };
+}
+
+function calcFibonacciLevels(candles, lookback = 120) {
+  const data = candles.slice(-lookback);
+  if (data.length < 20) return [];
+  let hi = { index: 0, price: -Infinity };
+  let lo = { index: 0, price: Infinity };
+  data.forEach((d, i) => {
+    const h = Number(d.high);
+    const l = Number(d.low);
+    if (h > hi.price) hi = { index: i, price: h, date: d.date };
+    if (l < lo.price) lo = { index: i, price: l, date: d.date };
+  });
+  const top = hi.price;
+  const bottom = lo.price;
+  const diff = Math.max(1, top - bottom);
+  return [
+    { label: "Fibo 23.6", price: top - diff * 0.236 },
+    { label: "Fibo 38.2", price: top - diff * 0.382 },
+    { label: "Fibo 50.0", price: top - diff * 0.5 },
+    { label: "Fibo 61.8", price: top - diff * 0.618 },
+  ];
+}
+
+
 function normalizeTechniqueSignal(key, signal) {
   const gradeScore =
     signal.grade === "강한 매수 후보" ? 3 :
@@ -1611,9 +2853,12 @@ function recommendChartTechniques(candles, gogoSignal) {
   const signals = [
     normalizeTechniqueSignal("gogojeo", { ...gogoSignal, signalName: "고고저" }),
     normalizeTechniqueSignal("maPullback", calculateMaPullbackSignal(candles)),
+    normalizeTechniqueSignal("supportResistance", calculateSupportResistanceSignal(candles)),
+    normalizeTechniqueSignal("boxBreakout", calculateBoxBreakoutSignal(candles)),
     normalizeTechniqueSignal("bollinger", calculateBollingerSqueezeSignal(candles)),
     normalizeTechniqueSignal("volumeBreakout", calculateVolumeBreakoutSignal(candles)),
     normalizeTechniqueSignal("rsiReversal", calculateRsiReversalSignal(candles)),
+    normalizeTechniqueSignal("gapSignal", calculateGapSignal(candles)),
   ];
 
   const ranked = signals
@@ -1637,9 +2882,12 @@ function techniqueDescription(key) {
     auto: "AI가 현재 차트에 가장 적합한 기법을 자동 선택합니다.",
     gogojeo: "고점①과 이후 낮은 고점②를 연결한 하락 추세선 돌파 여부를 봅니다.",
     maPullback: "20일선 눌림, MA5/MA20/MA60 정렬, 지지 후 반등을 봅니다.",
+    supportResistance: "최근 매물대가 많이 겹친 지지·저항 가격대를 자동 추정합니다.",
+    boxBreakout: "최근 박스권 상단 돌파 또는 돌파 임박 여부를 봅니다.",
     bollinger: "볼린저 밴드 수축 후 상단 돌파와 거래량 동반 여부를 봅니다.",
     volumeBreakout: "최근 20봉 전고점 돌파와 거래량 급증을 봅니다.",
     rsiReversal: "RSI 과매도 회복, 가격 반등, 20일선 회복을 봅니다.",
+    gapSignal: "갭상승/갭하락 후 지지 여부와 과열 리스크를 봅니다.",
   };
   return map[key] || "";
 }
@@ -1647,6 +2895,25 @@ function techniqueDescription(key) {
 async function fetchChartHistory(code, period = "D", range = "1Y", selected = null) {
   const count = countByPeriod(period, range);
   const minNeeded = minChartCandles(period, range);
+
+  if (selected?.assetClass === "global") {
+    const symbol = normalizeGlobalInput(selected.symbol || code);
+    const type = selected.type || (isCryptoSymbol(symbol) ? "crypto" : "us");
+    const path = `/api/global/chart/${symbol}?type=${type}&period=${period}&count=${count}&range=${range}`;
+    try {
+      const data = normalizeHistoryResponse(await fetchJson(path));
+      if (data.length >= Math.min(10, minNeeded)) {
+        return { data: data.slice(-count), source: path, fallback: false };
+      }
+    } catch (e) {
+      console.warn("global chart fallback", path, e);
+    }
+    return {
+      data: makeFallbackHistory(selected, count, period),
+      source: `global-fallback-${symbol}-${period}-${range}`,
+      fallback: true,
+    };
+  }
   const paths = [
     `/api/chart/${code}?period=${period}&count=${count}&range=${range}&analyze=1`,
     `/api/history/${code}?period=${period}&count=${count}&range=${range}`,
@@ -1746,7 +3013,7 @@ async function fetchExtendedGogoHistory(code, period, range, selected = null) {
 async function fetchGlobalQuotes() {
   const pairs = await Promise.all(
     GLOBAL_TICKERS.map(async (t) => {
-      const endpoint = t.type === "crypto" ? `/api/crypto/quote/${t.symbol}` : `/api/us/quote/${t.symbol}`;
+      const endpoint = globalEndpointFor(t.symbol, t.type);
       try {
         const q = await fetchJson(endpoint);
         return {
@@ -1780,6 +3047,24 @@ function fmtGlobalPrice(item) {
   if (item.type === "crypto") return `$${p.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
   return `$${p.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
+
+
+function normalizeGlobalInput(input) {
+  const raw = String(input || "").trim().toUpperCase().replace(/[^A-Z0-9.-]/g, "");
+  if (!raw) return "";
+  if (raw.endsWith("-USD")) return raw.replace("-USD", "");
+  return raw;
+}
+
+function isCryptoSymbol(symbol) {
+  return ["BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "BNB", "AVAX", "LINK", "DOT", "MATIC"].includes(String(symbol || "").toUpperCase());
+}
+
+function globalEndpointFor(symbol, type = "us") {
+  const s = normalizeGlobalInput(symbol);
+  return type === "crypto" || isCryptoSymbol(s) ? `/api/crypto/quote/${s}` : `/api/us/quote/${s}`;
+}
+
 
 function ReadMeSection({ title = "READ ME", children }) {
   const [open, setOpen] = useState(false);
@@ -1834,7 +3119,7 @@ function Header({ now, tab }) {
           <div className="live">● LIVE {now}</div>
         </div>
         <div className="top-right">
-          <span className="tag demo">US/CRYPTO DEMO</span>
+          <span className="tag green">US/CRYPTO API</span>
           <span className="tag green">KRX API</span>
           <span>2026.05.26</span>
         </div>
@@ -1845,7 +3130,7 @@ function Header({ now, tab }) {
 }
 
 function Nav({ tab, setTab }) {
-  const tabs = ["대시보드", "차트 분석", "스크리너", "저평가 스크리너", "포트폴리오", "알림 센터", "AI 리포트", "일일 브리핑", "섹터/테마", "전종목 스캔", "백테스트", "AI 시뮬레이션"];
+  const tabs = ["대시보드", "차트 분석", "스크리너", "저평가 스크리너", "US/CRYPTO", "포트폴리오", "알림 센터", "AI 리포트", "일일 브리핑", "섹터/테마", "전종목 스캔", "백테스트", "AI 시뮬레이션"];
   return (
     <div className="nav">
       {tabs.map((t) => <button key={t} onClick={() => setTab(t)} className={tab === t ? "active" : ""}>{t}</button>)}
@@ -1897,6 +3182,7 @@ function ScreenFrame({ tab, children }) {
     "차트 분석": "선택 종목의 AI 분석과 차트 시각화를 확인합니다.",
     "스크리너": "실시간 종목을 점수화해 추천 랭킹으로 정리합니다.",
     "저평가 스크리너": "PER/PBR, 52주 저점, 기술적 반등, 국민연금 관심권을 종합합니다.",
+    "US/CRYPTO": "미국주식과 가상자산 시세, 차트, AI 기법 분석을 확인합니다.",
     "포트폴리오": "보유 종목 평가손익과 리밸런싱 기준을 계산합니다.",
     "알림 센터": "가격/등락률/AI점수/20일선 조건을 등록하고 판정합니다.",
     "AI 리포트": "분석 결과 확인 후 추가 질문까지 이어서 진행합니다.",
@@ -2069,7 +3355,7 @@ function Dashboard({ market, selected, stocks }) {
 }
 
 function buildAnalysisPrompt(selected, stocks, followup, lastResult) {
-  const name = getStockName(selected?.code, selected?.name, stocks);
+  const name = selected?.assetClass === "global" ? (selected?.name || selected?.symbol || selected?.code) : getStockName(selected?.code, selected?.name, stocks);
   const base = `
 [종목 데이터]
 종목명: ${name}
@@ -2112,7 +3398,7 @@ ${WEIGHTS.map((w) => `- ${w.name}: ×${w.weight}, 최근 적중률 ${w.hit}%`).j
 
 
 function buildLocalAnalysis(selected, stocks, reason = "") {
-  const name = getStockName(selected?.code, selected?.name, stocks);
+  const name = selected?.assetClass === "global" ? (selected?.name || selected?.symbol || selected?.code) : getStockName(selected?.code, selected?.name, stocks);
   const price = Number(selected?.price || 0);
   const rate = Number(selected?.changeRate || 0);
   const high = Number(selected?.high || 0);
@@ -2513,19 +3799,84 @@ function Screener({ quotes, stocks }) {
 }
 
 function ValueScreener({ quotes, stocks }) {
-  const rows = stocks.map((s) => {
+  const [universeKind, setUniverseKind] = useState("current");
+  const [rows, setRows] = useState(() => stocks.map((s) => {
     const q = quotes[s.code] || {};
     const v = calcValueScore(s, q);
     return { ...s, q, ...v };
-  }).sort((a, b) => b.score - a.score);
+  }).sort((a, b) => b.score - a.score));
+  const [scanState, setScanState] = useState({ loading: false, done: 0, total: 0, current: "", lastRun: "", error: "" });
+
+  useEffect(() => {
+    if (scanState.loading) return;
+    if (universeKind !== "current") return;
+    const currentRows = stocks.map((s) => {
+      const q = quotes[s.code] || {};
+      const v = calcValueScore(s, q);
+      return { ...s, q, ...v };
+    }).sort((a, b) => b.score - a.score);
+    setRows(currentRows);
+  }, [quotes, stocks, universeKind, scanState.loading]);
+
+  const runScan = async (kind = universeKind) => {
+    const universe = getValueUniverse(kind, stocks);
+    setUniverseKind(kind);
+    setRows([]);
+    setScanState({ loading: true, done: 0, total: universe.length, current: "시작", lastRun: "", error: "" });
+    try {
+      const result = await runValueScanUniverse({
+        universe,
+        baseQuotes: quotes,
+        onProgress: ({ done, total, current }) => {
+          setScanState((p) => ({ ...p, done, total, current: `${current.name}(${current.code})` }));
+        },
+      });
+      setRows(result);
+      setScanState({ loading: false, done: universe.length, total: universe.length, current: "완료", lastRun: new Date().toLocaleString("ko-KR"), error: "" });
+    } catch (err) {
+      setScanState((p) => ({ ...p, loading: false, error: err.message || String(err) }));
+    }
+  };
+
+  const top = rows.slice(0, 30);
+  const strong = rows.filter((r) => r.score >= 78).length;
+  const watch = rows.filter((r) => r.score >= 62 && r.score < 78).length;
+  const progress = scanState.total ? Math.round(scanState.done / scanState.total * 100) : 0;
 
   return (
     <div className="panel">
-      <div className="panel-title"><span>AI 저평가 종목 스크리너</span><span className="tag yellow">VALUE + TECH</span></div>
+      <div className="panel-title"><span>AI 저평가 종목 스크리너</span><span className="tag yellow">KOSPI200 / KOSDAQ200 SCAN</span></div>
       <div className="panel-body">
+        <div className="value-scan-toolbar">
+          <select className="select" value={universeKind} onChange={(e) => setUniverseKind(e.target.value)} disabled={scanState.loading}>
+            <option value="current">현재 등록 종목</option>
+            <option value="kospi200">코스피 200 후보군</option>
+            <option value="kosdaq200">코스닥 200 후보군</option>
+            <option value="all">코스피+코스닥 통합 후보군</option>
+          </select>
+          <button className="btn" onClick={() => runScan(universeKind)} disabled={scanState.loading}>{scanState.loading ? "조회 중..." : "조회"}</button>
+          <button className="btn" onClick={() => runScan("kospi200")} disabled={scanState.loading}>코스피200 조회</button>
+          <button className="btn" onClick={() => runScan("kosdaq200")} disabled={scanState.loading}>코스닥200 조회</button>
+          <button className="btn" onClick={() => runScan("all")} disabled={scanState.loading}>통합 조회</button>
+        </div>
+
+        <div className="value-scan-summary">
+          <div className="mini-kpi">분석 대상<b>{scanState.total || rows.length}</b></div>
+          <div className="mini-kpi">저평가+반등 후보<b>{strong}</b></div>
+          <div className="mini-kpi">관심 후보<b>{watch}</b></div>
+          <div className="mini-kpi">마지막 조회<b>{scanState.lastRun || "-"}</b></div>
+        </div>
+
+        <div className="value-scan-status">
+          {scanState.loading ? `조회 진행 중: ${scanState.done}/${scanState.total} · 현재 ${scanState.current}` : "조회 버튼을 누르면 선택한 시장 후보군을 순차 조회해 저평가 후보를 산출합니다."}
+          {scanState.error && <div className="error">조회 오류: {scanState.error}</div>}
+          <div className="value-scan-progress"><div className="value-scan-progress-inner" style={{ width: `${progress}%` }} /></div>
+        </div>
+
         <table className="data-table"><thead><tr><th>순위</th><th>종목</th><th>현재가</th><th>PER/PBR</th><th>등락률</th><th>점수</th><th>판정</th><th>근거</th></tr></thead>
-          <tbody>{rows.map((r, i) => <tr key={r.code}><td className="rank">{i + 1}</td><td>{r.name} ({r.code})</td><td>{fmtPrice(r.q.price)}</td><td>{r.q.per ?? "-"} / {r.q.pbr ?? "-"}</td><td className={Number(r.q.changeRate || 0) >= 0 ? "up" : "down"}>{fmtRate(r.q.changeRate)}</td><td>{r.score}</td><td>{r.label}</td><td>{r.tags}</td></tr>)}</tbody></table>
-        <div className="footer-note">52주 저점/국민연금/DART 데이터는 서버 API 확장 시 실제값으로 대체됩니다. 현재는 KIS 응답값과 휴리스틱을 혼합한 MVP 판정입니다.</div>
+          <tbody>{top.map((r, i) => <tr key={r.code}><td className="rank">{i + 1}</td><td>{r.name} ({r.code})</td><td>{fmtPrice(r.q.price)}</td><td>{r.q.per ?? "-"} / {r.q.pbr ?? "-"}</td><td className={Number(r.q.changeRate || 0) >= 0 ? "up" : "down"}>{fmtRate(r.q.changeRate)}</td><td>{r.score}</td><td>{r.label}</td><td>{r.tags}</td></tr>)}
+          {!top.length && <tr><td colSpan="8" className="sub">조회 버튼을 눌러 코스피200 또는 코스닥200 후보군을 분석하세요.</td></tr>}</tbody></table>
+        <div className="footer-note">현재 버전은 코스피200/코스닥200 대표 후보군을 우선 내장해 분석합니다. 추후 KRX 전체 종목 마스터 JSON 또는 서버 DB를 붙이면 실제 지수 구성 200개 전체로 확장할 수 있습니다.</div>
       </div>
     </div>
   );
@@ -2703,6 +4054,17 @@ function getChartVisualSignals({ activeTechniqueKey, chartData, gogoSignal, acti
     }
   }
 
+  if (activeTechniqueKey === "supportResistance") {
+    const sr = activeTechnique?.raw?.sr;
+    if (sr?.support?.price) signals.push({ index: lastIndex, price: sr.support.price, label: "지지선", color: "#ffd447" });
+    if (sr?.resistance?.price) signals.push({ index: lastIndex, price: sr.resistance.price, label: "저항선", color: "#9b5cff" });
+  }
+
+  if (activeTechniqueKey === "boxBreakout") {
+    if (activeTechnique?.raw?.upper) signals.push({ index: lastIndex, price: activeTechnique.raw.upper, label: "박스 상단", color: "#00d9ff" });
+    if (activeTechnique?.raw?.isBreakout) signals.push({ index: lastIndex, price: chartData[lastIndex]?.close, label: "박스 돌파", color: "#00ff88" });
+  }
+
   return signals;
 }
 
@@ -2718,6 +4080,27 @@ function ChartView({ selected, stocks }) {
   const [visibleCount, setVisibleCount] = useState(80);
   const [windowOffset, setWindowOffset] = useState(0);
   const [chartFullscreen, setChartFullscreen] = useState(false);
+  const [hoverIndex, setHoverIndex] = useState(null);
+
+  // 자동 고고저 확장 무한 반복 방지용 잠금값입니다.
+  // 기존에는 5Y ↔ 10Y처럼 range가 자동 변경되면서 useEffect가 다시 실행되어
+  // 같은 종목에서 확장 조회가 반복되는 문제가 있었습니다.
+  const autoExtendKeyRef = useRef("");
+  const autoExtendRunningRef = useRef(false);
+  const {
+    log: psychLog,
+    pending: psychPending,
+    done: psychDone,
+    signalStats: psychSignalStats,
+    addEntry: addPsychEntry,
+    updateResult: updatePsychResult,
+    accuracy: psychAccuracy,
+    addAutoPrediction,
+    evaluateAutoPredictions,
+    clearLearning,
+    autoEnabled,
+    setAutoEnabled,
+  } = usePsychLearningLog();
 
   const rangeOptions = period === "D"
     ? ["6M", "1Y", "3Y", "5Y", "10Y"]
@@ -2729,33 +4112,51 @@ function ChartView({ selected, stocks }) {
     { key: "auto", label: "AI 자동" },
     { key: "gogojeo", label: "고고저" },
     { key: "maPullback", label: "이평 눌림" },
+    { key: "supportResistance", label: "지지·저항" },
+    { key: "boxBreakout", label: "박스권 돌파" },
     { key: "bollinger", label: "볼린저" },
     { key: "volumeBreakout", label: "거래량 돌파" },
     { key: "rsiReversal", label: "RSI 반등" },
   ];
-const loadExtendedGogo = async () => {
+const loadExtendedGogo = async (trigger = "manual") => {
     const code = selected?.code;
     if (!code) return;
+    if (selected?.assetClass === "global") {
+      setExtendNotice("해외/가상자산은 Yahoo Finance 장기 차트 기준으로 분석하며, 고고저 자동 기간 확장은 적용하지 않습니다.");
+      return;
+    }
+    if (autoExtendRunningRef.current) return;
+
+    autoExtendRunningRef.current = true;
     setHistoryState((prev) => ({ ...prev, loading: true }));
-    setExtendNotice("고고저 구조가 없어 더 이전 데이터까지 자동 조회 중입니다.");
+    setExtendNotice("고고저 구조가 없어 더 이전 데이터까지 1회만 조회 중입니다.");
+
     try {
       const res = await fetchExtendedGogoHistory(code, period, range, selected);
       if (res) {
+        // 핵심 수정:
+        // 여기서 setPeriod(res.period), setRange(res.range)를 호출하지 않습니다.
+        // 자동 확장 결과가 5Y/10Y를 오가며 드롭다운을 변경하면 useEffect가 다시 실행되어
+        // 무한 반복처럼 보이는 문제가 발생하기 때문입니다.
         setHistoryState({ ...res, loading: false, fallback: res.fallback || false });
-        setPeriod(res.period);
-        setRange(res.range);
         setAutoExtended(true);
-        setExtendNotice(res.message);
+        setExtendNotice(
+          trigger === "auto"
+            ? `${res.message} 단, 화면 선택값은 사용자가 고른 ${period}/${range}로 유지합니다.`
+            : res.message
+        );
       } else {
         const basic = await fetchChartHistory(code, period, range, selected);
         setHistoryState({ ...basic, loading: false, fallback: true });
-        setAutoExtended(false);
-        setExtendNotice("일봉 10년/월봉 10년까지 확장했지만 유효한 하락 고점 구조가 없습니다. 이 경우 고고저보다 볼린저/RSI/이평 눌림 기법이 더 적합합니다.");
+        setAutoExtended(true);
+        setExtendNotice("일봉 10년/월봉 10년까지 1회 확장했지만 유효한 하락 고점 구조가 없습니다. 고고저보다 볼린저/RSI/이평 눌림 기법이 더 적합할 수 있습니다.");
       }
     } catch (e) {
       setHistoryState((prev) => ({ ...prev, loading: false }));
-      setAutoExtended(false);
+      setAutoExtended(true);
       setExtendNotice(`이전 데이터 조회 중 오류가 발생했습니다: ${e.message || e}`);
+    } finally {
+      autoExtendRunningRef.current = false;
     }
   };
 
@@ -2774,6 +4175,10 @@ const loadExtendedGogo = async () => {
 
   useEffect(() => {
     setWindowOffset(0);
+    setAutoExtended(false);
+    setExtendNotice("");
+    autoExtendRunningRef.current = false;
+    autoExtendKeyRef.current = "";
   }, [selected?.code, period, range]);
 
   const loadChart = async () => {
@@ -2794,8 +4199,6 @@ const loadExtendedGogo = async () => {
     const code = selected?.code;
     if (!code) return;
 
-    setAutoExtended(false);
-    setExtendNotice("");
     setHistoryState((prev) => ({ ...prev, loading: true }));
     fetchChartHistory(code, period, range, selected)
       .then((res) => {
@@ -2829,6 +4232,10 @@ const loadExtendedGogo = async () => {
 
   const ma20 = calcMA(chartData, Math.min(20, chartData.length));
   const ma60 = calcMA(chartData, Math.min(60, chartData.length));
+  const rsiSeries = calcRSISeries(chartData, 14);
+  const psych = analyzeMarketPsychology(chartData, rsiSeries);
+  const psychPatterns = detectPsychPatterns(chartData);
+  const lastPsychLog = psychLog.filter((x) => String(x.code) === String(selected?.code || selected?.symbol)).slice(0, 20);
 
   const gogoSignal = calculateGogojeoSignal(chartData, {
     lookback: Math.min(gogoLookback, chartData.length),
@@ -2838,25 +4245,66 @@ const loadExtendedGogo = async () => {
 
   useEffect(() => {
     const code = selected?.code;
+    const autoKey = `${code || ""}|${period}|${range}|${techniqueMode}`;
+
     const shouldExtend =
       code &&
       !historyState.loading &&
       !autoExtended &&
+      !autoExtendRunningRef.current &&
+      autoExtendKeyRef.current !== autoKey &&
       techniqueMode === "auto" &&
-      chartData.length >= 60 &&
+      selected?.assetClass !== "global" &&
+      chartData.length >= minChartCandles(period, range) &&
       gogoSignal.status !== "OK" &&
       (String(gogoSignal.message || "").includes("하락 추세선") || String(gogoSignal.message || "").includes("고점"));
 
     if (shouldExtend) {
-      loadExtendedGogo();
+      autoExtendKeyRef.current = autoKey;
+      loadExtendedGogo("auto");
     }
-  }, [selected?.code, historyState.loading, autoExtended, techniqueMode, gogoSignal.status, gogoSignal.message]);
+  }, [selected?.code, period, range, historyState.loading, autoExtended, techniqueMode, chartData.length, gogoSignal.status]);
 
   const techniqueAI = recommendChartTechniques(chartData, gogoSignal);
   const activeTechniqueKey = techniqueMode === "auto" ? techniqueAI.recommended?.key || "gogojeo" : techniqueMode;
   const activeTechnique = techniqueAI.ranked.find((t) => t.key === activeTechniqueKey) || techniqueAI.recommended || techniqueAI.ranked[0];
+  const autoPrediction = decideAutoPrediction({ psych, activeTechnique, gogoSignal });
+
+  useEffect(() => {
+    const code = selected?.code || selected?.symbol;
+    const lastBar = chartData[chartData.length - 1];
+    if (!code || !lastBar || historyState.loading) return;
+
+    evaluateAutoPredictions(String(code), fullChartData, 2);
+
+    addAutoPrediction({
+      code: String(code),
+      name,
+      baseDate: String(lastBar.date),
+      basePrice: Number(lastBar.close || selected?.price || 0),
+      horizon: 5,
+      prediction: autoPrediction.prediction,
+      predictionScore: autoPrediction.score,
+      predictionReason: autoPrediction.reasons.join(" + "),
+      signalSet: buildSignalSet({ psych, activeTechnique, gogoSignal }),
+    });
+  }, [
+    selected?.code,
+    selected?.symbol,
+    chartData[chartData.length - 1]?.date,
+    historyState.loading,
+    autoPrediction.prediction,
+    autoPrediction.score,
+    autoEnabled,
+  ]);
 
   const last = chartData[chartData.length - 1];
+  const srInfo = calcSupportResistance(chartData, Math.min(120, chartData.length));
+  const fiboLevels = calcFibonacciLevels(chartData, Math.min(120, chartData.length));
+  const boxInfo = calculateBoxBreakoutSignal(chartData);
+  const suggestedTarget = srInfo?.target || (last ? Math.round(Number(last.close) * 1.05) : 0);
+  const suggestedStop = srInfo?.stop || (last ? Math.round(Number(last.close) * 0.96) : 0);
+  const hoverCandle = hoverIndex != null ? chartData[hoverIndex] : null;
 
   const width = 820;
   const height = 460;
@@ -2865,6 +4313,12 @@ const loadExtendedGogo = async () => {
   const lows = chartData.map((d) => d.low);
   const maValues = [...ma20, ...ma60].filter(Boolean);
   const extraValues = [];
+  if (srInfo?.support?.price) extraValues.push(srInfo.support.price);
+  if (srInfo?.resistance?.price) extraValues.push(srInfo.resistance.price);
+  if (suggestedTarget) extraValues.push(suggestedTarget);
+  if (suggestedStop) extraValues.push(suggestedStop);
+  fiboLevels.forEach((f) => extraValues.push(f.price));
+  if (boxInfo?.upper) extraValues.push(boxInfo.upper, boxInfo.lower);
   if (gogoSignal.status === "OK") extraValues.push(gogoSignal.trendLinePrice);
   if (activeTechniqueKey === "bollinger" && activeTechnique?.raw?.upper) {
     extraValues.push(activeTechnique.raw.upper, activeTechnique.raw.lower);
@@ -2963,6 +4417,14 @@ const loadExtendedGogo = async () => {
             현재 적용: <b>{activeTechnique?.name}</b> · {techniqueDescription(activeTechniqueKey)}
           </div>
 
+          <div className="chart-pro-toolbar">
+            <div className="chart-pro-chip"><b>지지선</b><br />{srInfo?.support?.price ? `${fmtPrice(srInfo.support.price)} · 접점 ${srInfo.support.count || 1}` : "-"}</div>
+            <div className="chart-pro-chip"><b>저항선</b><br />{srInfo?.resistance?.price ? `${fmtPrice(srInfo.resistance.price)} · 접점 ${srInfo.resistance.count || 1}` : "-"}</div>
+            <div className="chart-pro-chip"><b>목표/손절</b><br />목표 {fmtPrice(suggestedTarget)} · 손절 {fmtPrice(suggestedStop)}</div>
+            <div className="chart-pro-chip"><b>박스권</b><br />{boxInfo?.upper ? `${fmtPrice(boxInfo.lower)} ~ ${fmtPrice(boxInfo.upper)} · 폭 ${boxInfo.widthRate}%` : "-"}</div>
+            <div className="chart-pro-chip"><b>심리</b><br /><span style={{ color: psych.phaseColor }}>{psych.phase}</span> · {psych.fearGreedScore}점</div>
+          </div>
+
           <div className="technique-grid">
             {techniqueAI.ranked.map((t) => (
               <button key={t.key} className={`technique-btn ${activeTechniqueKey === t.key ? "active" : ""}`} onClick={() => setTechniqueMode(t.key)}>
@@ -2986,6 +4448,9 @@ const loadExtendedGogo = async () => {
             <span className="legend-pill"><span className="legend-dot" style={{ background: "#ff4466" }} />고고저</span>
             <span className="legend-pill"><span className="legend-dot" style={{ background: "#9b5cff" }} />볼린저</span>
             <span className="legend-pill"><span className="legend-dot" style={{ background: "#00ff88" }} />돌파/매수 신호</span>
+            <span className="legend-pill"><span className="legend-dot" style={{ background: "#ffd447" }} />지지선/손절</span>
+            <span className="legend-pill"><span className="legend-dot" style={{ background: "#9b5cff" }} />저항/목표</span>
+            <span className="legend-pill"><span className="legend-dot" style={{ background: psych.phaseColor }} />심리 {psych.fearGreedScore}</span>
           </div>
 
           <div className="chart-range-toolbar">
@@ -3010,7 +4475,27 @@ const loadExtendedGogo = async () => {
 
           <div className={`chart-box ${chartFullscreen ? "chart-box-fullscreen" : ""}`}>
             {chartFullscreen && <button className="chart-back-btn" onClick={() => setChartFullscreen(false)}>돌아가기</button>}
-            <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+            {hoverCandle && (
+              <div className="chart-tooltip" style={{ left: "74px", top: "18px" }}>
+                <b>{hoverCandle.date}</b><br />
+                시가: {fmtPrice(hoverCandle.open)} / 고가: {fmtPrice(hoverCandle.high)}<br />
+                저가: {fmtPrice(hoverCandle.low)} / 종가: {fmtPrice(hoverCandle.close)}<br />
+                거래량: {fmtPrice(hoverCandle.volume)}
+              </div>
+            )}
+            <div className="chart-svg-wrap">
+            <svg
+              className="chart-svg"
+              viewBox={`0 0 ${width} ${height}`}
+              preserveAspectRatio="none"
+              onMouseMove={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const relX = ((e.clientX - rect.left) / rect.width) * width;
+                const idx = Math.round((relX - pad.l) / Math.max(1, step));
+                setHoverIndex(Math.max(0, Math.min(chartData.length - 1, idx)));
+              }}
+              onMouseLeave={() => setHoverIndex(null)}
+            >
               <defs>
                 <marker id="arrowHead" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
                   <path d="M0,0 L0,6 L7,3 z" fill="#00ff88" />
@@ -3027,6 +4512,42 @@ const loadExtendedGogo = async () => {
                   </g>
                 );
               })}
+
+              {srInfo?.supportZone && (
+                <>
+                  <rect x={pad.l} y={yFor(srInfo.supportZone[1])} width={plotW} height={Math.max(3, yFor(srInfo.supportZone[0]) - yFor(srInfo.supportZone[1]))} className="sr-zone-support" />
+                  <line x1={pad.l} y1={yFor(srInfo.support.price)} x2={width - pad.r} y2={yFor(srInfo.support.price)} className="support-line" />
+                  <text x={width - 128} y={yFor(srInfo.support.price) - 6} className="axis-label">지지 {fmtPrice(srInfo.support.price)}</text>
+                </>
+              )}
+              {srInfo?.resistanceZone && (
+                <>
+                  <rect x={pad.l} y={yFor(srInfo.resistanceZone[1])} width={plotW} height={Math.max(3, yFor(srInfo.resistanceZone[0]) - yFor(srInfo.resistanceZone[1]))} className="sr-zone-resistance" />
+                  <line x1={pad.l} y1={yFor(srInfo.resistance.price)} x2={width - pad.r} y2={yFor(srInfo.resistance.price)} className="resistance-line" />
+                  <text x={width - 132} y={yFor(srInfo.resistance.price) - 6} className="axis-label">저항 {fmtPrice(srInfo.resistance.price)}</text>
+                </>
+              )}
+              {boxInfo?.upper && (
+                <rect x={pad.l} y={yFor(boxInfo.upper)} width={plotW} height={Math.max(4, yFor(boxInfo.lower) - yFor(boxInfo.upper))} className="box-zone" />
+              )}
+              {fiboLevels.map((f) => (
+                <g key={f.label}>
+                  <line x1={pad.l} y1={yFor(f.price)} x2={width - pad.r} y2={yFor(f.price)} className="fibo-line" />
+                  <text x={pad.l + 6} y={yFor(f.price) - 4} className="axis-label">{f.label}</text>
+                </g>
+              ))}
+              {suggestedTarget && (
+                <>
+                  <line x1={pad.l} y1={yFor(suggestedTarget)} x2={width - pad.r} y2={yFor(suggestedTarget)} className="target-line" />
+                  <text x={width - 118} y={yFor(suggestedTarget) + 16} className="axis-label">목표 {fmtPrice(suggestedTarget)}</text>
+                </>
+              )}
+              {suggestedStop && (
+                <>
+                  <line x1={pad.l} y1={yFor(suggestedStop)} x2={width - pad.r} y2={yFor(suggestedStop)} className="stop-line" />
+                  <text x={width - 118} y={yFor(suggestedStop) + 16} className="axis-label">손절 {fmtPrice(suggestedStop)}</text>
+                </>
+              )}
 
               {chartData.map((d, i) => {
                 const x = xFor(i);
@@ -3113,6 +4634,13 @@ const loadExtendedGogo = async () => {
                 );
               })}
 
+              {hoverIndex != null && chartData[hoverIndex] && (
+                <>
+                  <line x1={xFor(hoverIndex)} y1={pad.t} x2={xFor(hoverIndex)} y2={height - pad.b} className="chart-cross-line" />
+                  <line x1={pad.l} y1={yFor(chartData[hoverIndex].close)} x2={width - pad.r} y2={yFor(chartData[hoverIndex].close)} className="chart-cross-line" />
+                </>
+              )}
+
               {axisLabels.map(({ d, i }, idx) => {
                 const x = xFor(i);
                 const year = formatAxisYear(d.date);
@@ -3129,6 +4657,7 @@ const loadExtendedGogo = async () => {
                 );
               })}
             </svg>
+            </div>
           </div>
           <div className="chart-caption">
             <span>노란선: 20선</span>
@@ -3141,6 +4670,25 @@ const loadExtendedGogo = async () => {
             차트 하단 기간 표시는 <b>년.월</b> 기준입니다. 왼쪽은 과거, 오른쪽은 최신 시세입니다. 확대/축소 및 이전/최근 이동 시 표시 구간의 기간도 함께 변경됩니다.
           </div>
 
+          <PsychologyPanel
+            selected={selected}
+            name={name}
+            last={last}
+            psych={psych}
+            patterns={psychPatterns}
+            log={lastPsychLog}
+            pending={psychPending}
+            done={psychDone}
+            signalStats={psychSignalStats}
+            autoPrediction={autoPrediction}
+            addEntry={addPsychEntry}
+            updateResult={updatePsychResult}
+            accuracy={psychAccuracy}
+            autoEnabled={autoEnabled}
+            setAutoEnabled={setAutoEnabled}
+            clearLearning={clearLearning}
+          />
+
           <div className="kpi-grid" style={{ marginTop: 12 }}>
             <div className="kpi"><div className="card-title">선택 기법</div><strong>{activeTechnique?.name}</strong></div>
             <div className="kpi"><div className="card-title">AI 점수</div><strong>{activeTechnique?.score}</strong></div>
@@ -3149,16 +4697,166 @@ const loadExtendedGogo = async () => {
             <div className="kpi"><div className="card-title">고고저 점수</div><strong>{isGogoOk ? gogoSignal.score : "-"}</strong></div>
             <div className="kpi"><div className="card-title">추세선 가격</div><strong>{isGogoOk ? fmtPrice(gogoSignal.trendLinePrice) : "-"}</strong></div>
             <div className="kpi"><div className="card-title">돌파율</div><strong className={isGogoOk && gogoSignal.breakoutRate >= 0 ? "up" : "down"}>{isGogoOk ? `${gogoSignal.breakoutRate}%` : "-"}</strong></div>
+            <div className="kpi"><div className="card-title">자동 목표가</div><strong className="up">{fmtPrice(suggestedTarget)}</strong></div>
+            <div className="kpi"><div className="card-title">자동 손절가</div><strong className="down">{fmtPrice(suggestedStop)}</strong></div>
+            <div className="kpi"><div className="card-title">심리 단계</div><strong style={{ color: psych.phaseColor }}>{psych.phase}</strong></div>
+            <div className="kpi"><div className="card-title">공포·탐욕</div><strong>{psych.fearGreedScore}</strong></div>
             <div className="kpi"><div className="card-title">검증</div><strong>{activeTechnique?.status}</strong></div>
           </div>
 
           <div className="footer-note">
-            AI 자동 추천은 고고저, 이동평균 눌림, 볼린저 수축, 거래량 돌파, RSI 반등을 동시에 점수화한 뒤 현재 차트에 가장 적합한 기법을 선택합니다. 고고저 하락추세선을 만들 수 없으면 일봉 5년/10년 또는 월봉 10년까지 확장 조회해 다시 판정합니다.
+            AI 자동 추천은 고고저, 이동평균 눌림, 지지·저항, 박스권 돌파, 볼린저 수축, 거래량 돌파, RSI 반등, 갭/과열과 함께 심리분석까지 확인하도록 확장했습니다. 고고저 하락추세선을 만들 수 없으면 일봉 5년/10년 또는 월봉 10년까지 확장 조회해 다시 판정합니다.
             수동 선택 시 선택한 기법 기준으로 보조선과 KPI가 바뀝니다.
           </div>
 
           <IndicatorReadMe />
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+function GlobalMarket({ globalQuotes, setGlobalQuotes, selectedGlobal, setSelectedGlobal }) {
+  const [custom, setCustom] = useState(() => loadLS("alpha_global_custom", []));
+  const [form, setForm] = useState({ symbol: "", type: "us" });
+  const [loading, setLoading] = useState(false);
+  const assets = useMemo(() => {
+    const map = new Map();
+    [...GLOBAL_TICKERS, ...custom].forEach((x) => {
+      const symbol = normalizeGlobalInput(x.symbol);
+      if (symbol) map.set(symbol, { ...x, symbol, type: x.type || (isCryptoSymbol(symbol) ? "crypto" : "us"), assetClass: "global", code: symbol });
+    });
+    return Array.from(map.values());
+  }, [custom]);
+
+  useEffect(() => saveLS("alpha_global_custom", custom), [custom]);
+
+  const quoteMap = useMemo(() => {
+    const m = new Map();
+    globalQuotes.forEach((q) => m.set(q.symbol, q));
+    return m;
+  }, [globalQuotes]);
+
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const pairs = await Promise.all(
+        assets.map(async (a) => {
+          try {
+            const endpoint = globalEndpointFor(a.symbol, a.type);
+            const q = await fetchJson(endpoint);
+            return {
+              ...a,
+              ...q,
+              symbol: a.symbol,
+              code: a.symbol,
+              name: a.name,
+              type: a.type,
+              assetClass: "global",
+              price: q.price,
+              changeRate: q.changeRate ?? 0,
+              changeStr: q.changeStr || fmtRate(q.changeRate),
+              realtime: true,
+            };
+          } catch {
+            return { ...a, price: null, changeRate: 0, changeStr: "-", realtime: false };
+          }
+        })
+      );
+      setGlobalQuotes(pairs);
+      if (!selectedGlobal && pairs[0]) setSelectedGlobal(pairs[0]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!globalQuotes.length) refresh();
+  }, []);
+
+  const add = () => {
+    const symbol = normalizeGlobalInput(form.symbol);
+    if (!symbol) return alert("미국 종목 티커 또는 코인 심볼을 입력하세요. 예: NVDA, AAPL, BTC");
+    const type = form.type || (isCryptoSymbol(symbol) ? "crypto" : "us");
+    const exists = assets.some((a) => a.symbol === symbol);
+    if (!exists) setCustom((p) => [...p, { symbol, name: symbol, type, sector: type === "crypto" ? "Crypto" : "US" }]);
+    setSelectedGlobal({ symbol, code: symbol, name: symbol, type, assetClass: "global" });
+    setForm({ symbol: "", type: "us" });
+  };
+
+  const selected = selectedGlobal || globalQuotes[0] || assets[0];
+  const selectedQuote = selected ? { ...selected, ...(quoteMap.get(selected.symbol) || {}) } : null;
+
+  return (
+    <div className="global-grid">
+      <div className="panel">
+        <div className="panel-title">
+          <span>미국주식 · 가상자산 실시간</span>
+          <span className="tag green">{assets.length}개</span>
+        </div>
+        <div className="panel-body">
+          <div className="global-form">
+            <input className="input" placeholder="티커/코인 예: NVDA, AAPL, BTC" value={form.symbol} onChange={(e) => setForm({ ...form, symbol: e.target.value })} />
+            <select className="select" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+              <option value="us">미국주식</option>
+              <option value="crypto">가상자산</option>
+            </select>
+            <button className="btn" onClick={add}>추가</button>
+          </div>
+          <button className="btn full" onClick={refresh}>{loading ? "조회 중..." : "미국/코인 시세 새로고침"}</button>
+          <div style={{ height: 10 }} />
+          <div className="global-list">
+            {assets.map((a) => {
+              const q = quoteMap.get(a.symbol) || a;
+              const active = selected?.symbol === a.symbol;
+              return (
+                <button key={a.symbol} className={`global-card ${active ? "active" : ""}`} onClick={() => setSelectedGlobal({ ...a, ...(q || {}) })}>
+                  <div className="global-card-top">
+                    <span className="global-symbol">{a.symbol}</span>
+                    <span className="global-badge">{a.type === "crypto" ? "CRYPTO" : "US"}</span>
+                  </div>
+                  <div className="global-name">{a.name || a.symbol} · {a.sector || "-"}</div>
+                  <div className="global-price">{q.price ? fmtGlobalPrice(q) : "-"}</div>
+                  <div className={Number(q.changeRate || 0) >= 0 ? "up" : "down"}>{q.changeStr || fmtRate(q.changeRate)}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+      <div className="grid">
+        <div className="panel">
+          <div className="panel-title">
+            <span>{selectedQuote?.symbol || "-"} 글로벌 분석</span>
+            <span className={selectedQuote?.realtime ? "tag green" : "tag demo"}>{selectedQuote?.realtime ? "REALTIME" : "YAHOO/대기"}</span>
+          </div>
+          <div className="panel-body">
+            <div className="kpi-grid">
+              <div className="kpi"><div className="card-title">자산</div><strong>{selectedQuote?.name || selectedQuote?.symbol || "-"}</strong></div>
+              <div className="kpi"><div className="card-title">현재가</div><strong>{selectedQuote ? fmtGlobalPrice(selectedQuote) : "-"}</strong></div>
+              <div className="kpi"><div className="card-title">등락률</div><strong className={Number(selectedQuote?.changeRate || 0) >= 0 ? "up" : "down"}>{selectedQuote?.changeStr || fmtRate(selectedQuote?.changeRate)}</strong></div>
+              <div className="kpi"><div className="card-title">구분</div><strong>{selectedQuote?.type === "crypto" ? "가상자산" : "미국주식"}</strong></div>
+            </div>
+          </div>
+        </div>
+        {selectedQuote && (
+          <ChartView
+            selected={{
+              ...selectedQuote,
+              code: selectedQuote.symbol,
+              symbol: selectedQuote.symbol,
+              name: selectedQuote.name || selectedQuote.symbol,
+              assetClass: "global",
+              type: selectedQuote.type || (isCryptoSymbol(selectedQuote.symbol) ? "crypto" : "us"),
+              price: selectedQuote.price,
+              changeRate: selectedQuote.changeRate,
+              changeStr: selectedQuote.changeStr,
+            }}
+            stocks={[]}
+          />
+        )}
       </div>
     </div>
   );
@@ -3421,6 +5119,7 @@ export default function TradingPlatform() {
   const [quotes, setQuotes] = useState({});
   const [market, setMarket] = useState([]);
   const [globalQuotes, setGlobalQuotes] = useState([]);
+  const [selectedGlobal, setSelectedGlobal] = useState(null);
   const [selectedCode, setSelectedCode] = useState("005930");
   const [loading, setLoading] = useState(false);
   const [globalErr, setGlobalErr] = useState("");
@@ -3461,7 +5160,9 @@ export default function TradingPlatform() {
       });
       const [m, g, quotePairs] = await Promise.all([marketPromise, globalPromise, Promise.all(quotePromises)]);
       setMarket(Array.isArray(m) ? m : []);
-      setGlobalQuotes(Array.isArray(g) ? g : []);
+      const normalizedGlobal = Array.isArray(g) ? g.map((x) => ({ ...x, code: x.symbol, assetClass: "global" })) : [];
+      setGlobalQuotes(normalizedGlobal);
+      setSelectedGlobal((prev) => prev || normalizedGlobal[0] || null);
       setQuotes(Object.fromEntries(quotePairs));
     } catch (e) {
       setGlobalErr(e.message || String(e));
@@ -3478,11 +5179,14 @@ export default function TradingPlatform() {
     <div className="app">
       <style>{styles}</style>
       <Header now={now} tab={tab} />
+      <div className="mobile-nav-label">메뉴 선택 · 선택한 메뉴만 아래에 표시됩니다</div>
       <Nav tab={tab} setTab={setTab} />
       <TickerBar quotes={quotes} stocks={stocks} globalQuotes={globalQuotes} />
 
       <div className="main">
-        <LeftPanel stocks={stocks} quotes={quotes} selectedCode={selectedCode} setSelectedCode={setSelectedCode} reload={loadAll} loading={loading} addStock={addStock} removeStock={removeStock} />
+        <div className={`left-panel-shell ${tab === "대시보드" ? "" : "mobile-hide-left"}`}>
+          <LeftPanel stocks={stocks} quotes={quotes} selectedCode={selectedCode} setSelectedCode={setSelectedCode} reload={loadAll} loading={loading} addStock={addStock} removeStock={removeStock} />
+        </div>
 
         <div className="grid">
           {globalErr && <div className="error">전역 API 오류: {globalErr}</div>}
@@ -3491,6 +5195,7 @@ export default function TradingPlatform() {
             {tab === "차트 분석" && <ChartView selected={selected} stocks={stocks} />}
             {tab === "스크리너" && <Screener quotes={quotes} stocks={stocks} />}
             {tab === "저평가 스크리너" && <ValueScreener quotes={quotes} stocks={stocks} />}
+            {tab === "US/CRYPTO" && <GlobalMarket globalQuotes={globalQuotes} setGlobalQuotes={setGlobalQuotes} selectedGlobal={selectedGlobal} setSelectedGlobal={setSelectedGlobal} />}
             {tab === "포트폴리오" && <Portfolio quotes={quotes} stocks={stocks} />}
             {tab === "알림 센터" && <AlertCenter quotes={quotes} stocks={stocks} />}
             {tab === "AI 리포트" && <AiReport selected={selected} stocks={stocks} />}

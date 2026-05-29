@@ -898,6 +898,139 @@ async function fetchYahooQuote(symbol) {
   };
 }
 
+
+function yahooSymbol(symbol, type = "us") {
+  const raw = String(symbol || "").trim().toUpperCase();
+  if (!raw) return raw;
+  if (type === "crypto" && !raw.includes("-")) return `${raw}-USD`;
+  return raw;
+}
+
+function yahooRangeInterval(period = "D", range = "1Y", count = 260) {
+  const p = String(period || "D").toUpperCase();
+  const r = String(range || "1Y").toUpperCase();
+
+  if (p === "M") {
+    if (r === "1Y") return { range: "1y", interval: "1mo" };
+    if (r === "3Y") return { range: "3y", interval: "1mo" };
+    if (r === "5Y") return { range: "5y", interval: "1mo" };
+    return { range: "10y", interval: "1mo" };
+  }
+
+  if (p === "Y") {
+    return { range: r === "3Y" ? "5y" : r === "5Y" ? "5y" : "10y", interval: "3mo" };
+  }
+
+  if (r === "6M") return { range: "6mo", interval: "1d" };
+  if (r === "1Y") return { range: "1y", interval: "1d" };
+  if (r === "3Y") return { range: "3y", interval: "1d" };
+  if (r === "5Y") return { range: "5y", interval: "1d" };
+  return { range: "10y", interval: "1d" };
+}
+
+async function fetchYahooChart(symbol, type = "us", period = "D", range = "1Y", count = 260) {
+  const ys = yahooSymbol(symbol, type);
+  const ri = yahooRangeInterval(period, range, count);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ys)}?range=${ri.range}&interval=${ri.interval}`;
+  const { data } = await axios.get(url, {
+    timeout: 12000,
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+      "Accept": "application/json",
+    },
+  });
+
+  const result = data?.chart?.result?.[0];
+  const quote = result?.indicators?.quote?.[0] || {};
+  const timestamps = result?.timestamp || [];
+  const candles = timestamps.map((ts, i) => {
+    const open = Number(quote.open?.[i]);
+    const high = Number(quote.high?.[i]);
+    const low = Number(quote.low?.[i]);
+    const close = Number(quote.close?.[i]);
+    const volume = Number(quote.volume?.[i] || 0);
+    if (![open, high, low, close].every(Number.isFinite)) return null;
+    const d = new Date(ts * 1000);
+    return {
+      date: d.toISOString().slice(0, 10),
+      open,
+      high,
+      low,
+      close,
+      volume,
+    };
+  }).filter(Boolean);
+
+  return candles.slice(-Number(count || candles.length));
+}
+
+app.get("/api/global/chart/:symbol", async (req, res) => {
+  try {
+    const symbol = String(req.params.symbol || "").toUpperCase();
+    const type = req.query.type || (["BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "BNB"].includes(symbol) ? "crypto" : "us");
+    const period = req.query.period || "D";
+    const range = req.query.range || "1Y";
+    const count = Number(req.query.count || 260);
+    const candles = await fetchYahooChart(symbol, type, period, range, count);
+    res.json({
+      ok: true,
+      symbol,
+      type,
+      period,
+      range,
+      count: candles.length,
+      source: "Yahoo Finance",
+      candles,
+    });
+  } catch (err) {
+    res.status(err.response?.status || 500).json({
+      ok: false,
+      error: err.message,
+      detail: err.response?.data || null,
+    });
+  }
+});
+
+app.get("/api/global/quote/:symbol", async (req, res) => {
+  try {
+    const symbol = String(req.params.symbol || "").toUpperCase();
+    const type = req.query.type || (["BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "BNB"].includes(symbol) ? "crypto" : "us");
+    const q = await fetchYahooQuote(yahooSymbol(symbol, type));
+    res.json({ ...q, symbol, type, realtime: true, source: "Yahoo Finance" });
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ ok: false, error: err.message, detail: err.response?.data || null });
+  }
+});
+
+app.get("/api/global/search", (req, res) => {
+  const q = String(req.query.q || "").trim().toLowerCase();
+  const catalog = [
+    { symbol: "NVDA", name: "NVIDIA", type: "us", sector: "AI 반도체" },
+    { symbol: "TSLA", name: "Tesla", type: "us", sector: "전기차" },
+    { symbol: "AAPL", name: "Apple", type: "us", sector: "빅테크" },
+    { symbol: "MSFT", name: "Microsoft", type: "us", sector: "빅테크" },
+    { symbol: "GOOGL", name: "Alphabet", type: "us", sector: "빅테크" },
+    { symbol: "META", name: "Meta Platforms", type: "us", sector: "빅테크" },
+    { symbol: "AMZN", name: "Amazon", type: "us", sector: "이커머스/클라우드" },
+    { symbol: "AMD", name: "AMD", type: "us", sector: "반도체" },
+    { symbol: "AVGO", name: "Broadcom", type: "us", sector: "반도체" },
+    { symbol: "SMCI", name: "Super Micro Computer", type: "us", sector: "AI 서버" },
+    { symbol: "BTC", name: "Bitcoin", type: "crypto", sector: "Crypto" },
+    { symbol: "ETH", name: "Ethereum", type: "crypto", sector: "Crypto" },
+    { symbol: "SOL", name: "Solana", type: "crypto", sector: "Crypto" },
+    { symbol: "XRP", name: "XRP", type: "crypto", sector: "Crypto" },
+  ];
+  const rows = q
+    ? catalog.filter((x) =>
+        x.symbol.toLowerCase().includes(q) ||
+        x.name.toLowerCase().includes(q) ||
+        String(x.sector || "").toLowerCase().includes(q)
+      )
+    : catalog;
+  res.json(rows.slice(0, 20));
+});
+
+
 app.get("/api/us/quote/:symbol", async (req, res) => {
   try {
     const raw = String(req.params.symbol || "").trim().toUpperCase();
@@ -956,7 +1089,7 @@ app.get("/api/global/health", async (req, res) => {
   }
   res.json({
     ok: true,
-    routes: ["/api/us/quote/:symbol", "/api/crypto/quote/:symbol"],
+    routes: ["/api/us/quote/:symbol", "/api/crypto/quote/:symbol", "/api/global/quote/:symbol", "/api/global/chart/:symbol", "/api/global/search"],
     checks,
     time: new Date().toISOString(),
   });
