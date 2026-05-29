@@ -69,6 +69,39 @@ function buildKisErrorPayload(err, label = "KIS") {
   };
 }
 
+function buildSafeQuoteFallback(code, err) {
+  const payload = buildKisErrorPayload(err, "KIS_QUOTE");
+  return {
+    ok: false,
+    fallback: true,
+    code,
+    name: code,
+    price: null,
+    change: 0,
+    changeRate: 0,
+    changeStr: "-",
+    open: null,
+    high: null,
+    low: null,
+    volume: null,
+    per: null,
+    pbr: null,
+    eps: null,
+    w52High: null,
+    w52Low: null,
+    ma5: null,
+    ma20: null,
+    ma60: null,
+    ma120: null,
+    up: true,
+    analysis: null,
+    error: payload.error,
+    kisStatus: payload.status,
+    kisError: payload.kisError,
+    hint: "KIS 개별 종목 조회 실패로 화면 보호용 빈 시세를 반환했습니다. 종목코드, 거래소 구분, API 권한을 확인하세요.",
+  };
+}
+
 
 // ── 토큰 자동 발급/갱신 ──────────────────────────────────────────
 async function getAccessToken() {
@@ -235,7 +268,12 @@ app.get("/api/quote/:code", async (req, res) => {
   } catch (err) {
     const payload = buildKisErrorPayload(err, "KIS_QUOTE");
     console.error("[quote]", payload);
-    res.status(payload.status || 500).json(payload);
+
+    // 화면 보호:
+    // 특정 국내 종목에서 KIS가 500/403을 반환해도 프론트 전체가 오류처럼 보이지 않도록
+    // HTTP 200 + fallback:true 형태로 반환합니다.
+    // 이렇게 하면 콘솔의 빨간 500 메시지도 줄고, 해당 종목만 "조회 실패" 상태로 표시됩니다.
+    res.status(200).json(buildSafeQuoteFallback(req.params.code, err));
   }
 });
 
