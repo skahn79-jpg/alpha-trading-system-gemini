@@ -2,6 +2,7 @@
 
 /**
  * ALPHA TRADING SYSTEM — 통합 확장 버전
+ * Creator: ASK
  * 교체 대상: src/trading-platform.jsx
  *
  * 포함 기능:
@@ -41,6 +42,9 @@ const KOREAN_STOCK_CATALOG = [
   { code: "051910", name: "LG화학", tag: "화학/2차전지", sector: "2차전지" },
   { code: "011170", name: "롯데케미칼", tag: "화학", sector: "화학" },
   { code: "004000", name: "롯데정밀화학", tag: "화학/소재", sector: "화학" },
+  { code: "170900", name: "동아에스티", tag: "제약/바이오", sector: "바이오" },
+  { code: "045660", name: "에이텍", tag: "IT/금융단말", sector: "IT" },
+  { code: "224110", name: "에이텍모빌리티", tag: "교통카드/모빌리티", sector: "IT" },
   { code: "066570", name: "LG전자", tag: "전기전자", sector: "전기전자" },
   { code: "105560", name: "KB금융", tag: "금융", sector: "금융" },
   { code: "055550", name: "신한지주", tag: "금융", sector: "금융" },
@@ -1121,6 +1125,122 @@ const styles = `
   .value-top20-scroll{max-height:none}
 }
 
+
+/* === Sector/Theme KOSPI200 KOSDAQ200 Scan === */
+.theme-toolbar{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  align-items:center;
+  margin-bottom:12px;
+}
+.theme-summary-grid{
+  display:grid;
+  grid-template-columns:repeat(5,minmax(0,1fr));
+  gap:8px;
+  margin:12px 0;
+}
+.theme-mini-card{
+  border:1px solid #1e3445;
+  background:#0b1520;
+  padding:11px;
+}
+.theme-mini-card span{
+  display:block;
+  color:#6f899a;
+  font-size:11px;
+}
+.theme-mini-card b{
+  display:block;
+  margin-top:5px;
+  font-size:16px;
+  color:#d9ecf5;
+}
+.theme-section-grid{
+  display:grid;
+  grid-template-columns:1.1fr .9fr;
+  gap:12px;
+}
+.theme-stock-list{
+  display:grid;
+  gap:7px;
+  max-height:360px;
+  overflow:auto;
+  padding-right:4px;
+}
+.theme-stock-item{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  border:1px solid #1e3445;
+  background:#0b1520;
+  padding:9px 10px;
+  font-size:12px;
+}
+.theme-progress{
+  height:7px;
+  background:#0b1520;
+  border:1px solid #1e3445;
+  overflow:hidden;
+  margin-top:8px;
+}
+.theme-progress-inner{
+  height:100%;
+  background:#00d9ff;
+  transition:width .25s ease;
+}
+@media(max-width:1100px){
+  .theme-section-grid{grid-template-columns:1fr}
+  .theme-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+
+
+/* === Creator Signature: ASK === */
+.creator-badge{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  padding:6px 10px;
+  border:1px solid #00d9ff66;
+  background:#00d9ff12;
+  color:#d9ecf5;
+  font-size:12px;
+  font-weight:900;
+  letter-spacing:.8px;
+}
+.creator-badge b{
+  color:#00d9ff;
+  font-size:13px;
+}
+.creator-mark{
+  position:fixed;
+  right:12px;
+  bottom:10px;
+  z-index:40;
+  padding:6px 10px;
+  border:1px solid #1e3445;
+  background:rgba(7,16,24,.78);
+  color:#6f899a;
+  font-size:11px;
+  backdrop-filter:blur(8px);
+  pointer-events:none;
+}
+.creator-mark b{
+  color:#00d9ff;
+}
+@media(max-width:900px){
+  .creator-badge{
+    padding:5px 8px;
+    font-size:11px;
+  }
+  .creator-mark{
+    right:8px;
+    bottom:7px;
+    font-size:10px;
+    opacity:.72;
+  }
+}
+
 `;
 
 function normalizeCode(code) {
@@ -1412,11 +1532,14 @@ function buildScreener(quotes, stocks) {
 function searchStockCatalog(keyword, currentStocks = []) {
   const raw = String(keyword || "").trim();
   const q = raw.toLowerCase();
-  const compactQ = q.replace(/\s+/g, "");
+  const compactQ = q.replace(/\s+/g, "").replace(/[㈜주식회사()\[\]\-_.]/g, "");
   if (!q) return [];
 
   const aliases = {
     "롯데케미칼": ["롯데케미칼", "롯데 케미칼", "lottechemical", "lotte chem", "lotte chemical", "롯케"],
+    "롯데정밀화학": ["롯데정밀화학", "롯데 정밀화학", "lottefinechemical", "lotte fine chemical", "롯정"],
+    "동아에스티": ["동아에스티", "동아 에스티", "동아ST", "동아 st", "donga st", "dong-a st", "dongaest"],
+    "에이텍": ["에이텍", "atec", "a-tech", "에이텍컴퓨터", "에이텍모빌리티"],
     "LG에너지솔루션": ["lg에너지솔루션", "엘지에너지솔루션", "lg엔솔", "엘지엔솔"],
     "SK하이닉스": ["sk하이닉스", "에스케이하이닉스", "하이닉스"],
     "삼성전자": ["삼성전자", "삼전"],
@@ -3341,6 +3464,7 @@ function Header({ now, tab }) {
           <div className="live">● LIVE {now}</div>
         </div>
         <div className="top-right">
+          <span className="creator-badge">Created by <b>ASK</b></span>
           <span className="tag green">US/CRYPTO API</span>
           <span className="tag green">KRX API</span>
           <span>2026.05.26</span>
@@ -5422,29 +5546,237 @@ function DailyBriefing({ stocks, quotes, reload, loading }) {
   );
 }
 
-function ThemeAnalysis({ stocks, quotes }) {
-  const groups = stocks.reduce((acc, s) => {
+
+function buildThemeRowsFromUniverse(universe, quoteMap = {}) {
+  const groups = universe.reduce((acc, s) => {
     const sector = s.sector || s.tag || "기타";
     acc[sector] = acc[sector] || [];
-    acc[sector].push(s);
+    acc[sector].push({ ...s, q: quoteMap[s.code] || {} });
     return acc;
   }, {});
-  const rows = Object.entries(groups).map(([sector, list]) => {
-    const rates = list.map((s) => Number(quotes[s.code]?.changeRate || 0));
+
+  return Object.entries(groups).map(([sector, list]) => {
+    const withRate = list.map((s) => ({
+      ...s,
+      rate: Number(s.q?.changeRate || 0),
+      price: s.q?.price,
+      volume: Number(s.q?.volume || 0),
+    }));
+    const valid = withRate.filter((x) => x.q && (x.q.price || x.q.changeRate !== undefined));
+    const rates = withRate.map((s) => s.rate);
     const avg = rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : 0;
-    const leader = [...list].sort((a, b) => Number(quotes[b.code]?.changeRate || 0) - Number(quotes[a.code]?.changeRate || 0))[0];
-    return { sector, count: list.length, avg, leader };
-  }).sort((a, b) => b.avg - a.avg);
+    const positive = withRate.filter((s) => s.rate > 0).length;
+    const leader = [...withRate].sort((a, b) => b.rate - a.rate)[0];
+    const laggard = [...withRate].sort((a, b) => a.rate - b.rate)[0];
+    const strength = Math.round(Math.max(0, Math.min(100, 50 + avg * 10 + (positive / Math.max(1, list.length) - 0.5) * 30)));
+    return {
+      sector,
+      count: list.length,
+      loaded: valid.length,
+      avg,
+      positive,
+      positiveRate: Math.round((positive / Math.max(1, list.length)) * 100),
+      leader,
+      laggard,
+      strength,
+      list: withRate.sort((a, b) => b.rate - a.rate),
+    };
+  }).sort((a, b) => b.strength - a.strength || b.avg - a.avg);
+}
+
+async function scanThemeUniverse({ universe, baseQuotes = {}, onProgress }) {
+  const quoteMap = { ...baseQuotes };
+  const concurrency = 8;
+  let done = 0;
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < universe.length) {
+      const s = universe[cursor++];
+      try {
+        if (!quoteMap[s.code] || quoteMap[s.code].fallback || !quoteMap[s.code].price) {
+          quoteMap[s.code] = await fetchJson(`/api/quote/${s.code}?lite=1`);
+        }
+      } catch (err) {
+        quoteMap[s.code] = {
+          code: s.code,
+          name: s.name,
+          price: null,
+          changeRate: 0,
+          changeStr: "-",
+          error: true,
+          errorMessage: err.message || String(err),
+        };
+      }
+      done += 1;
+      if (onProgress) onProgress({ done, total: universe.length, current: s });
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(1, universe.length)) }, () => worker()));
+  return quoteMap;
+}
+
+
+function ThemeAnalysis({ stocks, quotes }) {
+  const [scope, setScope] = useState("both200");
+  const [themeQuotes, setThemeQuotes] = useState({});
+  const [scanState, setScanState] = useState({ loading: false, done: 0, total: 0, current: "", lastRun: "", error: "" });
+  const [selectedSector, setSelectedSector] = useState("");
+
+  const currentUniverse = useMemo(() => uniqueUniverse(stocks.map((s) => ({ ...s, market: "실시간 추가" }))), [stocks]);
+  const kospiUniverse = useMemo(() => getValueUniverse("kospi200", stocks), [stocks]);
+  const kosdaqUniverse = useMemo(() => getValueUniverse("kosdaq200", stocks), [stocks]);
+  const bothUniverse = useMemo(() => getValueUniverse("both200", stocks), [stocks]);
+
+  const universe = useMemo(() => {
+    if (scope === "current") return currentUniverse;
+    if (scope === "kospi200") return kospiUniverse;
+    if (scope === "kosdaq200") return kosdaqUniverse;
+    return bothUniverse;
+  }, [scope, currentUniverse, kospiUniverse, kosdaqUniverse, bothUniverse]);
+
+  const mergedQuotes = useMemo(() => ({ ...quotes, ...themeQuotes }), [quotes, themeQuotes]);
+  const rows = useMemo(() => buildThemeRowsFromUniverse(universe, mergedQuotes), [universe, mergedQuotes]);
+  const top = rows[0];
+  const weak = rows[rows.length - 1];
+  const selected = rows.find((r) => r.sector === selectedSector) || top;
+  const progress = scanState.total ? Math.round((scanState.done / scanState.total) * 100) : 0;
+
+  useEffect(() => {
+    if (!selectedSector && rows[0]) setSelectedSector(rows[0].sector);
+  }, [rows, selectedSector]);
+
+  const runScan = async (nextScope = scope) => {
+    const scanUniverse =
+      nextScope === "current" ? currentUniverse :
+      nextScope === "kospi200" ? kospiUniverse :
+      nextScope === "kosdaq200" ? kosdaqUniverse :
+      bothUniverse;
+
+    setScope(nextScope);
+    setScanState({ loading: true, done: 0, total: scanUniverse.length, current: "시작", lastRun: "", error: "" });
+
+    try {
+      const qmap = await scanThemeUniverse({
+        universe: scanUniverse,
+        baseQuotes: quotes,
+        onProgress: ({ done, total, current }) => {
+          setScanState((p) => ({ ...p, done, total, current: `${current.name}(${current.code})` }));
+        },
+      });
+      setThemeQuotes(qmap);
+      setScanState({
+        loading: false,
+        done: scanUniverse.length,
+        total: scanUniverse.length,
+        current: "완료",
+        lastRun: new Date().toLocaleString("ko-KR"),
+        error: "",
+      });
+    } catch (err) {
+      setScanState((p) => ({ ...p, loading: false, error: err.message || String(err) }));
+    }
+  };
+
   return (
     <div className="panel">
-      <div className="panel-title">섹터/테마 분석</div>
+      <div className="panel-title">
+        <span>섹터/테마 분석</span>
+        <span className="tag yellow">실시간 추가 + KOSPI200 + KOSDAQ200</span>
+      </div>
       <div className="panel-body">
-        <table className="data-table"><thead><tr><th>순위</th><th>섹터</th><th>종목수</th><th>평균 등락률</th><th>주도 종목</th><th>AI 해석</th></tr></thead>
-          <tbody>{rows.map((r, i) => <tr key={r.sector}><td className="rank">{i + 1}</td><td>{r.sector}</td><td>{r.count}</td><td className={r.avg >= 0 ? "up" : "down"}>{fmtRate(r.avg)}</td><td>{r.leader?.name}</td><td>{r.avg > 1 ? "섹터 내 강세 흐름. 주도주 지속성 확인." : r.avg < -1 ? "섹터 약세. 반등 확인 전 보수적 접근." : "차별화 진행 중."}</td></tr>)}</tbody></table>
+        <div className="theme-toolbar">
+          <select className="select" value={scope} onChange={(e) => setScope(e.target.value)} disabled={scanState.loading}>
+            <option value="both200">코스피200 + 코스닥200</option>
+            <option value="kospi200">코스피200</option>
+            <option value="kosdaq200">코스닥200</option>
+            <option value="current">실시간 추가 종목</option>
+          </select>
+          <button className="btn" onClick={() => runScan(scope)} disabled={scanState.loading}>{scanState.loading ? "조회 중..." : "선택 범위 조회"}</button>
+          <button className="btn" onClick={() => runScan("kospi200")} disabled={scanState.loading}>코스피200 반영</button>
+          <button className="btn" onClick={() => runScan("kosdaq200")} disabled={scanState.loading}>코스닥200 반영</button>
+          <button className="btn" onClick={() => runScan("both200")} disabled={scanState.loading}>전체 반영</button>
+        </div>
+
+        <div className="theme-summary-grid">
+          <div className="theme-mini-card"><span>분석 종목</span><b>{universe.length}</b></div>
+          <div className="theme-mini-card"><span>섹터 수</span><b>{rows.length}</b></div>
+          <div className="theme-mini-card"><span>강한 섹터</span><b>{top ? top.sector : "-"}</b></div>
+          <div className="theme-mini-card"><span>약한 섹터</span><b>{weak ? weak.sector : "-"}</b></div>
+          <div className="theme-mini-card"><span>마지막 조회</span><b>{scanState.lastRun || "-"}</b></div>
+        </div>
+
+        <div className="value-scan-status">
+          {scanState.loading
+            ? `섹터/테마 조회 중: ${scanState.done}/${scanState.total} · 현재 ${scanState.current}`
+            : "코스피200/코스닥200까지 반영하려면 조회 버튼을 누르세요. 조회 전에는 현재 로딩된 시세와 내장 후보군 기준으로 계산합니다."}
+          {scanState.error && <div className="error">조회 오류: {scanState.error}</div>}
+          <div className="theme-progress"><div className="theme-progress-inner" style={{ width: `${progress}%` }} /></div>
+        </div>
+
+        <div className="theme-section-grid" style={{ marginTop: 12 }}>
+          <div>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>순위</th>
+                  <th>섹터</th>
+                  <th>종목수</th>
+                  <th>상승비중</th>
+                  <th>평균 등락률</th>
+                  <th>주도 종목</th>
+                  <th>강도</th>
+                  <th>AI 해석</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={r.sector} onClick={() => setSelectedSector(r.sector)} style={{ cursor: "pointer" }}>
+                    <td className="rank">{i + 1}</td>
+                    <td>{r.sector}</td>
+                    <td>{r.count}</td>
+                    <td>{r.positiveRate}%</td>
+                    <td className={r.avg >= 0 ? "up" : "down"}>{fmtRate(r.avg)}</td>
+                    <td>{r.leader?.name} <span className={Number(r.leader?.rate || 0) >= 0 ? "up" : "down"}>{fmtRate(r.leader?.rate)}</span></td>
+                    <td>{r.strength}</td>
+                    <td>{r.avg > 1 ? "섹터 내 강세 흐름. 주도주 지속성 확인." : r.avg < -1 ? "섹터 약세. 반등 확인 전 보수적 접근." : "차별화 진행 중."}</td>
+                  </tr>
+                ))}
+                {!rows.length && <tr><td colSpan="8" className="sub">조회할 섹터/테마 데이터가 없습니다.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="panel" style={{ margin: 0 }}>
+            <div className="panel-title">
+              <span>{selected?.sector || "섹터"} 구성 종목</span>
+              <span className="tag green">{selected?.count || 0}개</span>
+            </div>
+            <div className="panel-body">
+              <div className="theme-stock-list">
+                {(selected?.list || []).slice(0, 40).map((s) => (
+                  <div className="theme-stock-item" key={`${s.code}-${s.name}`}>
+                    <span><b>{s.name}</b><br /><span className="sub">{s.code} · {s.market || s.tag || "-"}</span></span>
+                    <span className={Number(s.rate || 0) >= 0 ? "up" : "down"}>{fmtRate(s.rate)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="footer-note">
+                선택 섹터의 구성 종목을 등락률 순으로 표시합니다. 코스피200/코스닥200 조회 시 실시간 추가 종목 외의 후보군도 함께 반영됩니다.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="footer-note">
+          현재 KOSPI200/KOSDAQ200 후보군은 앱 내장 후보군과 서버 KRX 마스터 검색 구조를 기준으로 반영합니다. 공식 지수 구성 200개 전체 자동 업데이트는 KRX 마스터 파일 또는 별도 DB 배치 연동으로 확장 가능합니다.
+        </div>
       </div>
     </div>
   );
 }
+
 
 function FullScan({ stocks, quotes }) {
   const rows = stocks.map((s) => ({ ...s, q: quotes[s.code] || {}, value: calcValueScore(s, quotes[s.code] || {}) }));
@@ -5595,6 +5927,7 @@ export default function TradingPlatform() {
           </ScreenFrame>
         </div>
       </div>
+      <div className="creator-mark">Built by <b>ASK</b></div>
     </div>
   );
 }

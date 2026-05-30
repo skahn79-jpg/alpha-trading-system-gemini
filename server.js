@@ -1557,6 +1557,30 @@ const KRX_MASTER_DB = [
     "sector": "화학",
     "market": "KOSPI",
     "indexes": []
+  },
+  {
+    "code": "170900",
+    "name": "동아에스티",
+    "tag": "제약/바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "045660",
+    "name": "에이텍",
+    "tag": "IT/금융단말",
+    "sector": "IT",
+    "market": "KOSDAQ",
+    "indexes": []
+  },
+  {
+    "code": "224110",
+    "name": "에이텍모빌리티",
+    "tag": "교통카드/모빌리티",
+    "sector": "IT",
+    "market": "KOSDAQ",
+    "indexes": []
   }
 ];
 
@@ -1572,16 +1596,25 @@ function searchKrxMaster(q = "", limit = 20) {
   const query = normalizeKrQuery(q);
   if (!query) return KRX_MASTER_DB.slice(0, limit);
 
+  const aliasMap = {
+    "동아에스티": ["동아st", "동아에스티", "동아 에스티", "donga st", "dong-a st", "dongaest"],
+    "에이텍": ["에이텍", "atec", "a-tech", "에이텍컴퓨터"],
+    "에이텍모빌리티": ["에이텍모빌리티", "atec mobility", "에이텍 모빌리티"],
+    "롯데정밀화학": ["롯데정밀화학", "롯데 정밀화학", "lotte fine chemical", "lottefinechemical"],
+  };
+
   const scored = KRX_MASTER_DB.map((x) => {
     const name = normalizeKrQuery(x.name);
     const code = String(x.code || "");
     const tag = normalizeKrQuery(`${x.tag || ""}${x.sector || ""}${x.market || ""}${(x.indexes || []).join("")}`);
+    const aliases = (aliasMap[x.name] || []).map(normalizeKrQuery).join(" ");
     let score = 0;
     if (code === query) score += 1000;
     if (code.startsWith(query)) score += 500;
     if (name === query) score += 900;
     if (name.startsWith(query)) score += 500;
     if (name.includes(query)) score += 300;
+    if (aliases.includes(query)) score += 650;
     if (tag.includes(query)) score += 100;
     return { ...x, score };
   })
