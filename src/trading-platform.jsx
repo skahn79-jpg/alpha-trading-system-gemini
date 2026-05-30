@@ -1496,6 +1496,60 @@ async function searchStockMasterServer(keyword) {
   }
 }
 
+async function searchStockKisServer(keyword) {
+  const q = String(keyword || "").trim();
+  if (!q) return [];
+  try {
+    const data = await fetchJson(`/api/search?q=${encodeURIComponent(q)}&limit=20`);
+    const rows = Array.isArray(data?.results)
+      ? data.results
+      : Array.isArray(data?.output)
+        ? data.output
+        : Array.isArray(data)
+          ? data
+          : [];
+
+    return rows.map((s) => ({
+      code: normalizeCode(s.code || s.pdno || s.PDNO || s.mksc_shrn_iscd || s.stck_shrn_iscd),
+      name: s.name || s.prdt_name || s.hts_kor_isnm || s.kor_isnm || s.code,
+      tag: s.tag || s.sector || s.market || s.rprs_mrkt_kor_name || s.mrkt_kor_name || "KIS",
+      sector: s.sector || s.tag || s.market || "KIS",
+      market: s.market || s.rprs_mrkt_kor_name || s.mrkt_kor_name || "",
+      source: s.source || "KIS",
+      indexes: s.indexes || [],
+    })).filter((s) => s.code.length === 6);
+  } catch (e) {
+    console.warn("KIS stock search failed", e);
+    return [];
+  }
+}
+
+async function searchStockEverywhere(keyword, currentStocks = []) {
+  const q = String(keyword || "").trim();
+  if (!q) return [];
+
+  const localRows = searchStockCatalog(q, currentStocks);
+  const [masterRows, kisRows] = await Promise.all([
+    searchStockMasterServer(q),
+    searchStockKisServer(q),
+  ]);
+
+  const map = new Map();
+  [...localRows, ...masterRows, ...kisRows].forEach((s) => {
+    const code = normalizeCode(s.code);
+    if (!code) return;
+    map.set(code, {
+      ...s,
+      code,
+      name: s.name || code,
+      tag: s.tag || s.sector || s.market || "KRX",
+      sector: s.sector || s.tag || "KRX",
+    });
+  });
+
+  return Array.from(map.values()).slice(0, 15);
+}
+
 function parseChartDateValue(value, fallbackIndex = 0) {
   const s = String(value ?? "").trim();
 
@@ -3394,7 +3448,7 @@ function LeftPanel({ stocks, quotes, selectedCode, setSelectedCode, reload, load
 
     setMasterLoading(true);
     const timer = setTimeout(async () => {
-      const rows = await searchStockMasterServer(q);
+      const rows = await searchStockEverywhere(q, stocks);
       if (!ignore) {
         setServerMatches(rows.filter((s) => !stocks.some((x) => x.code === s.code)));
         setMasterLoading(false);
@@ -3430,7 +3484,7 @@ function LeftPanel({ stocks, quotes, selectedCode, setSelectedCode, reload, load
       : resolveStockInput(newStock.query || newStock.name, stocks);
 
     if (!resolved) {
-      const serverRows = await searchStockMasterServer(newStock.query || newStock.name);
+      const serverRows = await searchStockEverywhere(newStock.query || newStock.name, stocks);
       resolved = serverRows[0];
     }
 
@@ -3477,7 +3531,7 @@ function LeftPanel({ stocks, quotes, selectedCode, setSelectedCode, reload, load
           <div style={{ height: 10 }} />
           <input
             className="input"
-            placeholder="종목명 또는 코드 검색 예: 삼성전자, 한미반도체, 005930"
+            placeholder="종목명 또는 코드 검색 예: 롯데정밀화학, 삼성전자, 005930"
             value={newStock.query}
             onChange={(e) => {
               const query = e.target.value;
@@ -3496,18 +3550,18 @@ function LeftPanel({ stocks, quotes, selectedCode, setSelectedCode, reload, load
               {matches.map((s) => (
                 <button type="button" className="search-item" key={s.code} onClick={() => pickStock(s)}>
                   <span><b>{s.name}</b> · {s.code}</span>
-                  <span>{s.tag || s.sector}{s.market ? ` · ${s.market}` : ""}</span>
+                  <span>{s.tag || s.sector}{s.market ? ` · ${s.market}` : ""}{s.source ? ` · ${s.source}` : ""}</span>
                 </button>
               ))}
             </div>
           )}
 
           {newStock.query && masterLoading && (
-            <div className="search-empty">KRX 마스터에서 추가 검색 중입니다...</div>
+            <div className="search-empty">KRX 마스터 + KIS에서 추가 검색 중입니다...</div>
           )}
 
           {newStock.query && !matches.length && !newStock.code && !masterLoading && (
-            <div className="search-empty">검색 결과가 없습니다. KRX 마스터에 없는 종목은 6자리 코드로 먼저 추가할 수 있습니다.</div>
+            <div className="search-empty">검색 결과가 없습니다. KRX/KIS 검색에 없는 종목은 6자리 코드로 직접 추가할 수 있습니다.</div>
           )}
 
           <div className="add-stock-grid">

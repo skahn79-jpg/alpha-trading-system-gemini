@@ -401,26 +401,92 @@ app.get("/api/quotes", async (req, res) => {
 
 // 종목 검색
 // GET /api/search?q=삼성
+// 검색 순서:
+// 1) 서버 KRX 마스터 DB
+// 2) KIS search-stock-info API
+// 3) 결과 병합 후 중복 제거
+function normalizeKisSearchRow(row = {}) {
+  const code =
+    row.code ||
+    row.pdno ||
+    row.PDNO ||
+    row.mksc_shrn_iscd ||
+    row.stck_shrn_iscd ||
+    row.iscd ||
+    row.shtn_pdno ||
+    "";
+
+  const name =
+    row.name ||
+    row.prdt_name ||
+    row.prdt_name120 ||
+    row.hts_kor_isnm ||
+    row.kor_isnm ||
+    row.prdt_eng_name ||
+    code;
+
+  const market =
+    row.market ||
+    row.rprs_mrkt_kor_name ||
+    row.mrkt_kor_name ||
+    row.mrkt_div_cls_name ||
+    "";
+
+  return {
+    code: String(code).replace(/\D/g, "").padStart(6, "0").slice(-6),
+    name: String(name || code),
+    tag: market || "KIS",
+    sector: market || "KIS",
+    market,
+    source: "KIS",
+  };
+}
+
 app.get("/api/search", async (req, res) => {
+  const q = req.query.q || "";
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit || 20)));
+
+  const masterRows = searchKrxMaster(q, limit).map((x) => ({ ...x, source: "KRX_MASTER" }));
+  let kisRows = [];
+  let kisError = null;
+
   try {
     const data = await kisGet(
       "/uapi/domestic-stock/v1/quotations/search-stock-info",
       "CTPF1002R",
-      { PRDT_TYPE_CD: "300", PDNO: req.query.q || "" }
+      { PRDT_TYPE_CD: "300", PDNO: q }
     );
-    res.json(data.output || []);
+
+    const rawRows = Array.isArray(data?.output)
+      ? data.output
+      : Array.isArray(data?.output1)
+        ? data.output1
+        : Array.isArray(data)
+          ? data
+          : [];
+
+    kisRows = rawRows.map(normalizeKisSearchRow).filter((x) => /^\d{6}$/.test(x.code));
   } catch (err) {
-    console.error("[search]", err.response?.data || err.message);
-    const fallback = searchKrxMaster(req.query.q || "", 20);
-    res.status(200).json({
-      ok: true,
-      fallback: true,
-      source: "server KRX master cache",
-      error: err.message,
-      results: fallback,
-      output: fallback,
-    });
+    kisError = err.message;
+    console.error("[search:KIS]", err.response?.data || err.message);
   }
+
+  const map = new Map();
+  [...masterRows, ...kisRows].forEach((x) => {
+    if (!x.code) return;
+    if (!map.has(x.code)) map.set(x.code, x);
+  });
+
+  const results = Array.from(map.values()).slice(0, limit);
+  res.status(200).json({
+    ok: true,
+    q,
+    count: results.length,
+    source: kisError ? "KRX master + KIS fallback failed" : "KRX master + KIS",
+    kisError,
+    results,
+    output: results,
+  });
 });
 
 const KRX_MASTER_DB = [
