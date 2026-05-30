@@ -411,9 +411,1146 @@ app.get("/api/search", async (req, res) => {
     res.json(data.output || []);
   } catch (err) {
     console.error("[search]", err.response?.data || err.message);
-    res.status(500).json({ error: err.message });
+    const fallback = searchKrxMaster(req.query.q || "", 20);
+    res.status(200).json({
+      ok: true,
+      fallback: true,
+      source: "server KRX master cache",
+      error: err.message,
+      results: fallback,
+      output: fallback,
+    });
   }
 });
+
+const KRX_MASTER_DB = [
+  {
+    "code": "005930",
+    "name": "삼성전자",
+    "tag": "반도체",
+    "sector": "반도체",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "000660",
+    "name": "SK하이닉스",
+    "tag": "반도체",
+    "sector": "반도체",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "035420",
+    "name": "NAVER",
+    "tag": "플랫폼",
+    "sector": "인터넷",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "035720",
+    "name": "카카오",
+    "tag": "플랫폼",
+    "sector": "인터넷",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "005380",
+    "name": "현대차",
+    "tag": "자동차",
+    "sector": "자동차",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "000270",
+    "name": "기아",
+    "tag": "자동차",
+    "sector": "자동차",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "006400",
+    "name": "삼성SDI",
+    "tag": "2차전지",
+    "sector": "2차전지",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "373220",
+    "name": "LG에너지솔루션",
+    "tag": "2차전지",
+    "sector": "2차전지",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "012450",
+    "name": "한화에어로스페이스",
+    "tag": "방산",
+    "sector": "방산",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "042700",
+    "name": "한미반도체",
+    "tag": "반도체",
+    "sector": "반도체",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "005490",
+    "name": "POSCO홀딩스",
+    "tag": "철강/2차전지",
+    "sector": "철강",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "051910",
+    "name": "LG화학",
+    "tag": "화학/2차전지",
+    "sector": "2차전지",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "011170",
+    "name": "롯데케미칼",
+    "tag": "화학",
+    "sector": "화학",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "066570",
+    "name": "LG전자",
+    "tag": "전기전자",
+    "sector": "전기전자",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "105560",
+    "name": "KB금융",
+    "tag": "금융",
+    "sector": "금융",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "055550",
+    "name": "신한지주",
+    "tag": "금융",
+    "sector": "금융",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "086790",
+    "name": "하나금융지주",
+    "tag": "금융",
+    "sector": "금융",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "316140",
+    "name": "우리금융지주",
+    "tag": "금융",
+    "sector": "금융",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "068270",
+    "name": "셀트리온",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "207940",
+    "name": "삼성바이오로직스",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "028260",
+    "name": "삼성물산",
+    "tag": "지주/건설",
+    "sector": "지주",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "032830",
+    "name": "삼성생명",
+    "tag": "보험",
+    "sector": "금융",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "033780",
+    "name": "KT&G",
+    "tag": "소비재",
+    "sector": "소비재",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "096770",
+    "name": "SK이노베이션",
+    "tag": "정유/배터리",
+    "sector": "에너지",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "034730",
+    "name": "SK",
+    "tag": "지주",
+    "sector": "지주",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "017670",
+    "name": "SK텔레콤",
+    "tag": "통신",
+    "sector": "통신",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "030200",
+    "name": "KT",
+    "tag": "통신",
+    "sector": "통신",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "015760",
+    "name": "한국전력",
+    "tag": "전력",
+    "sector": "유틸리티",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "009150",
+    "name": "삼성전기",
+    "tag": "전자부품",
+    "sector": "전기전자",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "011200",
+    "name": "HMM",
+    "tag": "해운",
+    "sector": "운송",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "003670",
+    "name": "포스코퓨처엠",
+    "tag": "2차전지",
+    "sector": "2차전지",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "247540",
+    "name": "에코프로비엠",
+    "tag": "2차전지",
+    "sector": "2차전지",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "086520",
+    "name": "에코프로",
+    "tag": "2차전지",
+    "sector": "2차전지",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "196170",
+    "name": "알테오젠",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "000810",
+    "name": "삼성화재",
+    "tag": "보험",
+    "sector": "금융",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "010130",
+    "name": "고려아연",
+    "tag": "비철금속",
+    "sector": "소재",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "018260",
+    "name": "삼성에스디에스",
+    "tag": "IT서비스",
+    "sector": "IT",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "251270",
+    "name": "넷마블",
+    "tag": "게임",
+    "sector": "게임",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "259960",
+    "name": "크래프톤",
+    "tag": "게임",
+    "sector": "게임",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "377300",
+    "name": "카카오페이",
+    "tag": "핀테크",
+    "sector": "인터넷",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "323410",
+    "name": "카카오뱅크",
+    "tag": "은행",
+    "sector": "금융",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "047810",
+    "name": "한국항공우주",
+    "tag": "방산",
+    "sector": "방산",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "064350",
+    "name": "현대로템",
+    "tag": "방산/철도",
+    "sector": "방산",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "329180",
+    "name": "HD현대중공업",
+    "tag": "조선",
+    "sector": "조선",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "010140",
+    "name": "삼성중공업",
+    "tag": "조선",
+    "sector": "조선",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "009540",
+    "name": "HD한국조선해양",
+    "tag": "조선",
+    "sector": "조선",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "267260",
+    "name": "HD현대일렉트릭",
+    "tag": "전력기기",
+    "sector": "전력기기",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "010120",
+    "name": "LS ELECTRIC",
+    "tag": "전력기기",
+    "sector": "전력기기",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "352820",
+    "name": "하이브",
+    "tag": "엔터",
+    "sector": "엔터",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "041510",
+    "name": "에스엠",
+    "tag": "엔터",
+    "sector": "엔터",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "035900",
+    "name": "JYP Ent.",
+    "tag": "엔터",
+    "sector": "엔터",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "263750",
+    "name": "펄어비스",
+    "tag": "게임",
+    "sector": "게임",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "112040",
+    "name": "위메이드",
+    "tag": "게임",
+    "sector": "게임",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "011070",
+    "name": "LG이노텍",
+    "tag": "전자부품",
+    "sector": "전기전자",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "272210",
+    "name": "한화시스템",
+    "tag": "방산",
+    "sector": "방산",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "011210",
+    "name": "현대위아",
+    "tag": "자동차부품",
+    "sector": "자동차",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "012330",
+    "name": "현대모비스",
+    "tag": "자동차부품",
+    "sector": "자동차",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "161390",
+    "name": "한국타이어앤테크놀로지",
+    "tag": "타이어",
+    "sector": "자동차",
+    "market": "KOSPI",
+    "indexes": [
+      "KOSPI200"
+    ]
+  },
+  {
+    "code": "028300",
+    "name": "HLB",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "145020",
+    "name": "휴젤",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "214150",
+    "name": "클래시스",
+    "tag": "미용의료기기",
+    "sector": "의료기기",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "214450",
+    "name": "파마리서치",
+    "tag": "바이오/미용",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "058470",
+    "name": "리노공업",
+    "tag": "반도체",
+    "sector": "반도체",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "039030",
+    "name": "이오테크닉스",
+    "tag": "반도체장비",
+    "sector": "반도체",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "036930",
+    "name": "주성엔지니어링",
+    "tag": "반도체장비",
+    "sector": "반도체",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "240810",
+    "name": "원익IPS",
+    "tag": "반도체장비",
+    "sector": "반도체",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "064760",
+    "name": "티씨케이",
+    "tag": "반도체소재",
+    "sector": "반도체",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "095340",
+    "name": "ISC",
+    "tag": "반도체부품",
+    "sector": "반도체",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "089030",
+    "name": "테크윙",
+    "tag": "반도체장비",
+    "sector": "반도체",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "067310",
+    "name": "하나마이크론",
+    "tag": "반도체후공정",
+    "sector": "반도체",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "222800",
+    "name": "심텍",
+    "tag": "PCB",
+    "sector": "전자부품",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "101490",
+    "name": "에스앤에스텍",
+    "tag": "반도체소재",
+    "sector": "반도체",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "319660",
+    "name": "피에스케이",
+    "tag": "반도체장비",
+    "sector": "반도체",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "036540",
+    "name": "SFA반도체",
+    "tag": "반도체후공정",
+    "sector": "반도체",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "005290",
+    "name": "동진쎄미켐",
+    "tag": "반도체소재",
+    "sector": "반도체",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "046890",
+    "name": "서울반도체",
+    "tag": "LED",
+    "sector": "전자부품",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "078600",
+    "name": "대주전자재료",
+    "tag": "2차전지소재",
+    "sector": "2차전지",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "121600",
+    "name": "나노신소재",
+    "tag": "2차전지소재",
+    "sector": "2차전지",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "348370",
+    "name": "엔켐",
+    "tag": "2차전지소재",
+    "sector": "2차전지",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "025900",
+    "name": "동화기업",
+    "tag": "2차전지/소재",
+    "sector": "소재",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "131970",
+    "name": "두산테스나",
+    "tag": "반도체테스트",
+    "sector": "반도체",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "277810",
+    "name": "레인보우로보틱스",
+    "tag": "로봇",
+    "sector": "로봇",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "108490",
+    "name": "로보티즈",
+    "tag": "로봇",
+    "sector": "로봇",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "090360",
+    "name": "로보스타",
+    "tag": "로봇",
+    "sector": "로봇",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "042000",
+    "name": "카페24",
+    "tag": "이커머스",
+    "sector": "인터넷",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "067160",
+    "name": "SOOP",
+    "tag": "플랫폼",
+    "sector": "인터넷",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "035760",
+    "name": "CJ ENM",
+    "tag": "미디어",
+    "sector": "미디어",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "060250",
+    "name": "NHN KCP",
+    "tag": "결제",
+    "sector": "핀테크",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "293490",
+    "name": "카카오게임즈",
+    "tag": "게임",
+    "sector": "게임",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "122870",
+    "name": "와이지엔터테인먼트",
+    "tag": "엔터",
+    "sector": "엔터",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "376300",
+    "name": "디어유",
+    "tag": "엔터플랫폼",
+    "sector": "엔터",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "053800",
+    "name": "안랩",
+    "tag": "보안",
+    "sector": "소프트웨어",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "096530",
+    "name": "씨젠",
+    "tag": "진단키트",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "237690",
+    "name": "에스티팜",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "068760",
+    "name": "셀트리온제약",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "141080",
+    "name": "리가켐바이오",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "000250",
+    "name": "삼천당제약",
+    "tag": "제약",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "214370",
+    "name": "케어젠",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "086900",
+    "name": "메디톡스",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "048410",
+    "name": "현대바이오",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "206650",
+    "name": "유바이오로직스",
+    "tag": "백신",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "140410",
+    "name": "메지온",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "095700",
+    "name": "제넥신",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "085660",
+    "name": "차바이오텍",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "084990",
+    "name": "헬릭스미스",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "007390",
+    "name": "네이처셀",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "215600",
+    "name": "신라젠",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "323990",
+    "name": "박셀바이오",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "144510",
+    "name": "지씨셀",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "195940",
+    "name": "HK이노엔",
+    "tag": "제약",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "052020",
+    "name": "에스티큐브",
+    "tag": "바이오",
+    "sector": "바이오",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "215200",
+    "name": "메가스터디교육",
+    "tag": "교육",
+    "sector": "교육",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "089980",
+    "name": "상아프론테크",
+    "tag": "소재",
+    "sector": "소재",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "004000",
+    "name": "롯데정밀화학",
+    "tag": "화학/소재",
+    "sector": "화학",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "010060",
+    "name": "OCI홀딩스",
+    "tag": "화학/소재",
+    "sector": "화학",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "298050",
+    "name": "효성첨단소재",
+    "tag": "화학/소재",
+    "sector": "화학",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "298020",
+    "name": "효성티앤씨",
+    "tag": "섬유/화학",
+    "sector": "화학",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "005950",
+    "name": "이수화학",
+    "tag": "화학",
+    "sector": "화학",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "009830",
+    "name": "한화솔루션",
+    "tag": "화학/태양광",
+    "sector": "화학",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "285130",
+    "name": "SK케미칼",
+    "tag": "화학/바이오",
+    "sector": "화학",
+    "market": "KOSPI",
+    "indexes": []
+  },
+  {
+    "code": "120110",
+    "name": "코오롱인더",
+    "tag": "화학/소재",
+    "sector": "화학",
+    "market": "KOSPI",
+    "indexes": []
+  }
+];
+
+function normalizeKrQuery(q = "") {
+  return String(q || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[㈜주식회사\(\)\[\]\-_.]/g, "");
+}
+
+function searchKrxMaster(q = "", limit = 20) {
+  const query = normalizeKrQuery(q);
+  if (!query) return KRX_MASTER_DB.slice(0, limit);
+
+  const scored = KRX_MASTER_DB.map((x) => {
+    const name = normalizeKrQuery(x.name);
+    const code = String(x.code || "");
+    const tag = normalizeKrQuery(`${x.tag || ""}${x.sector || ""}${x.market || ""}${(x.indexes || []).join("")}`);
+    let score = 0;
+    if (code === query) score += 1000;
+    if (code.startsWith(query)) score += 500;
+    if (name === query) score += 900;
+    if (name.startsWith(query)) score += 500;
+    if (name.includes(query)) score += 300;
+    if (tag.includes(query)) score += 100;
+    return { ...x, score };
+  })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, "ko"));
+
+  return scored.slice(0, limit).map(({ score, ...x }) => x);
+}
+
+app.get("/api/master/search", (req, res) => {
+  const q = req.query.q || "";
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit || 20)));
+  const results = searchKrxMaster(q, limit);
+  res.json({ ok: true, q, count: results.length, results, source: "server KRX master cache" });
+});
+
+app.get("/api/master/symbol/:query", (req, res) => {
+  const results = searchKrxMaster(req.params.query, 10);
+  if (!results.length) {
+    return res.status(404).json({ ok: false, error: "MASTER_NOT_FOUND", q: req.params.query });
+  }
+  res.json({ ok: true, result: results[0], candidates: results });
+});
+
+app.get("/api/master/universe/:kind", (req, res) => {
+  const kind = String(req.params.kind || "").toLowerCase();
+  let rows = KRX_MASTER_DB;
+  if (kind === "kospi200") rows = rows.filter((x) => (x.indexes || []).includes("KOSPI200"));
+  else if (kind === "kosdaq200") rows = rows.filter((x) => (x.indexes || []).includes("KOSDAQ200"));
+  else if (kind === "kospi") rows = rows.filter((x) => String(x.market).includes("KOSPI"));
+  else if (kind === "kosdaq") rows = rows.filter((x) => String(x.market).includes("KOSDAQ"));
+  res.json({ ok: true, kind, count: rows.length, results: rows });
+});
+
+
 
 // ═══════════════════════════════════════════════════════════════
 // DART - 국민연금 지분 변동
