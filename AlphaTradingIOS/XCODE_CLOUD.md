@@ -132,6 +132,7 @@ Xcode Cloud 빌드 머신에서 `.env.local` 없이도 프로덕션 API URL로 �
 | Archive 실패 (서명) | Xcode → Signing → Automatically manage signing |
 | API 연결 실패 | Environment에 `VITE_API_URL` 확인 |
 | 빌드 번호 중복 | `Release.xcconfig`의 `CURRENT_PROJECT_VERSION` 증가 후 push |
+| Prepare Build for App Store Connect 실패 | ① `Release.xcconfig`에 `MARKETING_VERSION` 확인 ② [인증서](https://developer.apple.com/account/resources/certificates/list)에서 **Distribution Managed (Xcode Cloud)** 폐기 후 재빌드 ③ 빌드 **로그** → `xcodebuild-export-archive.log` 확인 |
 
 ---
 

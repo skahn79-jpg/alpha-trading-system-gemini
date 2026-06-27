@@ -7,4 +7,7 @@ API_BASE_URL = https://alpha-trading-server.onrender.com
 APP_API_KEY =
 
 MARKETING_VERSION = 1.0.0
-CURRENT_PROJECT_VERSION = 5
+CURRENT_PROJECT_VERSION = 6
+
+CODE_SIGN_ENTITLEMENTS = AlphaTrading/Resources/AlphaTrading.entitlements
+INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO
