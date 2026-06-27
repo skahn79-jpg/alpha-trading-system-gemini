@@ -19,7 +19,45 @@ App Store Connect **Xcode Cloud** 탭에서 보이는 화면은 워크플로가 
 
 ---
 
-## 2. Xcode에서 워크플로 생성
+## 2. Xcode / App Store Connect에서 워크플로 + TestFlight 설정
+
+### A) App Store Connect (웹 — 권장)
+
+1. [App Store Connect](https://appstoreconnect.apple.com) → **ALPHA TRADING**
+2. **Xcode Cloud** 탭 → 왼쪽 **워크플로 관리**
+3. **Default** (또는 사용 중인 워크플로) → **…** → **편집**
+4. **Actions** → **Archive (iOS)** 펼치기:
+   - **Deployment Preparation**: **TestFlight and App Store** 선택  
+     (Distribution 인증서로 서명 — TestFlight 업로드 필수)
+5. **Post-Actions** → **+** → **TestFlight Internal Testing** (내부 테스트) 추가
+6. **저장**
+
+### B) Xcode (동일 설정)
+
+```bash
+open AlphaTradingIOS/AlphaTrading.xcodeproj
+# 또는
+osascript AlphaTradingIOS/scripts/open-xcode-cloud-workflows.applescript
+```
+
+1. **Product → Xcode Cloud → Manage Workflows…**
+2. **Default** → **Edit Workflow**
+3. Archive → **TestFlight and App Store**
+4. Post-Actions → **+ TestFlight Internal Testing**
+5. **Save**
+
+### C) TestFlight 테스터 (App Store Connect)
+
+1. **TestFlight** 탭 → **내부 테스트**
+2. **+** 그룹 생성 (예: `팀 내부`)
+3. **테스터 추가** → 본인 Apple ID (App Store Connect 계정과 동일 이메일)
+4. Xcode Cloud 빌드 완료 후 해당 그룹에 **빌드 선택** → 테스터에게 자동 초대
+
+> `Info.plist`에 `ITSAppUsesNonExemptEncryption = false` 설정됨 — 수출 규정 질문 자동 통과.
+
+---
+
+## 2-1. (구) 워크플로 최초 생성
 
 1. App Store Connect → **Xcode Cloud** → **Xcode 열기** 클릭  
    또는 터미널:
