@@ -16,7 +16,19 @@ open AlphaTradingIOS/AlphaTrading.xcodeproj
 
 1. **Signing & Capabilities** → Apple Developer Team 선택
 2. `Config/Secrets.xcconfig` 설정 (아래 참고)
-3. **⌘R** 실행
+3. 상단 디바이스: **iPhone 17 Pro (Simulator)** 선택 ← 실기기가 아닌 **시뮬레이터**
+4. **⌘R** 실행
+
+### CodeSign failed / errSecInternalComponent
+
+**실기기** 또는 **Archive** 빌드 시 키체인 접근 오류가 날 수 있습니다.
+
+| 즉시 해결 | 영구 해결 |
+|-----------|-----------|
+| 디바이스 메뉴에서 **iOS Simulators → iPhone 17 Pro** 선택 | `scripts/fix-codesign-keychain.command` 더블클릭 |
+| | Xcode → Settings → Accounts → Certificates 재생성 |
+
+시뮬레이터 빌드는 서명 없이 동작합니다. TestFlight는 **Xcode Cloud** 또는 Distribution 인증서로 Archive하세요.
 
 ## API 키 설정 (웹앱과 자동 동기화)
 
