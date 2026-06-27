@@ -460,9 +460,6 @@
 			files = (
 			);
 			inputPaths = (
-				"$(SRCROOT)/../.env",
-				"$(SRCROOT)/../.env.local",
-				"$(SRCROOT)/../scripts/sync-ios-api-config.mjs",
 			);
 			name = "Sync API Config from Web";
 			outputPaths = (
@@ -470,7 +467,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cd \"${SRCROOT}/..\"\nGEN=\"${SRCROOT}/Config/Generated.xcconfig\"\nwrite_fallback() {\n  mkdir -p \"${SRCROOT}/Config\"\n  cat > \"$GEN\" <<EOF\n// Xcode Cloud fallback\nAPI_BASE_URL = https://alpha-trading-server.onrender.com\nAPP_API_KEY =\nEOF\n}\nif command -v node >/dev/null 2>&1; then\n  MODE=\"debug\"\n  if [ \"${CONFIGURATION}\" = \"Release\" ]; then MODE=\"release\"; fi\n  node scripts/sync-ios-api-config.mjs \"$MODE\" || {\n    if [ -f \"$GEN\" ]; then echo \"warning: sync failed, using existing Generated.xcconfig\"; else write_fallback; fi\n  }\nelse\n  if [ ! -f \"$GEN\" ]; then write_fallback; fi\nfi\n";
+			shellScript = "set -e\nGEN=\"${SRCROOT}/Config/Generated.xcconfig\"\nmkdir -p \"${SRCROOT}/Config\"\nif command -v node >/dev/null 2>&1 && [ -f \"${SRCROOT}/../scripts/sync-ios-api-config.mjs\" ]; then\n  MODE=\"debug\"\n  if [ \"${CONFIGURATION}\" = \"Release\" ]; then MODE=\"release\"; fi\n  (cd \"${SRCROOT}/..\" && node scripts/sync-ios-api-config.mjs \"$MODE\") || true\nfi\nif [ ! -f \"$GEN\" ]; then\n  printf '%s\\n' '// Xcode Cloud fallback' 'API_BASE_URL = https://alpha-trading-server.onrender.com' 'APP_API_KEY =' > \"$GEN\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
