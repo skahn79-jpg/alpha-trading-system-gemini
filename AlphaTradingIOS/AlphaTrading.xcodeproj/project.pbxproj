@@ -55,6 +55,7 @@
 		A1000000000000000000002E /* AlertCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000031 /* AlertCenterView.swift */; };
 		A1000000000000000000002F /* AIReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000032 /* AIReportView.swift */; };
 		A10000000000000000000030 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000033 /* PrivacyInfo.xcprivacy */; };
+		B10000000000000000000001 /* AlphaTradingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* AlphaTradingTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -109,10 +110,29 @@
 		A20000000000000000000031 /* AlertCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertCenterView.swift; sourceTree = "<group>"; };
 		A20000000000000000000032 /* AIReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIReportView.swift; sourceTree = "<group>"; };
 		A20000000000000000000033 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		B20000000000000000000001 /* AlphaTradingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlphaTradingTests.swift; sourceTree = "<group>"; };
+		B30000000000000000000001 /* AlphaTradingTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AlphaTradingTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A30000000000000000000001 /* AlphaTrading.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AlphaTrading.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXContainerItemProxy section */
+		BC0000000000000000000002 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A90000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A60000000000000000000001;
+			remoteInfo = AlphaTrading;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFrameworksBuildPhase section */
+		B40000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A40000000000000000000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -127,6 +147,7 @@
 			isa = PBXGroup;
 			children = (
 				A50000000000000000000002 /* AlphaTrading */,
+				B50000000000000000000001 /* AlphaTradingTests */,
 				A50000000000000000000003 /* Config */,
 				A50000000000000000000004 /* Products */,
 			);
@@ -158,8 +179,17 @@
 			isa = PBXGroup;
 			children = (
 				A30000000000000000000001 /* AlphaTrading.app */,
+				B30000000000000000000001 /* AlphaTradingTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		B50000000000000000000001 /* AlphaTradingTests */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000001 /* AlphaTradingTests.swift */,
+			);
+			path = AlphaTradingTests;
 			sourceTree = "<group>";
 		};
 		A50000000000000000000005 /* App */ = {
@@ -330,7 +360,32 @@
 			productReference = A30000000000000000000001 /* AlphaTrading.app */;
 			productType = "com.apple.product-type.application";
 		};
+		B60000000000000000000001 /* AlphaTradingTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B80000000000000000000001 /* Build configuration list for PBXNativeTarget "AlphaTradingTests" */;
+			buildPhases = (
+				B70000000000000000000001 /* Sources */,
+				B40000000000000000000001 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				BC0000000000000000000001 /* PBXTargetDependency */,
+			);
+			name = AlphaTradingTests;
+			productName = AlphaTradingTests;
+			productReference = B30000000000000000000001 /* AlphaTradingTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXTargetDependency section */
+		BC0000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A60000000000000000000001 /* AlphaTrading */;
+			targetProxy = BC0000000000000000000002 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXProject section */
 		A90000000000000000000001 /* Project object */ = {
@@ -342,6 +397,10 @@
 				TargetAttributes = {
 					A60000000000000000000001 = {
 						CreatedOnToolsVersion = 15.0;
+					};
+					B60000000000000000000001 = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = A60000000000000000000001;
 					};
 				};
 			};
@@ -360,6 +419,7 @@
 			projectRoot = "";
 			targets = (
 				A60000000000000000000001 /* AlphaTrading */,
+				B60000000000000000000001 /* AlphaTradingTests */,
 			);
 		};
 /* End PBXProject section */
@@ -381,6 +441,17 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXSourcesBuildPhase section */
+		B70000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000001 /* AlphaTradingTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
 /* Begin PBXShellScriptBuildPhase section */
 		AB0000000000000000000001 /* Sync API Config from Web */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -399,7 +470,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cd \"${SRCROOT}/..\"\nif command -v node >/dev/null 2>&1; then\n  MODE=\"debug\"\n  if [ \"${CONFIGURATION}\" = \"Release\" ]; then MODE=\"release\"; fi\n  node scripts/sync-ios-api-config.mjs \"$MODE\" || exit 1\nelse\n  echo \"warning: node not found — skip API config sync\"\nfi\n";
+			shellScript = "cd \"${SRCROOT}/..\"\nGEN=\"${SRCROOT}/Config/Generated.xcconfig\"\nwrite_fallback() {\n  mkdir -p \"${SRCROOT}/Config\"\n  cat > \"$GEN\" <<EOF\n// Xcode Cloud fallback\nAPI_BASE_URL = https://alpha-trading-server.onrender.com\nAPP_API_KEY =\nEOF\n}\nif command -v node >/dev/null 2>&1; then\n  MODE=\"debug\"\n  if [ \"${CONFIGURATION}\" = \"Release\" ]; then MODE=\"release\"; fi\n  node scripts/sync-ios-api-config.mjs \"$MODE\" || {\n    if [ -f \"$GEN\" ]; then echo \"warning: sync failed, using existing Generated.xcconfig\"; else write_fallback; fi\n  }\nelse\n  if [ ! -f \"$GEN\" ]; then write_fallback; fi\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -570,6 +641,44 @@
 			};
 			name = Release;
 		};
+		BA0000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(DEVELOPMENT_TEAM)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alpha.trading.ios.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AlphaTrading.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AlphaTrading";
+			};
+			name = Debug;
+		};
+		BA0000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(DEVELOPMENT_TEAM)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alpha.trading.ios.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AlphaTrading.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AlphaTrading";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -587,6 +696,15 @@
 			buildConfigurations = (
 				AA0000000000000000000001 /* Debug */,
 				AA0000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B80000000000000000000001 /* Build configuration list for PBXNativeTarget "AlphaTradingTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BA0000000000000000000001 /* Debug */,
+				BA0000000000000000000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
