@@ -19,6 +19,45 @@ function pct(a, b) {
   return ((a - b) / b) * 100;
 }
 
+function rsi(closes, period = 14) {
+  if (!Array.isArray(closes) || closes.length < period + 1) return null;
+  let gains = 0;
+  let losses = 0;
+  for (let i = 0; i < period; i += 1) {
+    const diff = num(closes[i]) - num(closes[i + 1]);
+    if (diff >= 0) gains += diff;
+    else losses -= diff;
+  }
+  const avgGain = gains / period;
+  const avgLoss = losses / period;
+  if (!avgLoss) return 100;
+  const rs = avgGain / avgLoss;
+  return Math.round((100 - (100 / (1 + rs))) * 10) / 10;
+}
+
+function bollinger(closes, period = 20, mult = 2) {
+  if (!Array.isArray(closes) || closes.length < period) return null;
+  const slice = closes.slice(0, period).map(num);
+  const mid = slice.reduce((a, b) => a + b, 0) / period;
+  const variance = slice.reduce((a, b) => a + ((b - mid) ** 2), 0) / period;
+  const std = Math.sqrt(variance);
+  const upper = mid + mult * std;
+  const lower = mid - mult * std;
+  return {
+    upper: Math.round(upper),
+    mid: Math.round(mid),
+    lower: Math.round(lower),
+    bandwidth: mid ? Math.round(((upper - lower) / mid) * 1000) / 10 : null,
+    position: upper > lower ? Math.round(((num(closes[0]) - lower) / (upper - lower)) * 1000) / 10 : null,
+  };
+}
+
+function signalBadge(score, rsiVal) {
+  if (score >= 70 || (rsiVal !== null && rsiVal <= 30 && score >= 55)) return '매수';
+  if (score <= 40 || (rsiVal !== null && rsiVal >= 70 && score <= 55)) return '매도';
+  return '중립';
+}
+
 function analyzeCandles(rawCandles = []) {
   const candles = [...rawCandles]
     .filter(c => c && Number.isFinite(num(c.close)))
@@ -64,21 +103,40 @@ function analyzeCandles(rawCandles = []) {
   if (ma20 && close < ma20) { score -= 8; signals.push('20일선 하단 이탈'); }
   if (ma60 && close < ma60) { score -= 10; signals.push('60일선 하단 이탈'); }
 
+  const rsi14 = rsi(closes, 14);
+  const bb = bollinger(closes, 20, 2);
+  if (rsi14 !== null && rsi14 <= 30) { score += 5; signals.push(`RSI 과매도 ${rsi14}`); }
+  if (rsi14 !== null && rsi14 >= 70) { score -= 5; signals.push(`RSI 과매수 ${rsi14}`); }
+  if (bb && bb.position !== null && bb.position <= 15) { score += 4; signals.push('볼린저 하단 근접'); }
+  if (bb && bb.position !== null && bb.position >= 85) { score -= 4; signals.push('볼린저 상단 근접'); }
+
   score = Math.max(0, Math.min(100, Math.round(score)));
   const grade = score >= 80 ? 'A' : score >= 65 ? 'B' : score >= 50 ? 'C' : 'D';
   const action = score >= 80 ? '관심 진입 후보' : score >= 65 ? '분할 관찰 후보' : score >= 50 ? '중립/대기' : '리스크 관리 우선';
+  const badge = signalBadge(score, rsi14);
+
+  const yearSlice = candles.slice(0, Math.min(252, candles.length));
+  const w52High = yearSlice.length ? Math.max(...yearSlice.map((c) => num(c.high))) : null;
+  const w52Low = yearSlice.length ? Math.min(...yearSlice.map((c) => num(c.low))) : null;
+  const w52Position = w52High && w52Low && w52High > w52Low
+    ? Math.round(((close - w52Low) / (w52High - w52Low)) * 1000) / 10
+    : null;
 
   return {
     grade,
     score,
     action,
+    signalBadge: badge,
     baseLine: ma20 ? '20일선' : ma5 ? '5일선' : '데이터 부족',
     movingAverages: { ma5, ma20, ma60, ma120 },
     distance: { ma20: dist20, ma60: dist60 },
+    rsi: rsi14,
+    bollinger: bb,
+    week52: { high: w52High, low: w52Low, position: w52Position },
     volume: { latest: num(latest.volume), avg20: avgVol20, ratio: volRatio },
     confluence: signals.length,
     signals,
-    summary: `${action} · 점수 ${score}점 · 컨플루언스 ${signals.length}개${dist20 !== null ? ` · 20일선 이격 ${dist20.toFixed(1)}%` : ''}`,
+    summary: `${badge} · ${action} · 점수 ${score}점 · 컨플루언스 ${signals.length}개${dist20 !== null ? ` · 20일선 이격 ${dist20.toFixed(1)}%` : ''}`,
   };
 }
 

@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax check (server)
+        run: node --check server.js
+
+      - name: Build web client
+        run: npm run build
+
+  ios-simulator:
+    name: iOS Simulator build
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Sync iOS API config
+        run: node scripts/sync-ios-api-config.mjs release
+
+      - name: Build for Simulator
+        run: |
+          cd AlphaTradingIOS
+          xcodebuild -project AlphaTrading.xcodeproj \
+            -scheme AlphaTrading \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -configuration Debug \
+            build

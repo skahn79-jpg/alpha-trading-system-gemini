@@ -1,0 +1,2 @@
+// Xcode → Settings → Accounts 에서 Team ID 확인 후 입력
+DEVELOPMENT_TEAM = YOUR_TEAM_ID_HERE

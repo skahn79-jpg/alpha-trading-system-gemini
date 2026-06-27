@@ -1,0 +1,135 @@
+name: iOS TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: "빌드 번호 (비우면 Release.xcconfig 값 사용)"
+        required: false
+        type: string
+  push:
+    tags:
+      - "ios/v*"
+
+jobs:
+  testflight:
+    name: Archive & Upload
+    runs-on: macos-14
+    timeout-minutes: 45
+    env:
+      DEVELOPMENT_TEAM: VWAZ3CVW5Z
+      BUNDLE_ID: com.alpha.trading.ios
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Sync iOS API config
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          VITE_APP_API_KEY: ${{ secrets.APP_API_KEY }}
+        run: node scripts/sync-ios-api-config.mjs release
+
+      - name: Validate signing secrets
+        run: |
+          missing=0
+          for key in IOS_DIST_SIGNING_CERTIFICATE_BASE64 IOS_DIST_SIGNING_CERTIFICATE_PASSWORD IOS_KEYCHAIN_PASSWORD ASC_API_KEY_ID ASC_ISSUER_ID ASC_API_PRIVATE_KEY; do
+            if [ -z "${!key:-}" ]; then
+              echo "::error::Missing secret: $key"
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then
+            echo "GITHUB_SETUP.md 의 iOS Secrets 설정을 완료한 뒤 다시 실행하세요."
+            exit 1
+          fi
+        env:
+          IOS_DIST_SIGNING_CERTIFICATE_BASE64: ${{ secrets.IOS_DIST_SIGNING_CERTIFICATE_BASE64 }}
+          IOS_DIST_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DIST_SIGNING_CERTIFICATE_PASSWORD }}
+          IOS_KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_API_PRIVATE_KEY: ${{ secrets.ASC_API_PRIVATE_KEY }}
+
+      - name: Install Apple Distribution certificate
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.IOS_DIST_SIGNING_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.IOS_DIST_SIGNING_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/build_certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$CERTIFICATE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+      - name: Configure App Store Connect API key
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_PRIVATE_KEY: ${{ secrets.ASC_API_PRIVATE_KEY }}
+        run: |
+          mkdir -p "$HOME/private_keys"
+          KEY_PATH="$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8"
+          printf '%s\n' "$ASC_API_PRIVATE_KEY" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          echo "APP_STORE_CONNECT_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Optional build number override
+        if: ${{ inputs.build_number != '' }}
+        run: |
+          sed -i '' "s/CURRENT_PROJECT_VERSION = .*/CURRENT_PROJECT_VERSION = ${{ inputs.build_number }}/" AlphaTradingIOS/Config/Release.xcconfig
+
+      - name: Archive
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_PATH: ${{ env.APP_STORE_CONNECT_API_KEY_PATH }}
+        run: |
+          cd AlphaTradingIOS
+          xcodebuild -project AlphaTrading.xcodeproj \
+            -scheme AlphaTrading \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/AlphaTrading.xcarchive \
+            -allowProvisioningUpdates \
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+            CODE_SIGN_STYLE=Automatic \
+            clean archive
+
+      - name: Export IPA
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_PATH: ${{ env.APP_STORE_CONNECT_API_KEY_PATH }}
+        run: |
+          cd AlphaTradingIOS
+          xcodebuild -exportArchive \
+            -archivePath build/AlphaTrading.xcarchive \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath build/export \
+            -allowProvisioningUpdates
+
+      - name: Upload to TestFlight
+        uses: apple-actions/upload-testflight-build@v3
+        with:
+          app-path: AlphaTradingIOS/build/export/AlphaTrading.ipa
+          issuer-id: ${{ secrets.ASC_ISSUER_ID }}
+          api-key-id: ${{ secrets.ASC_API_KEY_ID }}
+          api-private-key: ${{ secrets.ASC_API_PRIVATE_KEY }}
+
+      - name: Summary
+        run: |
+          echo "### TestFlight 업로드 완료" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Bundle: \`$BUNDLE_ID\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Team: \`$DEVELOPMENT_TEAM\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "App Store Connect → TestFlight 에서 빌드 처리(10~30분) 후 테스터에게 배포하세요." >> "$GITHUB_STEP_SUMMARY"

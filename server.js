@@ -16,6 +16,7 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const rateLimit = require("express-rate-limit");
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
@@ -47,26 +48,67 @@ app.use(cors({
 }));
 app.use(express.json());
 
+const isProduction = process.env.NODE_ENV === "production";
+
+function requireAppAuth(req, res, next) {
+  const expected = process.env.APP_API_KEY;
+  if (!expected) {
+    if (isProduction) {
+      return res.status(503).json({ ok: false, error: "APP_API_KEY not configured" });
+    }
+    return next();
+  }
+  const key = req.headers["x-app-key"];
+  if (key !== expected) {
+    return res.status(401).json({ ok: false, error: "Unauthorized" });
+  }
+  next();
+}
+
+const generalRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: Number(process.env.RATE_LIMIT_GENERAL || 60),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: "Too many requests" },
+});
+
+const aiRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: Number(process.env.RATE_LIMIT_AI || 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: "AI rate limit exceeded" },
+});
+
+app.use("/api", generalRateLimit);
+app.use("/api/ai", aiRateLimit, requireAppAuth);
+app.use("/api/alerts", requireAppAuth);
+app.use("/api/sim", requireAppAuth);
+
 const KIS_BASE = process.env.KIS_BASE_URL || "https://openapi.koreainvestment.com:9443"; // 실전투자
 
 let ACCESS_TOKEN = null;
 let TOKEN_EXPIRES_AT = null;
 
 function buildKisErrorPayload(err, label = "KIS") {
-  return {
+  const payload = {
     ok: false,
     label,
     error: err.message,
     status: err.response?.status || 500,
-    kisError: err.response?.data || null,
-    url: err.config?.url || null,
-    params: err.config?.params || null,
-    method: err.config?.method || null,
     hint:
       err.response?.status === 403
         ? "KIS 403 오류입니다. APP_KEY/APP_SECRET, 실전·모의 URL, TR_ID, 요청 파라미터, 계정 권한을 확인하세요."
         : "KIS 요청 중 오류가 발생했습니다.",
   };
+  if (!isProduction) {
+    payload.kisError = err.response?.data || null;
+    payload.url = err.config?.url || null;
+    payload.params = err.config?.params || null;
+    payload.method = err.config?.method || null;
+  }
+  return payload;
 }
 
 function buildSafeQuoteFallback(code, err) {
@@ -97,7 +139,7 @@ function buildSafeQuoteFallback(code, err) {
     analysis: null,
     error: payload.error,
     kisStatus: payload.status,
-    kisError: payload.kisError,
+    ...(isProduction ? {} : { kisError: payload.kisError }),
     hint: "KIS 개별 종목 조회 실패로 화면 보호용 빈 시세를 반환했습니다. 종목코드, 거래소 구분, API 권한을 확인하세요.",
   };
 }
@@ -173,8 +215,11 @@ async function fetchDailyCandles(code, count = 130) {
 
 // ── 엔드포인트 ───────────────────────────────────────────────────
 
-// 서버 상태 확인
+// 서버 상태 확인 (공개 — 최소 정보만 반환)
 app.get("/api/health", async (req, res) => {
+  if (isProduction) {
+    return res.json({ status: "ok" });
+  }
   try {
     await getAccessToken();
     res.json({ status: "ok", token: !!ACCESS_TOKEN, time: new Date().toISOString() });
@@ -1584,6 +1629,92 @@ const KRX_MASTER_DB = [
   }
 ];
 
+// Enriched KOSPI/KOSDAQ catalog (sector/industry + market correction)
+let KRX_MASTER_ALL = KRX_MASTER_DB;
+try {
+  const mergedPath = path.join(__dirname, "data/krx-master-merged.json");
+  if (fs.existsSync(mergedPath)) {
+    const merged = JSON.parse(fs.readFileSync(mergedPath, "utf8"));
+    if (Array.isArray(merged) && merged.length >= KRX_MASTER_DB.length) {
+      KRX_MASTER_ALL = merged;
+      console.log(`[master] loaded enriched catalog: ${merged.length} symbols`);
+    }
+  }
+} catch (e) {
+  console.warn("[master] enriched catalog load failed:", e.message);
+}
+
+function normalizeMarketFilter(market = "ALL") {
+  const m = String(market || "ALL").toUpperCase();
+  return m === "KOSPI" || m === "KOSDAQ" ? m : "ALL";
+}
+
+function scoreKrxRow(x, query) {
+  const name = normalizeKrQuery(x.name);
+  const code = String(x.code || "");
+  const tag = normalizeKrQuery(`${x.tag || ""}${x.sector || ""}${x.industry || ""}${x.market || ""}${(x.indexes || []).join("")}`);
+  let score = 0;
+  if (code === query) score += 1000;
+  if (code.startsWith(query)) score += 500;
+  if (name === query) score += 900;
+  if (name.startsWith(query)) score += 500;
+  if (name.includes(query)) score += 300;
+  if (tag.includes(query)) score += 100;
+  return score;
+}
+
+function filterKrxMaster({ market, sector, industry, q } = {}) {
+  let rows = KRX_MASTER_ALL;
+  const mkt = normalizeMarketFilter(market);
+  if (mkt !== "ALL") {
+    rows = rows.filter((x) => String(x.market || "").toUpperCase() === mkt);
+  }
+  if (sector) {
+    const s = normalizeKrQuery(sector);
+    rows = rows.filter((x) => {
+      const val = normalizeKrQuery(x.sector || "");
+      return val === s || val.includes(s);
+    });
+  }
+  if (industry) {
+    const s = normalizeKrQuery(industry);
+    rows = rows.filter((x) => {
+      const val = normalizeKrQuery(x.industry || x.tag || "");
+      return val === s || val.includes(s);
+    });
+  }
+  const query = normalizeKrQuery(q);
+  if (query) {
+    rows = rows
+      .map((x) => ({ ...x, score: scoreKrxRow(x, query) }))
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, "ko"))
+      .map(({ score, ...x }) => x);
+  } else {
+    rows = [...rows].sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  }
+  return rows;
+}
+
+function listMasterSectors({ market = "ALL", type = "sector" } = {}) {
+  const rows = filterKrxMaster({ market });
+  const pick = type === "industry"
+    ? (x) => x.industry || x.tag || "기타"
+    : (x) => x.sector || "기타";
+  const map = new Map();
+  rows.forEach((x) => {
+    const key = pick(x) || "기타";
+    if (!map.has(key)) {
+      map.set(key, { name: key, count: 0, kospi: 0, kosdaq: 0 });
+    }
+    const bucket = map.get(key);
+    bucket.count += 1;
+    if (String(x.market || "").toUpperCase() === "KOSDAQ") bucket.kosdaq += 1;
+    else bucket.kospi += 1;
+  });
+  return Array.from(map.values()).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "ko"));
+}
+
 function normalizeKrQuery(q = "") {
   return String(q || "")
     .trim()
@@ -1592,9 +1723,15 @@ function normalizeKrQuery(q = "") {
     .replace(/[㈜주식회사\(\)\[\]\-_.]/g, "");
 }
 
-function searchKrxMaster(q = "", limit = 20) {
+function searchKrxMaster(q = "", limit = 20, filters = {}) {
   const query = normalizeKrQuery(q);
-  if (!query) return KRX_MASTER_DB.slice(0, limit);
+  const base = filterKrxMaster({
+    market: filters.market,
+    sector: filters.sector,
+    industry: filters.industry,
+  });
+
+  if (!query) return base.slice(0, limit);
 
   const aliasMap = {
     "동아에스티": ["동아st", "동아에스티", "동아 에스티", "donga st", "dong-a st", "dongaest"],
@@ -1603,19 +1740,15 @@ function searchKrxMaster(q = "", limit = 20) {
     "롯데정밀화학": ["롯데정밀화학", "롯데 정밀화학", "lotte fine chemical", "lottefinechemical"],
   };
 
-  const scored = KRX_MASTER_DB.map((x) => {
+  const scored = base.map((x) => {
     const name = normalizeKrQuery(x.name);
     const code = String(x.code || "");
-    const tag = normalizeKrQuery(`${x.tag || ""}${x.sector || ""}${x.market || ""}${(x.indexes || []).join("")}`);
+    const tag = normalizeKrQuery(`${x.tag || ""}${x.sector || ""}${x.industry || ""}${x.market || ""}${(x.indexes || []).join("")}`);
     const aliases = (aliasMap[x.name] || []).map(normalizeKrQuery).join(" ");
-    let score = 0;
-    if (code === query) score += 1000;
-    if (code.startsWith(query)) score += 500;
-    if (name === query) score += 900;
-    if (name.startsWith(query)) score += 500;
-    if (name.includes(query)) score += 300;
+    let score = scoreKrxRow(x, query);
     if (aliases.includes(query)) score += 650;
     if (tag.includes(query)) score += 100;
+    if (name.includes(query) && score === 0) score += 300;
     return { ...x, score };
   })
     .filter((x) => x.score > 0)
@@ -1627,8 +1760,74 @@ function searchKrxMaster(q = "", limit = 20) {
 app.get("/api/master/search", (req, res) => {
   const q = req.query.q || "";
   const limit = Math.min(100, Math.max(1, Number(req.query.limit || 20)));
-  const results = searchKrxMaster(q, limit);
-  res.json({ ok: true, q, count: results.length, results, source: "server KRX master cache" });
+  const filters = {
+    market: req.query.market,
+    sector: req.query.sector,
+    industry: req.query.industry,
+  };
+  const results = searchKrxMaster(q, limit, filters);
+  res.json({
+    ok: true,
+    q,
+    ...filters,
+    count: results.length,
+    results,
+    source: "server KRX master cache",
+  });
+});
+
+app.get("/api/master/sectors", (req, res) => {
+  const market = req.query.market || "ALL";
+  const type = req.query.type || "sector";
+  const sectors = listMasterSectors({ market, type });
+  res.json({
+    ok: true,
+    market: normalizeMarketFilter(market),
+    type,
+    totalSymbols: filterKrxMaster({ market }).length,
+    count: sectors.length,
+    sectors,
+  });
+});
+
+app.get("/api/master/by-sector", (req, res) => {
+  const sector = String(req.query.sector || req.query.industry || "").trim();
+  const type = req.query.type || (req.query.industry ? "industry" : "sector");
+  const market = req.query.market || "ALL";
+  const sort = String(req.query.sort || "name").toLowerCase();
+  const q = req.query.q || "";
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit || 200)));
+
+  if (!sector) {
+    return res.status(400).json({ ok: false, error: "sector 또는 industry 파라미터가 필요합니다." });
+  }
+
+  const filterKey = type === "industry" ? "industry" : "sector";
+  let rows = filterKrxMaster({
+    market,
+    [filterKey]: sector,
+    q,
+  });
+
+  if (sort === "code") {
+    rows.sort((a, b) => a.code.localeCompare(b.code));
+  } else if (sort === "marketcap") {
+    rows.sort((a, b) => (Number(b.marketCap) || 0) - (Number(a.marketCap) || 0));
+  } else {
+    rows.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  }
+
+  rows = rows.slice(0, limit);
+  res.json({
+    ok: true,
+    sector,
+    type,
+    market: normalizeMarketFilter(market),
+    sort,
+    q,
+    count: rows.length,
+    results: rows,
+  });
 });
 
 app.get("/api/master/symbol/:query", (req, res) => {
@@ -1641,7 +1840,7 @@ app.get("/api/master/symbol/:query", (req, res) => {
 
 app.get("/api/master/universe/:kind", (req, res) => {
   const kind = String(req.params.kind || "").toLowerCase();
-  let rows = KRX_MASTER_DB;
+  let rows = KRX_MASTER_ALL;
   if (kind === "kospi200") rows = rows.filter((x) => (x.indexes || []).includes("KOSPI200"));
   else if (kind === "kosdaq200") rows = rows.filter((x) => (x.indexes || []).includes("KOSDAQ200"));
   else if (kind === "kospi") rows = rows.filter((x) => String(x.market).includes("KOSPI"));
@@ -2066,6 +2265,9 @@ app.post("/api/alerts/telegram/test", async (req, res) => {
 app.get("/api/alerts/check", async (req, res) => {
   try {
     const secret = process.env.ALERT_CHECK_SECRET;
+    if (isProduction && !secret) {
+      return res.status(503).json({ ok: false, error: "ALERT_CHECK_SECRET required in production" });
+    }
     if (secret && req.query.secret !== secret) {
       return res.status(401).json({ ok: false, error: "Invalid secret" });
     }
@@ -2338,6 +2540,9 @@ app.get("/api/crypto/quote/:symbol", async (req, res) => {
 
 
 app.get("/api/kis/health", async (req, res) => {
+  if (isProduction) {
+    return res.json({ ok: true, time: new Date().toISOString() });
+  }
   res.json({
     ok: true,
     kisBase: KIS_BASE,

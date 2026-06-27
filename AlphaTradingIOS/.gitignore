@@ -1,0 +1,12 @@
+# Xcode 로컬 빌드 산출물
+DerivedData/
+build/
+*.xcuserstate
+*.xcuserdata/
+
+# API 키 (로컬 전용)
+Config/Secrets.xcconfig
+Config/Generated.xcconfig
+
+# macOS
+.DS_Store

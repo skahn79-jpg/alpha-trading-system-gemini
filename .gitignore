@@ -66,6 +66,9 @@ node_modules/
 .env
 .env.local
 
+# GitHub Actions secrets export (로컬 전용, 절대 commit 금지)
+.github-secrets-export/
+
 # build output
 dist/
 
