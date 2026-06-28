@@ -13,7 +13,11 @@
     "start": "node server.js",
     "sync:ios": "node scripts/sync-ios-api-config.mjs",
     "sync:ios:release": "node scripts/sync-ios-api-config.mjs release",
-    "archive:ios": "bash AlphaTradingIOS/scripts/archive-testflight.sh"
+    "archive:ios": "bash AlphaTradingIOS/scripts/archive-testflight.sh",
+    "setup:asc": "bash AlphaTradingIOS/scripts/setup-asc-api-key.sh",
+    "verify:asc": "bash AlphaTradingIOS/scripts/verify-asc-api-key.sh",
+    "probe:asc": "node AlphaTradingIOS/scripts/asc-jwt-probe.mjs",
+    "xcode-cloud:md": "bash AlphaTradingIOS/scripts/fix-xcode-cloud-workflow.command"
   },
   "dependencies": {
     "axios": "^1.6.0",

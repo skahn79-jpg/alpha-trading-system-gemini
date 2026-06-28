@@ -110,10 +110,14 @@ open AlphaTradingIOS/AlphaTrading.xcodeproj
 |----------|------|------|
 | `ci_post_clone.sh` | 클론 직후 | `Generated.xcconfig` 생성 + (가능 시) npm sync |
 | `ci_pre_xcodebuild.sh` | xcodebuild 직전 | API 설정 검증·동기화 |
-| `ci_post_xcodebuild.sh` | Archive 직후 | ASC API 키 있으면 iTMSTransporter 업로드 (Prepare Build 우회) |
+| `ci_post_xcodebuild.sh` | Archive 직후 | (선택) ASC API 키 있으면 iTMSTransporter 수동 업로드 |
 
-> **권장**: 워크플로 Archive **배포 준비 = 없음** (1차) → MaterialDelivery와 동일.  
-> Prepare Build가 계속 실패하면 Environment에 ASC API 3개 변수를 추가하세요.
+> **MaterialDelivery 성공 패턴 (권장):** ASC API 키 **불필요**.  
+> 1차 **배포 준비 = 없음** → 2차 **TestFlight and App Store** → 3차 **Internal Testing**.  
+> Xcode Cloud가 자체 인증으로 업로드합니다 (`VWAZ3CVW5Z` 동일 팀).
+
+> **ASC API 키** (`APPSTORE_*`)는 401이 나도 **Xcode Cloud 자동 배포와 무관**합니다.  
+> 수동 IPA 업로드(`upload-ipa-testflight.sh`)할 때만 필요합니다.
 
 ---
 

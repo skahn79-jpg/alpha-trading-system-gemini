@@ -3,10 +3,25 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-KEY_ID="68F8234UMH"
-P8_SRC="$HOME/Downloads/AuthKey_${KEY_ID}.p8"
-# App Store Connect → 사용자 및 액세스 → 키 상단 Issuer ID (팀별 UUID)
-ISSUER_ID="${ASC_ISSUER_ID:-12ad4880-ea76-4ebf-bbc3-49d0883321a5}"
+ENV_LOCAL="$ROOT/.env.local"
+
+load_from_env_local() {
+  if [[ -f "$ENV_LOCAL" ]]; then
+    KEY_ID="$(grep -E '^ASC_API_KEY_ID=' "$ENV_LOCAL" | tail -1 | cut -d= -f2- | tr -d ' \r"'"'"'')"
+    ISSUER_ID="$(grep -E '^ASC_ISSUER_ID=' "$ENV_LOCAL" | tail -1 | cut -d= -f2- | tr -d ' \r"'"'"'')"
+  fi
+}
+load_from_env_local
+
+KEY_ID="${ASC_API_KEY_ID:-${KEY_ID:-}}"
+ISSUER_ID="${ASC_ISSUER_ID:-${ISSUER_ID:-}}"
+P8_SRC="${ASC_API_KEY_PATH:-$HOME/Downloads/AuthKey_${KEY_ID}.p8}"
+
+if [[ -z "$KEY_ID" || -z "$ISSUER_ID" ]]; then
+  echo "❌ ASC_API_KEY_ID / ASC_ISSUER_ID 없음"
+  echo "   bash AlphaTradingIOS/scripts/setup-asc-api-key.sh 실행 후 다시 시도"
+  exit 1
+fi
 
 if [[ ! -f "$P8_SRC" ]]; then
   echo "❌ API Key 없음: $P8_SRC"
@@ -37,9 +52,10 @@ echo "   ASC_ISSUER_ID=$ISSUER_ID"
 echo ""
 echo "Xcode 워크플로 Environment 창을 엽니다..."
 echo "아래 3개를 Secret 변수로 추가하세요 (+ 버튼):"
-echo "  ASC_API_KEY_ID = $KEY_ID"
-echo "  ASC_ISSUER_ID = $ISSUER_ID"
-echo "  ASC_API_PRIVATE_KEY = (.p8 전체 — 클립보드에 복사됨)"
+echo "  APPSTORE_KEY_ID = $KEY_ID"
+echo "  APPSTORE_ISSUER_ID = $ISSUER_ID"
+echo "  APPSTORE_PRIVATE_KEY = (.p8 전체 — 클립보드에 복사됨)"
+echo "  (ASC_API_KEY_ID 이름은 Xcode Cloud invalid value 오류 가능 — 사용하지 마세요)"
 echo ""
 
 printf '%s' "$P8_CONTENT" | pbcopy

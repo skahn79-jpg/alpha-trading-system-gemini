@@ -2,14 +2,21 @@
 -- Xcode Cloud: Archive 배포 준비 안내 + 워크플로 열기
 display dialog "Prepare Build 오류 해결 (MaterialDelivery 방식)
 
+ASC API 키는 필요 없습니다.
+MaterialDelivery도 Environment Secret 없이 성공했습니다.
+
+【1차 — 지금】
 1. Manage Workflows → Default → Edit
 2. Archive - iOS → 배포 준비: 없음
 3. Post-Actions: 모두 OFF
-4. Environment → Secret 3개 (encode-asc-key-for-cloud.sh 참고)
+4. Environment Variables: 비워둠 (ASC/APPSTORE 키 불필요)
 5. 저장 → Start Build
 
-Prepare Build 단계가 사라져 빌드 전체가 ✅ 됩니다.
-TestFlight 업로드는 ci_post_xcodebuild + ASC API Secret 으로 처리됩니다." buttons {"워크플로 열기", "닫기"} default button 1
+【2차 — Archive ✅ 후】
+Archive → 배포 준비: TestFlight and App Store
+
+【3차 — TestFlight Processing 후】
+Post-Actions → TestFlight Internal Testing ON" buttons {"워크플로 열기", "닫기"} default button 1
 
 if button returned of result is "워크플로 열기" then
 	tell application "Xcode" to activate
