@@ -467,7 +467,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\nGEN=\"${SRCROOT}/Config/Generated.xcconfig\"\nmkdir -p \"${SRCROOT}/Config\"\nif command -v node >/dev/null 2>&1 && [ -f \"${SRCROOT}/../scripts/sync-ios-api-config.mjs\" ]; then\n  MODE=\"debug\"\n  if [ \"${CONFIGURATION}\" = \"Release\" ]; then MODE=\"release\"; fi\n  (cd \"${SRCROOT}/..\" && node scripts/sync-ios-api-config.mjs \"$MODE\") || true\nfi\nif [ ! -f \"$GEN\" ]; then\n  printf '%s\\n' '// Xcode Cloud fallback' 'API_BASE_URL = https://alpha-trading-server.onrender.com' 'APP_API_KEY =' > \"$GEN\"\nfi\n";
+			shellScript = "set -e\nGEN=\"${SRCROOT}/Config/Generated.xcconfig\"\nEXAMPLE=\"${SRCROOT}/Config/Generated.xcconfig.example\"\nmkdir -p \"${SRCROOT}/Config\"\nif [ ! -f \"$GEN\" ] && [ -f \"$EXAMPLE\" ]; then cp \"$EXAMPLE\" \"$GEN\"; fi\nif [ ! -f \"$GEN\" ]; then\n  printf '%s\\n' 'API_BASE_URL = https://alpha-trading-server.onrender.com' 'APP_API_KEY =' > \"$GEN\"\nfi\nif command -v node >/dev/null 2>&1 && [ -f \"${SRCROOT}/../scripts/sync-ios-api-config.mjs\" ]; then\n  MODE=\"release\"\n  [ \"${CONFIGURATION}\" = \"Debug\" ] && MODE=\"debug\"\n  (cd \"${SRCROOT}/..\" && node scripts/sync-ios-api-config.mjs \"$MODE\") || true\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
