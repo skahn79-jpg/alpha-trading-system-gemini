@@ -7,11 +7,13 @@ on:
         description: "빌드 번호 (비우면 Release.xcconfig 값 사용)"
         required: false
         type: string
+  # Xcode Cloud와 중복 빌드 방지 — push 트리거 비활성화 (MaterialDelivery는 Xcode Cloud만 사용)
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - "AlphaTradingIOS/**"
+  #     - ".github/workflows/ios-testflight.yml"
   push:
-    branches: [main]
-    paths:
-      - "AlphaTradingIOS/**"
-      - ".github/workflows/ios-testflight.yml"
     tags:
       - "ios/v*"
 
@@ -119,7 +121,7 @@ jobs:
           cd AlphaTradingIOS
           xcodebuild -exportArchive \
             -archivePath build/AlphaTrading.xcarchive \
-            -exportOptionsPlist ExportOptions-ci.plist \
+            -exportOptionsPlist scripts/ExportOptions-export.plist \
             -exportPath build/export \
             -allowProvisioningUpdates
 

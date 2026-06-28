@@ -21,30 +21,42 @@ App Store Connect **Xcode Cloud** 탭에서 보이는 화면은 워크플로가 
 
 ## 2. Xcode / App Store Connect에서 워크플로 + TestFlight 설정
 
+> **MaterialDelivery(성공 사례)와 동일한 3단계 전략**을 사용하세요.  
+> 처음부터 TestFlight ON 하면 Prepare Build가 실패할 수 있습니다.
+
+### 단계별 배포 준비 (권장)
+
+| 단계 | Archive → 배포 준비 | Post-Actions |
+|------|---------------------|--------------|
+| **1차** (Archive 검증) | **없음** | 모두 OFF |
+| **2차** (업로드) | **TestFlight and App Store** | TestFlight Internal OFF |
+| **3차** (내부 테스트) | **TestFlight and App Store** | **TestFlight Internal Testing** ON |
+
+1차 빌드가 ✅이면 2차로 올리고, TestFlight에 Processing이 보이면 3차를 켭니다.
+
 ### A) App Store Connect (웹 — 권장)
 
 1. [App Store Connect](https://appstoreconnect.apple.com) → **ALPHA TRADING**
 2. **Xcode Cloud** 탭 → 왼쪽 **워크플로 관리**
 3. **Default** (또는 사용 중인 워크플로) → **…** → **편집**
-4. **Actions** → **Archive (iOS)** 펼치기:
-   - **Deployment Preparation**: **TestFlight and App Store** 선택  
-     (Distribution 인증서로 서명 — TestFlight 업로드 필수)
-5. **Post-Actions** → **+** → **TestFlight Internal Testing** (내부 테스트) 추가
-6. **저장**
+4. **Environment** → Xcode **16.4 (16F6)** (26.x 사용 중이면 변경)
+5. **Test** → **iPhone 15** + **iOS 18.x**
+6. **Actions** → **Archive (iOS)**:
+   - 1차: **Deployment Preparation** = **없음**
+   - 2차 이후: **TestFlight and App Store**
+7. **Post-Actions** → 3차에서만 **TestFlight Internal Testing** 추가
+8. **저장** → **Start Build** (Rebuild 아님, 최신 commit)
 
 ### B) Xcode (동일 설정)
 
 ```bash
 open AlphaTradingIOS/AlphaTrading.xcodeproj
-# 또는
-osascript AlphaTradingIOS/scripts/open-xcode-cloud-workflows.applescript
 ```
 
 1. **Product → Xcode Cloud → Manage Workflows…**
 2. **Default** → **Edit Workflow**
-3. Archive → **TestFlight and App Store**
-4. Post-Actions → **+ TestFlight Internal Testing**
-5. **Save**
+3. 위 표와 동일하게 단계별 설정
+4. **Save**
 
 ### C) TestFlight 테스터 (App Store Connect)
 
@@ -96,9 +108,12 @@ osascript AlphaTradingIOS/scripts/open-xcode-cloud-workflows.applescript
 
 | 스크립트 | 시점 | 역할 |
 |----------|------|------|
-| `ci_post_clone.sh` | 클론 직후 | `npm ci` + `sync-ios-api-config.mjs release` |
+| `ci_post_clone.sh` | 클론 직후 | `Generated.xcconfig` 생성 + (가능 시) npm sync |
+| `ci_pre_xcodebuild.sh` | xcodebuild 직전 | API 설정 검증·동기화 |
+| `ci_post_xcodebuild.sh` | Archive 직후 | ASC API 키 있으면 iTMSTransporter 업로드 (Prepare Build 우회) |
 
-Xcode Cloud 빌드 머신에서 `.env.local` 없이도 프로덕션 API URL로 동기화됩니다.
+> **권장**: 워크플로 Archive **배포 준비 = 없음** (1차) → MaterialDelivery와 동일.  
+> Prepare Build가 계속 실패하면 Environment에 ASC API 3개 변수를 추가하세요.
 
 ---
 
@@ -132,42 +147,32 @@ Xcode Cloud 빌드 머신에서 `.env.local` 없이도 프로덕션 API URL로 �
 | Archive 실패 (서명) | Xcode → Signing → Automatically manage signing |
 | API 연결 실패 | Environment에 `VITE_API_URL` 확인 |
 | 빌드 번호 중복 | `Release.xcconfig`의 `CURRENT_PROJECT_VERSION` 증가 후 push |
-| Prepare Build for App Store Connect 실패 | 아래 **§6-1** 참고 |
+| Prepare Build for App Store Connect 실패 | **§6-1** — `ExportOptions.plist`를 프로젝트 루트에서 제거함 (MaterialDelivery와 동일) |
 | Test - iOS: `iPhone 16 is incompatible with iOS 16.4` | 워크플로 Test → **iPhone 15** + **iOS 18.x** (Xcode 16.4 기준). iPhone 16은 iOS 18+ 필요 |
 
-### 6-1. Prepare Build 실패 (빌드 8~12 공통)
+### 6-1. Prepare Build 실패 (빌드 8~17)
 
-Archive·Export는 ✅ 인데 **Prepare Build for App Store Connect** 만 ❌ 인 경우, **앱 코드 문제가 아니라 Apple 업로드 인증 이슈**입니다. (Xcode 26.x Cloud 환경에서 자주 발생)
+Archive·Export는 ✅ 인데 **Prepare Build for App Store Connect** 만 ❌ 인 경우:
 
-#### 방법 A — Xcode 버전 다운그레이드 (가장 빠름)
+#### 방법 A — 3단계 워크플로 (MaterialDelivery 성공 패턴, **권장**)
 
-1. App Store Connect → **워크플로 관리** → 워크플로 **편집**
-2. **Environment** → Xcode 버전을 **Latest Release (16.x)** 로 변경 (**26.5 사용 중이면 변경**)
-3. **저장** → 새 push로 빌드
+1. **1차**: Archive → 배포 준비 **없음** → 빌드 ✅ 확인
+2. **2차**: 배포 준비 **TestFlight and App Store** → TestFlight Processing 확인
+3. **3차**: Post-Action **TestFlight Internal Testing** 추가
 
-#### 방법 B — ci_post_xcodebuild API 업로드 (우회)
+#### 방법 B — Xcode 버전 확인
 
-1. App Store Connect → **사용자 및 액세스** → **키** → API Key 생성 (Developer 권한)
-2. 워크플로 **Environment**에 비밀 변수 3개 추가:
+1. 워크플로 **Environment** → Xcode **16.4 (16F6)** (26.x는 Prepare Build 불안정)
+2. Test → **iPhone 15** + **iOS 18.x**
 
-| 변수 | 값 |
-|------|-----|
-| `ASC_API_KEY_ID` | Key ID |
-| `ASC_ISSUER_ID` | Issuer ID |
-| `ASC_API_PRIVATE_KEY` | `.p8` 파일 **전체 내용** |
+#### 방법 C — 빌드 아티팩트 수동 업로드 (지금 바로)
 
-3. `main` push → `ci_post_xcodebuild.sh`가 Archive 직후 **iTMSTransporter**로 업로드
-
-> Prepare Build 단계는 여전히 ❌로 보일 수 있으나, TestFlight에 빌드가 올라가면 성공입니다.
-
-#### 방법 C — 빌드 12 IPA 수동 업로드 (지금 바로)
-
-1. 빌드 12 → **아티팩트** → `AlphaTrading 1.0.0 app-store` 다운로드
+1. 빌드 → **아티팩트** → `AlphaTrading 1.0.0 app-store` 다운로드
 2. Mac에서 실행:
    ```bash
    bash AlphaTradingIOS/scripts/upload-ipa-testflight.sh ~/Downloads/AlphaTrading.ipa
    ```
-3. 자격 증명 없으면 **Transporter** 앱이 열립니다 → IPA 드래그
+3. 자격 증명 없으면 **Transporter** 앱 → IPA 드래그
 
 #### 방법 D — 인증서 재발급
 
@@ -179,9 +184,10 @@ Archive·Export는 ✅ 인데 **Prepare Build for App Store Connect** 만 ❌ �
 
 | 파일 | 역할 |
 |------|------|
-| `AlphaTradingIOS/ci_scripts/ci_post_clone.sh` | 클론 후 API 동기화 |
-| `AlphaTradingIOS/ci_scripts/ci_post_xcodebuild.sh` | Archive 후 TestFlight API 업로드 |
-| `AlphaTradingIOS/ExportOptions-ci.plist` | CI export 전용 (upload 없음) |
+| `AlphaTradingIOS/ci_scripts/ci_post_clone.sh` | 클론 후 API 설정 |
+| `AlphaTradingIOS/ci_scripts/ci_pre_xcodebuild.sh` | 빌드 직전 API 설정 검증 |
+| `AlphaTradingIOS/scripts/ExportOptions-export.plist` | GitHub Actions / 로컬 export 전용 |
+| `AlphaTradingIOS/scripts/ExportOptions-upload.plist` | 로컬 Transporter 업로드 전용 |
 | `AlphaTradingIOS/scripts/upload-ipa-testflight.sh` | 로컬 IPA 업로드 |
 | `AlphaTradingIOS/TESTFLIGHT.md` | 로컬 Archive 가이드 |
 | `GITHUB_SETUP.md` | GitHub Actions 대안 |

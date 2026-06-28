@@ -25,7 +25,7 @@ xcodebuild -project AlphaTrading.xcodeproj \
 echo "==> IPA Export"
 xcodebuild -exportArchive \
   -archivePath "$ARCHIVE" \
-  -exportOptionsPlist ExportOptions.plist \
+  -exportOptionsPlist scripts/ExportOptions-upload.plist \
   -exportPath "$EXPORT"
 
 IPA="$EXPORT/AlphaTrading.ipa"

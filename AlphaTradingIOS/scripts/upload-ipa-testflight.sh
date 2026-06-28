@@ -8,17 +8,25 @@ IPA="${1:-}"
 UPLOADED=0
 
 if [[ -z "$IPA" ]]; then
-  IPA="$(find "$HOME/Downloads" -maxdepth 2 -name '*.ipa' -print0 2>/dev/null \
+  IPA="$(find "$HOME/Downloads" -maxdepth 4 -name '*.ipa' -print0 2>/dev/null \
     | xargs -0 ls -t 2>/dev/null | head -1 || true)"
 fi
 
 if [[ -z "$IPA" || ! -f "$IPA" ]]; then
   echo "❌ IPA 파일을 찾을 수 없습니다."
   echo ""
-  echo "1) App Store Connect → Xcode Cloud → 빌드 → Archive - iOS → 아티팩트"
-  echo "   → 'AlphaTrading 1.0.0 app-store' 다운로드"
-  echo "2) 다시 실행:"
-  echo "   bash AlphaTradingIOS/scripts/upload-ipa-testflight.sh ~/Downloads/AlphaTrading.ipa"
+  echo "【다운로드 방법】"
+  echo "  App Store Connect → ALPHA TRADING → Xcode Cloud"
+  echo "  → 빌드 16 또는 17 → Archive - iOS → 아티팩트"
+  echo "  → 'AlphaTrading 1.0.0 app-store' 옆 [다운로드] 클릭"
+  echo ""
+  echo "  (다운로드 후 파일명이 다를 수 있습니다. 예: AlphaTrading 1.0.0.ipa)"
+  echo ""
+  echo "【업로드】다운로드한 .ipa 경로로 실행:"
+  echo "  bash AlphaTradingIOS/scripts/upload-ipa-testflight.sh ~/Downloads/다운받은파일.ipa"
+  echo ""
+  open "https://appstoreconnect.apple.com" 2>/dev/null || true
+  open -a Transporter 2>/dev/null || true
   exit 1
 fi
 
@@ -27,6 +35,18 @@ if [[ -f "$ROOT/.env.local" ]]; then
   set -a
   source <(grep -E '^(ASC_API_KEY_ID|ASC_API_ISSUER_ID|ASC_API_KEY_PATH|ASC_API_PRIVATE_KEY|APPLE_ID|APPLE_APP_PASSWORD)=' "$ROOT/.env.local" 2>/dev/null || true)
   set +a
+fi
+
+# Downloads 의 AuthKey_*.p8 자동 감지
+if [[ -z "${ASC_API_KEY_PATH:-}" || ! -f "${ASC_API_KEY_PATH:-}" ]]; then
+  AUTO_P8="$(find "$HOME/Downloads" -maxdepth 2 -name 'AuthKey_*.p8' 2>/dev/null | head -1)"
+  if [[ -n "$AUTO_P8" && -f "$AUTO_P8" ]]; then
+    ASC_API_KEY_PATH="$AUTO_P8"
+    if [[ -z "${ASC_API_KEY_ID:-}" ]]; then
+      ASC_API_KEY_ID="$(basename "$AUTO_P8" .p8 | sed 's/^AuthKey_//')"
+    fi
+    echo "==> API Key 감지: $ASC_API_KEY_PATH (ID: $ASC_API_KEY_ID)"
+  fi
 fi
 
 echo "==> TestFlight 업로드: $IPA"
@@ -61,10 +81,18 @@ if [[ "$UPLOADED" -eq 0 && -n "${APPLE_ID:-}" && -n "${APPLE_APP_PASSWORD:-}" ]]
 fi
 
 if [[ "$UPLOADED" -eq 0 ]]; then
-  echo "⚠️  .env.local 에 업로드 자격 증명이 없습니다."
-  echo "   ASC_API_KEY_ID / ASC_API_ISSUER_ID / ASC_API_KEY_PATH (또는 ASC_API_PRIVATE_KEY)"
-  echo "   또는 APPLE_ID / APPLE_APP_PASSWORD (앱 전용 비밀번호)"
-  echo ""
+  if [[ -n "${ASC_API_KEY_ID:-}" && -z "${ASC_API_ISSUER_ID:-}" ]]; then
+    echo "⚠️  API Key는 있으나 ASC_ISSUER_ID 가 없습니다."
+    echo "   App Store Connect → 사용자 및 액세스 → 키 → Issuer ID 복사 후:"
+    echo "   ASC_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx \\"
+    echo "   bash AlphaTradingIOS/scripts/upload-ipa-testflight.sh \"$IPA\""
+    echo ""
+  else
+    echo "⚠️  .env.local 에 업로드 자격 증명이 없습니다."
+    echo "   ASC_API_KEY_ID / ASC_API_ISSUER_ID / ASC_API_KEY_PATH (또는 ASC_API_PRIVATE_KEY)"
+    echo "   또는 APPLE_ID / APPLE_APP_PASSWORD (앱 전용 비밀번호)"
+    echo ""
+  fi
   echo "Transporter 앱으로 업로드합니다..."
   open -a Transporter "$IPA" 2>/dev/null || open -a Transporter
   echo "IPA를 Transporter 창에 드래그하세요: $IPA"
