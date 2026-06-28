@@ -69,6 +69,9 @@ node_modules/
 # GitHub Actions secrets export (로컬 전용, 절대 commit 금지)
 .github-secrets-export/
 
+# ASC API key (로컬 b64 — Cloud에는 Workflow Environment Secret 사용)
+AlphaTradingIOS/ci_scripts/asc_api_key.b64
+
 # build output
 dist/
 

@@ -150,33 +150,40 @@ open AlphaTradingIOS/AlphaTrading.xcodeproj
 | Prepare Build for App Store Connect 실패 | **§6-1** — `ExportOptions.plist`를 프로젝트 루트에서 제거함 (MaterialDelivery와 동일) |
 | Test - iOS: `iPhone 16 is incompatible with iOS 16.4` | 워크플로 Test → **iPhone 15** + **iOS 18.x** (Xcode 16.4 기준). iPhone 16은 iOS 18+ 필요 |
 
-### 6-1. Prepare Build 실패 (빌드 8~17)
+### 6-1. Prepare Build 실패 (빌드 8~20) — **코드 버그 아님**
 
-Archive·Export는 ✅ 인데 **Prepare Build for App Store Connect** 만 ❌ 인 경우:
+Archive·Test ✅ 인데 **Prepare Build for App Store Connect** 만 ❌:
 
-#### 방법 A — 3단계 워크플로 (MaterialDelivery 성공 패턴, **권장**)
+**원인:** Xcode Cloud가 App Store Connect에 인증할 때 `Session Proxy Provider` 오류 (Apple 서버/팀 권한 이슈). MaterialDelivery도 **배포 준비 없음**으로 1차 통과 후 TestFlight를 켰습니다.
 
-1. **1차**: Archive → 배포 준비 **없음** → 빌드 ✅ 확인
-2. **2차**: 배포 준비 **TestFlight and App Store** → TestFlight Processing 확인
-3. **3차**: Post-Action **TestFlight Internal Testing** 추가
+#### ✅ 해결 1 — 워크플로 변경 (필수, 2분)
 
-#### 방법 B — Xcode 버전 확인
+```text
+Product → Xcode Cloud → Manage Workflows → Edit
+→ Archive - iOS → 배포 준비: 없음
+→ Post-Actions: 모두 OFF
+```
 
-1. 워크플로 **Environment** → Xcode **16.4 (16F6)** (26.x는 Prepare Build 불안정)
-2. Test → **iPhone 15** + **iOS 18.x**
+또는 터미널:
 
-#### 방법 C — 빌드 아티팩트 수동 업로드 (지금 바로)
+```bash
+osascript AlphaTradingIOS/scripts/fix-xcode-cloud-prepare-build.applescript
+```
 
-1. 빌드 → **아티팩트** → `AlphaTrading 1.0.0 app-store` 다운로드
-2. Mac에서 실행:
-   ```bash
-   bash AlphaTradingIOS/scripts/upload-ipa-testflight.sh ~/Downloads/AlphaTrading.ipa
-   ```
-3. 자격 증명 없으면 **Transporter** 앱 → IPA 드래그
+→ **Prepare Build 단계 자체가 실행되지 않아** 빌드 전체 ✅
 
-#### 방법 D — 인증서 재발급
+#### ✅ 해결 2 — TestFlight 업로드 (ASC API)
 
-[Certificates](https://developer.apple.com/account/resources/certificates/list) → **Distribution Managed (Xcode Cloud)** 전부 **폐기** → 재빌드
+```bash
+bash AlphaTradingIOS/scripts/encode-asc-key-for-cloud.sh
+```
+
+출력된 3개 Secret을 Workflow → **Environment**에 추가.  
+`ci_post_xcodebuild.sh`가 Archive 직후 **iTMSTransporter**로 업로드합니다.
+
+#### ✅ 해결 3 — 수동 (가장 빠름)
+
+빌드 → **아티팩트** → `app-store` IPA → Transporter
 
 ---
 
