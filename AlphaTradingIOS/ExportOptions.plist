@@ -11,7 +11,7 @@
 	<key>uploadSymbols</key>
 	<true/>
 	<key>manageAppVersionAndBuildNumber</key>
-	<true/>
+	<false/>
 	<key>teamID</key>
 	<string>VWAZ3CVW5Z</string>
 </dict>
