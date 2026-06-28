@@ -132,7 +132,8 @@ Xcode Cloud 빌드 머신에서 `.env.local` 없이도 프로덕션 API URL로 �
 | Archive 실패 (서명) | Xcode → Signing → Automatically manage signing |
 | API 연결 실패 | Environment에 `VITE_API_URL` 확인 |
 | 빌드 번호 중복 | `Release.xcconfig`의 `CURRENT_PROJECT_VERSION` 증가 후 push |
-| **Prepare Build for App Store Connect 실패** (Archive·Export는 성공) | 아래 **§6-1** 참고 |
+| Prepare Build for App Store Connect 실패 | 아래 **§6-1** 참고 |
+| Test - iOS: `iPhone 16 is incompatible with iOS 16.4` | 워크플로 Test → **iPhone 15** + **iOS 18.x** (Xcode 16.4 기준). iPhone 16은 iOS 18+ 필요 |
 
 ### 6-1. Prepare Build 실패 (빌드 8~12 공통)
 
