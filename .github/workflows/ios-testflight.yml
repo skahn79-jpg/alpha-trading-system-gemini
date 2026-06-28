@@ -8,13 +8,17 @@ on:
         required: false
         type: string
   push:
+    branches: [main]
+    paths:
+      - "AlphaTradingIOS/**"
+      - ".github/workflows/ios-testflight.yml"
     tags:
       - "ios/v*"
 
 jobs:
   testflight:
     name: Archive & Upload
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
     env:
       DEVELOPMENT_TEAM: VWAZ3CVW5Z
@@ -115,17 +119,25 @@ jobs:
           cd AlphaTradingIOS
           xcodebuild -exportArchive \
             -archivePath build/AlphaTrading.xcarchive \
-            -exportOptionsPlist ExportOptions.plist \
+            -exportOptionsPlist ExportOptions-ci.plist \
             -exportPath build/export \
             -allowProvisioningUpdates
 
-      - name: Upload to TestFlight
-        uses: apple-actions/upload-testflight-build@v3
-        with:
-          app-path: AlphaTradingIOS/build/export/AlphaTrading.ipa
-          issuer-id: ${{ secrets.ASC_ISSUER_ID }}
-          api-key-id: ${{ secrets.ASC_API_KEY_ID }}
-          api-private-key: ${{ secrets.ASC_API_PRIVATE_KEY }}
+      - name: Upload to TestFlight (iTMSTransporter)
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_API_PRIVATE_KEY: ${{ secrets.ASC_API_PRIVATE_KEY }}
+        run: |
+          mkdir -p "$HOME/private_keys"
+          KEY_PATH="$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8"
+          printf '%s\n' "$ASC_API_PRIVATE_KEY" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          xcrun iTMSTransporter -m upload \
+            -assetFile AlphaTradingIOS/build/export/AlphaTrading.ipa \
+            -apiKey "$ASC_API_KEY_ID" \
+            -apiIssuer "$ASC_ISSUER_ID" \
+            -v informational
 
       - name: Summary
         run: |
