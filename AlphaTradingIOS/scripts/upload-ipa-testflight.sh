@@ -5,6 +5,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 IPA="${1:-}"
+UPLOADED=0
 
 if [[ -z "$IPA" ]]; then
   IPA="$(find "$HOME/Downloads" -maxdepth 2 -name '*.ipa' -print0 2>/dev/null \
@@ -24,22 +25,44 @@ fi
 if [[ -f "$ROOT/.env.local" ]]; then
   # shellcheck disable=SC1090
   set -a
-  source <(grep -E '^(ASC_API_KEY_ID|ASC_API_ISSUER_ID|ASC_API_KEY_PATH|APPLE_ID|APPLE_APP_PASSWORD)=' "$ROOT/.env.local" 2>/dev/null || true)
+  source <(grep -E '^(ASC_API_KEY_ID|ASC_API_ISSUER_ID|ASC_API_KEY_PATH|ASC_API_PRIVATE_KEY|APPLE_ID|APPLE_APP_PASSWORD)=' "$ROOT/.env.local" 2>/dev/null || true)
   set +a
 fi
 
 echo "==> TestFlight 업로드: $IPA"
 
-if [[ -n "${ASC_API_KEY_ID:-}" && -n "${ASC_API_ISSUER_ID:-}" && -n "${ASC_API_KEY_PATH:-}" && -f "${ASC_API_KEY_PATH}" ]]; then
-  xcrun altool --upload-app --type ios --file "$IPA" \
-    --apiKey "$ASC_API_KEY_ID" \
-    --apiIssuer "$ASC_API_ISSUER_ID"
-elif [[ -n "${APPLE_ID:-}" && -n "${APPLE_APP_PASSWORD:-}" ]]; then
-  xcrun altool --upload-app --type ios --file "$IPA" \
-    -u "$APPLE_ID" -p "$APPLE_APP_PASSWORD"
-else
+if [[ -n "${ASC_API_KEY_ID:-}" && -n "${ASC_API_ISSUER_ID:-}" ]]; then
+  KEY_DIR="$HOME/private_keys"
+  mkdir -p "$KEY_DIR"
+  if [[ -n "${ASC_API_KEY_PATH:-}" && -f "${ASC_API_KEY_PATH}" ]]; then
+    KEY_PATH="$ASC_API_KEY_PATH"
+  elif [[ -n "${ASC_API_PRIVATE_KEY:-}" ]]; then
+    KEY_PATH="$KEY_DIR/AuthKey_${ASC_API_KEY_ID}.p8"
+    printf '%s\n' "$ASC_API_PRIVATE_KEY" > "$KEY_PATH"
+    chmod 600 "$KEY_PATH"
+  fi
+  if [[ -n "${KEY_PATH:-}" && -f "$KEY_PATH" ]]; then
+    xcrun iTMSTransporter -m upload \
+      -assetFile "$IPA" \
+      -apiKey "$ASC_API_KEY_ID" \
+      -apiIssuer "$ASC_API_ISSUER_ID" \
+      -v informational
+    UPLOADED=1
+  fi
+fi
+
+if [[ "$UPLOADED" -eq 0 && -n "${APPLE_ID:-}" && -n "${APPLE_APP_PASSWORD:-}" ]]; then
+  xcrun iTMSTransporter -m upload \
+    -assetFile "$IPA" \
+    -u "$APPLE_ID" \
+    -p "$APPLE_APP_PASSWORD" \
+    -v informational
+  UPLOADED=1
+fi
+
+if [[ "$UPLOADED" -eq 0 ]]; then
   echo "⚠️  .env.local 에 업로드 자격 증명이 없습니다."
-  echo "   ASC_API_KEY_ID / ASC_API_ISSUER_ID / ASC_API_KEY_PATH"
+  echo "   ASC_API_KEY_ID / ASC_API_ISSUER_ID / ASC_API_KEY_PATH (또는 ASC_API_PRIVATE_KEY)"
   echo "   또는 APPLE_ID / APPLE_APP_PASSWORD (앱 전용 비밀번호)"
   echo ""
   echo "Transporter 앱으로 업로드합니다..."

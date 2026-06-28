@@ -132,7 +132,45 @@ Xcode Cloud 빌드 머신에서 `.env.local` 없이도 프로덕션 API URL로 �
 | Archive 실패 (서명) | Xcode → Signing → Automatically manage signing |
 | API 연결 실패 | Environment에 `VITE_API_URL` 확인 |
 | 빌드 번호 중복 | `Release.xcconfig`의 `CURRENT_PROJECT_VERSION` 증가 후 push |
-| Prepare Build for App Store Connect 실패 | ① `Release.xcconfig`에 `MARKETING_VERSION` 확인 ② [인증서](https://developer.apple.com/account/resources/certificates/list)에서 **Distribution Managed (Xcode Cloud)** 폐기 후 재빌드 ③ 빌드 **로그** → `xcodebuild-export-archive.log` 확인 |
+| **Prepare Build for App Store Connect 실패** (Archive·Export는 성공) | 아래 **§6-1** 참고 |
+
+### 6-1. Prepare Build 실패 (빌드 8~12 공통)
+
+Archive·Export는 ✅ 인데 **Prepare Build for App Store Connect** 만 ❌ 인 경우, **앱 코드 문제가 아니라 Apple 업로드 인증 이슈**입니다. (Xcode 26.x Cloud 환경에서 자주 발생)
+
+#### 방법 A — Xcode 버전 다운그레이드 (가장 빠름)
+
+1. App Store Connect → **워크플로 관리** → 워크플로 **편집**
+2. **Environment** → Xcode 버전을 **Latest Release (16.x)** 로 변경 (**26.5 사용 중이면 변경**)
+3. **저장** → 새 push로 빌드
+
+#### 방법 B — ci_post_xcodebuild API 업로드 (우회)
+
+1. App Store Connect → **사용자 및 액세스** → **키** → API Key 생성 (Developer 권한)
+2. 워크플로 **Environment**에 비밀 변수 3개 추가:
+
+| 변수 | 값 |
+|------|-----|
+| `ASC_API_KEY_ID` | Key ID |
+| `ASC_ISSUER_ID` | Issuer ID |
+| `ASC_API_PRIVATE_KEY` | `.p8` 파일 **전체 내용** |
+
+3. `main` push → `ci_post_xcodebuild.sh`가 Archive 직후 **iTMSTransporter**로 업로드
+
+> Prepare Build 단계는 여전히 ❌로 보일 수 있으나, TestFlight에 빌드가 올라가면 성공입니다.
+
+#### 방법 C — 빌드 12 IPA 수동 업로드 (지금 바로)
+
+1. 빌드 12 → **아티팩트** → `AlphaTrading 1.0.0 app-store` 다운로드
+2. Mac에서 실행:
+   ```bash
+   bash AlphaTradingIOS/scripts/upload-ipa-testflight.sh ~/Downloads/AlphaTrading.ipa
+   ```
+3. 자격 증명 없으면 **Transporter** 앱이 열립니다 → IPA 드래그
+
+#### 방법 D — 인증서 재발급
+
+[Certificates](https://developer.apple.com/account/resources/certificates/list) → **Distribution Managed (Xcode Cloud)** 전부 **폐기** → 재빌드
 
 ---
 
@@ -141,5 +179,8 @@ Xcode Cloud 빌드 머신에서 `.env.local` 없이도 프로덕션 API URL로 �
 | 파일 | 역할 |
 |------|------|
 | `AlphaTradingIOS/ci_scripts/ci_post_clone.sh` | 클론 후 API 동기화 |
+| `AlphaTradingIOS/ci_scripts/ci_post_xcodebuild.sh` | Archive 후 TestFlight API 업로드 |
+| `AlphaTradingIOS/ExportOptions-ci.plist` | CI export 전용 (upload 없음) |
+| `AlphaTradingIOS/scripts/upload-ipa-testflight.sh` | 로컬 IPA 업로드 |
 | `AlphaTradingIOS/TESTFLIGHT.md` | 로컬 Archive 가이드 |
 | `GITHUB_SETUP.md` | GitHub Actions 대안 |
