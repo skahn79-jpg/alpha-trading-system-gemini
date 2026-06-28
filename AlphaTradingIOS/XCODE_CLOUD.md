@@ -189,6 +189,37 @@ bash AlphaTradingIOS/scripts/encode-asc-key-for-cloud.sh
 
 빌드 → **아티팩트** → `app-store` IPA → Transporter
 
+### 6-2. 전체 실패 + Archive 오류 1개 (빌드 23)
+
+**증상:** Archive / Prepare Build / `ci_post_xcodebuild` 로그는 ✅인데 빌드 전체 ❌, Archive - iOS에 오류 1개, Test - iOS 진행 중 또는 ❌
+
+**핵심:** `ci_post_xcodebuild.sh`는 **항상 exit 0**입니다. 업로드 실패·export 실패도 Xcode Cloud 전체 상태를 바꾸지 않습니다.
+
+| 단계 | exit code | 빌드 실패 원인? |
+|------|-----------|----------------|
+| `ci_post_xcodebuild.sh` | **항상 0** | ❌ 아님 |
+| Prepare Build for App Store Connect | non-zero | ✅ Archive 하위 오류 1개 |
+| Post-action TestFlight Internal Testing | non-zero | ✅ 전체 ❌ |
+| Test - iOS | non-zero | ✅ 전체 ❌ |
+
+**TestFlight 업로드 확인 (빌드 ❌여도 업로드됐을 수 있음):**
+
+1. Xcode Cloud Build #23 → **ci_post_xcodebuild** 로그 검색: `SUMMARY upload_succeeded=1`
+2. [App Store Connect](https://appstoreconnect.apple.com) → **ALPHA TRADING** → **TestFlight** → `1.0.0` 아래 빌드 **23** Processing 여부
+3. 없으면 Artifacts → IPA → Transporter
+
+**다음 자동 조치 (MaterialDelivery Build 25~27 패턴):**
+
+| 우선 | 조치 |
+|------|------|
+| 1 | Workflow **1차**: Archive 배포 준비 **없음**, Post-actions **모두 OFF** → Start Build (빌드 24) |
+| 2 | 1차 ✅ 후 **2차**: 배포 준비 TestFlight and App Store, Internal Testing OFF |
+| 3 | Test - iOS 실패 시: Test → **iPhone 15 + iOS 18.x** (Xcode 16.4) |
+| 4 | 진단 스크립트: `bash AlphaTradingIOS/scripts/diagnose-xcode-cloud-build.sh` |
+| 5 | 로컬 테스트: `bash AlphaTradingIOS/scripts/run-local-ci-preflight.sh` |
+
+**Internal Testing Post-action:** TestFlight에 빌드가 Processing 된 뒤에만 켜세요. Prepare Build와 동시에 켜면 전체 ❌가 자주 납니다.
+
 ---
 
 ## 7. 관련 파일
@@ -200,5 +231,7 @@ bash AlphaTradingIOS/scripts/encode-asc-key-for-cloud.sh
 | `AlphaTradingIOS/scripts/ExportOptions-export.plist` | GitHub Actions / 로컬 export 전용 |
 | `AlphaTradingIOS/scripts/ExportOptions-upload.plist` | 로컬 Transporter 업로드 전용 |
 | `AlphaTradingIOS/scripts/upload-ipa-testflight.sh` | 로컬 IPA 업로드 |
+| `AlphaTradingIOS/scripts/diagnose-xcode-cloud-build.sh` | 빌드 실패 원인 진단 |
+| `AlphaTradingIOS/scripts/run-local-ci-preflight.sh` | 로컬 Test+Build 사전 검증 |
 | `AlphaTradingIOS/TESTFLIGHT.md` | 로컬 Archive 가이드 |
 | `GITHUB_SETUP.md` | GitHub Actions 대안 |
