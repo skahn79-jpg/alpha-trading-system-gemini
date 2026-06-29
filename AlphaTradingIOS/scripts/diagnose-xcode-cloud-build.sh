@@ -19,6 +19,19 @@ echo "- 모든 경로에서 exit 0 (업로드 실패해도 Xcode Cloud 전체 �
 echo "- 로그에서 SUMMARY upload_attempted=1 upload_succeeded=1 이면 TestFlight 업로드 요청 성공"
 echo "- ci_post ✅ + 빌드 ❌ → Prepare Build / Post-action / Test - iOS 중 하나 실패"
 
+section "Archive·Prepare Build ✅ + 전체 ❌ (빌드 25)"
+cat <<'EOF'
+근본 원인 (우선순위):
+  1. Test - iOS — 시뮬레이터/OS 불일치 (iPhone 16 + iOS 16.4 등)
+  2. Post-action TestFlight Internal Testing — Processing 전 배포 시도
+  (Prepare Build 통과 시) ci_post / Prepare Build 는 원인 아님
+
+영구 수정:
+  - Workflow 1차: Scheme AlphaTrading-CI, Archive만, 배포 준비=없음, Post-actions=OFF
+  - 또는 Test OFF / iPhone 15 + iOS 18.x
+  - AlphaTrading-CI.xcscheme = Archive 전용 (Test 타깃 없음)
+EOF
+
 section "전체 실패 + Archive 1 error (MaterialDelivery Build 25 패턴)"
 cat <<'EOF'
 가능 원인 (우선순위):

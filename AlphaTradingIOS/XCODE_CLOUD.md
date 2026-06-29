@@ -220,6 +220,38 @@ bash AlphaTradingIOS/scripts/encode-asc-key-for-cloud.sh
 
 **Internal Testing Post-action:** TestFlight에 빌드가 Processing 된 뒤에만 켜세요. Prepare Build와 동시에 켜면 전체 ❌가 자주 납니다.
 
+### 6-3. Archive·Prepare Build ✅ + 전체 ❌ (빌드 25)
+
+**증상:** `Archive - iOS`, `Prepare Build for App Store Connect`, `ci_post_xcodebuild` 로그는 ✅인데 **빌드 전체 ❌**
+
+**왜?** Xcode Cloud는 **Actions**(Test, Archive)와 **Post-Actions**를 별도로 집계합니다. Archive가 성공해도 다른 단계가 실패하면 전체가 ❌입니다.
+
+| 실패 단계 | 전형적 로그 | 원인 |
+|-----------|-------------|------|
+| **Test - iOS** | `incompatible with iOS`, `Unable to find destination` | 워크플로 Test → iPhone 16 + iOS 16.4 등 **시뮬레이터/OS 불일치** |
+| **Post-action TestFlight Internal Testing** | `No builds available`, `build not found` | TestFlight Processing 전에 Internal Testing ON |
+| Prepare Build | (빌드 25에서는 통과) | — |
+| ci_post_xcodebuild | 항상 exit 0 | **원인 아님** |
+
+**근본 원인 (빌드 25, 우선순위 2개):**
+
+1. **Test - iOS** — 워크플로에 Test action이 켜져 있고, 시뮬레이터/OS가 Xcode 16.4 러너와 맞지 않음 (MaterialDelivery 빌드 25와 동일 패턴의 *후속* 실패)
+2. **Post-action TestFlight Internal Testing** — Archive 직후 내부 테스트 배포를 시도하지만 ASC에 해당 빌드가 아직 없음
+
+**영구 수정 (저장소 + 워크플로):**
+
+| 조치 | 내용 |
+|------|------|
+| **1차 워크플로** | Scheme **`AlphaTrading-CI`** (Test 없음), Actions: **Archive만**, 배포 준비 **없음**, Post-actions **모두 OFF** |
+| **대안** | Scheme `AlphaTrading` 유지 시 Test action **OFF**, 또는 Test → **iPhone 15 + iOS 18.x** |
+| **스킴** | `AlphaTrading-CI.xcscheme` — Test 타깃 제외, Archive 전용 (로컬 개발은 `AlphaTrading` 사용) |
+| **2차** | 배포 준비 TestFlight and App Store, Internal Testing OFF |
+| **3차** | TestFlight Processing 확인 후 Internal Testing ON |
+
+```bash
+bash AlphaTradingIOS/scripts/fix-xcode-cloud-workflow.command
+```
+
 ---
 
 ## 7. 관련 파일
@@ -231,6 +263,8 @@ bash AlphaTradingIOS/scripts/encode-asc-key-for-cloud.sh
 | `AlphaTradingIOS/scripts/ExportOptions-export.plist` | GitHub Actions / 로컬 export 전용 |
 | `AlphaTradingIOS/scripts/ExportOptions-upload.plist` | 로컬 Transporter 업로드 전용 |
 | `AlphaTradingIOS/scripts/upload-ipa-testflight.sh` | 로컬 IPA 업로드 |
+| `AlphaTrading.xcodeproj/xcshareddata/xcschemes/AlphaTrading.xcscheme` | 로컬 개발 (Test skipped=YES — Cloud Test 실패 방지) |
+| `AlphaTrading.xcodeproj/xcshareddata/xcschemes/AlphaTrading-CI.xcscheme` | **Xcode Cloud 1차** Archive 전용 (Test 없음) |
 | `AlphaTradingIOS/scripts/diagnose-xcode-cloud-build.sh` | 빌드 실패 원인 진단 |
 | `AlphaTradingIOS/scripts/run-local-ci-preflight.sh` | 로컬 Test+Build 사전 검증 |
 | `AlphaTradingIOS/TESTFLIGHT.md` | 로컬 Archive 가이드 |

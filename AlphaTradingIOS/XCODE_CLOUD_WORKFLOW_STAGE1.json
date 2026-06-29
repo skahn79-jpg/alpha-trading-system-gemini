@@ -1,0 +1,51 @@
+{
+  "_comment": "Xcode Cloud 워크플로는 Git에 저장되지 않습니다. ASC/Xcode UI에서 아래 값과 일치하는지 수동 확인하세요.",
+  "required_stage": 1,
+  "stage_name": "Archive-only 검증 (MaterialDelivery Build 27 패턴)",
+  "workflow_name": "Default",
+  "scheme": "AlphaTrading-CI",
+  "scheme_note": "Archive 전용, Test 타깃 없음. 로컬 개발은 AlphaTrading 사용.",
+  "environment": {
+    "xcode_version": "16.4 (16F6)",
+    "xcode_version_avoid": ["26.x"]
+  },
+  "test": {
+    "enabled": false,
+    "enabled_note": "1차는 Archive만. Test 켤 경우 아래 device/os 사용",
+    "device": "iPhone 15",
+    "os": "iOS 18.x",
+    "avoid": "iPhone 16 + iOS 16.4 (incompatible)"
+  },
+  "archive": {
+    "enabled": true,
+    "deployment_preparation": "none",
+    "deployment_preparation_ko": "없음",
+    "deployment_preparation_avoid": [
+      "TestFlight and App Store",
+      "App Store Connect"
+    ]
+  },
+  "post_actions": {
+    "testflight_internal_testing": false,
+    "app_store_connect_upload": false,
+    "all_off": true
+  },
+  "environment_variables": {
+    "required_for_stage1": [],
+    "optional_later": [
+      "VITE_API_URL",
+      "APP_API_KEY"
+    ],
+    "not_required_for_xcode_cloud_upload": [
+      "APPSTORE_KEY_ID",
+      "APPSTORE_ISSUER_ID",
+      "APPSTORE_PRIVATE_KEY"
+    ]
+  },
+  "apply_command": "bash AlphaTradingIOS/scripts/apply-workflow-stage1-only.command",
+  "next_stage_after_success": {
+    "stage": 2,
+    "archive_deployment_preparation": "TestFlight and App Store",
+    "post_actions_testflight_internal": false
+  }
+}
