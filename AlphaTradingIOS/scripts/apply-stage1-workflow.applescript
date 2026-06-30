@@ -1,5 +1,5 @@
 #!/usr/bin/env osascript
--- Stage 1: AlphaTrading-CI + Archive 배포 준비 없음 + Test OFF (MaterialDelivery Build 27)
+-- Stage 1: Test OFF + AlphaTrading-CI + Archive 배포 준비 없음 + Start Build
 property projectPath : "/Users/aiden.an/Desktop/alpha-trading-system-gemini/AlphaTradingIOS/AlphaTrading.xcodeproj"
 
 on run
@@ -7,40 +7,32 @@ on run
 		activate
 		open projectPath
 	end tell
-	delay 2.5
+	delay 2
 
 	my openWorkflowManager()
 	delay 1.5
 	my openEditWorkflow()
 	delay 2
 
-	-- General: Scheme → AlphaTrading-CI
-	my clickText("General")
+	-- 1) Test - iOS 비활성화 (사이드바 토글)
+	my disableTestAction()
+	delay 0.8
+
+	-- 2) General → Scheme AlphaTrading-CI
+	my clickSidebar("General")
 	delay 0.5
 	my pickScheme("AlphaTrading-CI")
 	delay 0.5
 
-	-- Test OFF
-	my clickText("Test - iOS")
+	-- 3) Archive → 배포 준비 없음
+	my clickSidebar("Archive - iOS")
 	delay 0.5
-	my tryDisableCheckbox()
-
-	-- Archive: 배포 준비 없음
-	my clickText("Archive - iOS")
+	my pickDeploymentNone()
 	delay 0.5
-	my clickText("Archive")
-	delay 0.8
-	my pickPopup({"없음", "None", "No Distribution", "Do Not Distribute"})
-
-	-- Post-Actions OFF
-	my clickText("Post-Actions")
-	delay 0.3
-	my clickText("Post-actions")
-	delay 0.2
-	my tryDisableCheckbox()
 
 	my saveWorkflow()
-	delay 0.5
+	delay 1
+	my startBuild()
 	return "OK"
 end run
 
@@ -74,41 +66,68 @@ on openEditWorkflow()
 	end tell
 end openEditWorkflow
 
-on pickScheme(schemeName)
+on disableTestAction()
 	tell application "System Events"
 		tell process "Xcode"
+			-- Test - iOS 행 선택 후 토글 OFF
 			try
-				click pop up button 1 of window 1
+				click static text "Test - iOS" of window 1
 				delay 0.3
-				click menu item schemeName of menu 1
+			end try
+			try
+				set tg to first checkbox of group 1 of window 1 whose value is 1
+				click tg
 			on error
 				try
-					click pop up button 2 of window 1
-					delay 0.3
-					click menu item schemeName of menu 1
+					-- workflow action enable switch (often right of action name)
+					click (first checkbox whose value is 1 of window 1)
 				end try
 			end try
 		end tell
 	end tell
-end pickScheme
+end disableTestAction
 
-on configureArchive()
-	my clickText("Archive - iOS")
-	my clickText("Archive")
-	delay 0.8
-	my pickPopup({"없음", "None", "No Distribution", "Do Not Distribute"})
-end configureArchive
-
-on tryDisableCheckbox()
+on clickSidebar(labelText)
 	tell application "System Events"
 		tell process "Xcode"
 			try
-				set cb to first checkbox whose value is 1 of window 1
-				click cb
+				click static text labelText of window 1
+			on error
+				click static text labelText
 			end try
 		end tell
 	end tell
-end tryDisableCheckbox
+end clickSidebar
+
+on pickScheme(schemeName)
+	tell application "System Events"
+		tell process "Xcode"
+			repeat with idx from 1 to 4
+				try
+					tell pop up button idx of window 1
+						click
+						delay 0.3
+						click menu item schemeName of menu 1
+						return
+					end tell
+				end try
+			end repeat
+		end tell
+	end tell
+end pickScheme
+
+on pickDeploymentNone()
+	tell application "System Events"
+		tell process "Xcode"
+			repeat with labelText in {"없음", "None", "No Distribution", "Do Not Distribute"}
+				try
+					click radio button labelText of window 1
+					return
+				end try
+			end repeat
+		end tell
+	end tell
+end pickDeploymentNone
 
 on saveWorkflow()
 	tell application "System Events"
@@ -126,37 +145,23 @@ on saveWorkflow()
 	end tell
 end saveWorkflow
 
-on clickText(txt)
-	try
-		tell application "System Events"
-			tell process "Xcode"
-				click static text txt of window 1
-			end tell
-		end tell
-	on error
-		try
-			tell application "System Events"
-				tell process "Xcode"
-					click static text txt
-				end tell
-			end tell
-		end try
-	end try
-end clickText
-
-on pickPopup(choices)
+on startBuild()
 	tell application "System Events"
 		tell process "Xcode"
-			repeat with labelText in choices
+			set frontmost to true
+			try
+				click button "Start Build" of sheet 1 of window 1
+			on error
 				try
-					tell pop up button 1 of window 1
-						click
-						delay 0.3
-						click menu item labelText of menu 1
-						return
-					end tell
+					click button "빌드 시작" of sheet 1 of window 1
+				on error
+					try
+						click button "Start Build" of window 1
+					on error
+						click button "빌드 시작" of window 1
+					end try
 				end try
-			end repeat
+			end try
 		end tell
 	end tell
-end pickPopup
+end startBuild
