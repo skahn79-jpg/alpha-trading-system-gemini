@@ -26,8 +26,12 @@ echo ""
 
 open "$ROOT/AlphaTradingIOS/AlphaTrading.xcodeproj" 2>/dev/null || true
 sleep 1
-osascript "$ROOT/AlphaTradingIOS/scripts/fix-xcode-cloud-prepare-build.applescript" 2>/dev/null || true
-osascript "$ROOT/AlphaTradingIOS/scripts/open-xcode-cloud-workflows.applescript" 2>/dev/null || true
+echo ""
+echo "==> Stage 1 UI 자동 적용 시도 (Test OFF + AlphaTrading-CI + Archive 없음)..."
+osascript "$ROOT/AlphaTradingIOS/scripts/apply-stage1-workflow.applescript" 2>/dev/null || {
+  osascript "$ROOT/AlphaTradingIOS/scripts/fix-xcode-cloud-prepare-build.applescript" 2>/dev/null || true
+  osascript "$ROOT/AlphaTradingIOS/scripts/open-xcode-cloud-workflows.applescript" 2>/dev/null || true
+}
 
 echo ""
 echo "수동 확인 후 저장 → Start Build (Rebuild 아님, 최신 commit)"

@@ -1,8 +1,16 @@
 #!/bin/sh
-# Xcode Cloud: Archive 성공 후 TestFlight 업로드 (Prepare Build 실패 우회)
-# NOTE: 이 스크립트는 실패해도 exit 0 — Xcode Cloud 전체 빌드 상태를 바꾸지 않음.
-#       Prepare Build / Post-action / Test 실패는 워크플로 설정으로 해결해야 함.
+# Xcode Cloud: Archive 직후 — 선택적 수동 TestFlight 업로드
+# MaterialDelivery는 이 스크립트 없이 워크플로 TestFlight만 사용합니다.
 echo "[CI] ===== ci_post_xcodebuild.sh started ====="
+
+if [ "${ENABLE_CI_ASC_UPLOAD:-}" != "1" ]; then
+  echo "[CI] MaterialDelivery mode: ENABLE_CI_ASC_UPLOAD≠1 — ASC 수동 업로드 스킵"
+  echo "[CI] TestFlight는 워크플로 Archive → TestFlight and App Store 로 처리"
+  echo "[CI] SUMMARY upload_attempted=0 upload_succeeded=0 exit=0 (workflow mode)"
+  echo "[CI] ===== ci_post_xcodebuild.sh finished ====="
+  exit 0
+fi
+
 echo "[CI] CI_XCODEBUILD_EXIT_CODE=${CI_XCODEBUILD_EXIT_CODE:-unset}"
 echo "[CI] CI_ARCHIVE_PATH=${CI_ARCHIVE_PATH:-unset}"
 
@@ -16,7 +24,7 @@ if [ -z "${CI_ARCHIVE_PATH:-}" ]; then
 fi
 
 if [ "${CI_XCODEBUILD_EXIT_CODE:-1}" != "0" ]; then
-  echo "[CI] WARN: xcodebuild exit non-zero (often Prepare Build for ASC) — fallback upload will still run"
+  echo "[CI] WARN: xcodebuild exit non-zero — fallback upload may still run"
 fi
 
 REPO_ROOT="${CI_PRIMARY_REPOSITORY_PATH:-$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)}"
@@ -24,17 +32,24 @@ IOS_DIR="$REPO_ROOT/AlphaTradingIOS"
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 B64_FILE="$SCRIPT_DIR/asc_api_key.b64"
 TMP_KEY="${TMPDIR:-/tmp}/asc_key_$$.p8"
+DEBUG_LOG="$REPO_ROOT/.cursor/debug-73e95f.log"
 
-# Xcode Cloud는 ASC_API_KEY_ID 이름에 Apple 서버 검증이 걸려 "invalid value" 오류가 날 수 있음.
-# → Workflow Environment에는 APPSTORE_* 이름 사용 (아래 fallback 순서).
+log_debug() {
+  _msg="$1"
+  _data="$2"
+  _ts="$(date +%s)000"
+  mkdir -p "$(dirname "$DEBUG_LOG")" 2>/dev/null || true
+  printf '%s\n' "{\"sessionId\":\"73e95f\",\"runId\":\"ci-post\",\"location\":\"ci_post_xcodebuild.sh\",\"message\":\"$_msg\",\"data\":$_data,\"timestamp\":$_ts}" >> "$DEBUG_LOG" 2>/dev/null || true
+}
+
 ASC_API_KEY_ID="${APPSTORE_KEY_ID:-${ASC_API_KEY_ID:-}}"
 ASC_ISSUER_ID="${APPSTORE_ISSUER_ID:-${ASC_ISSUER_ID:-}}"
 PRIVATE_KEY="${APPSTORE_PRIVATE_KEY:-${ASC_API_PRIVATE_KEY:-}}"
 
 if [ -z "$ASC_API_KEY_ID" ] || [ -z "$ASC_ISSUER_ID" ]; then
   echo "[CI] WARN: APPSTORE_KEY_ID / APPSTORE_ISSUER_ID missing — upload skipped"
-  echo "[CI] 로컬: bash AlphaTradingIOS/scripts/setup-asc-api-key.sh"
-  echo "[CI] SUMMARY upload_attempted=0 upload_succeeded=0 exit=0 (no ASC credentials)"
+  log_debug "asc_missing" "{\"ok\":false}"
+  echo "[CI] SUMMARY upload_attempted=0 upload_succeeded=0 exit=0"
   exit 0
 fi
 
@@ -49,7 +64,6 @@ decode_b64_to_file() {
 
 B64_SECRET="${APPSTORE_PRIVATE_KEY_BASE64:-${ASC_API_PRIVATE_KEY_BASE64:-}}"
 if [ -z "$PRIVATE_KEY" ] && [ -n "$B64_SECRET" ]; then
-  echo "[CI] decode private key (base64)"
   decode_b64_to_file "$B64_SECRET" "$TMP_KEY" || true
   if [ -s "$TMP_KEY" ]; then
     PRIVATE_KEY="$(cat "$TMP_KEY")"
@@ -57,9 +71,7 @@ if [ -z "$PRIVATE_KEY" ] && [ -n "$B64_SECRET" ]; then
 fi
 
 if [ -z "$PRIVATE_KEY" ] && [ -f "$B64_FILE" ]; then
-  echo "[CI] using asc_api_key.b64"
-  B64_CONTENT="$(tr -d '\n\r ' < "$B64_FILE")"
-  decode_b64_to_file "$B64_CONTENT" "$TMP_KEY" || true
+  decode_b64_to_file "$(tr -d '\n\r ' < "$B64_FILE")" "$TMP_KEY" || true
   if [ -s "$TMP_KEY" ]; then
     PRIVATE_KEY="$(cat "$TMP_KEY")"
   fi
@@ -67,12 +79,9 @@ fi
 
 if [ -z "$PRIVATE_KEY" ]; then
   echo "[CI] WARN: ASC private key missing — upload skipped"
-  echo "[CI] Workflow Environment Secret 추가 (권장 이름):"
-  echo "[CI]   APPSTORE_KEY_ID / APPSTORE_ISSUER_ID / APPSTORE_PRIVATE_KEY"
-  echo "[CI]   (ASC_API_KEY_ID 는 Xcode Cloud UI에서 invalid value 오류 가능)"
-  echo "[CI] 또는 로컬: bash AlphaTradingIOS/scripts/encode-asc-key-for-cloud.sh"
+  log_debug "p8_missing" "{\"ok\":false}"
   rm -f "$TMP_KEY"
-  echo "[CI] SUMMARY upload_attempted=0 upload_succeeded=0 exit=0 (no private key)"
+  echo "[CI] SUMMARY upload_attempted=0 upload_succeeded=0 exit=0"
   exit 0
 fi
 
@@ -85,40 +94,35 @@ printf '%s\n' "$PRIVATE_KEY" > "$KEY_PATH"
 chmod 600 "$KEY_PATH"
 rm -f "$TMP_KEY"
 
-echo "[CI] export IPA (key_id=$ASC_API_KEY_ID)"
 if ! xcodebuild -exportArchive \
   -archivePath "$CI_ARCHIVE_PATH" \
   -exportOptionsPlist "$IOS_DIR/scripts/ExportOptions-export.plist" \
   -exportPath "$EXPORT_DIR" \
   -allowProvisioningUpdates; then
-  echo "[CI] WARN: exportArchive failed"
-  echo "[CI] SUMMARY upload_attempted=0 upload_succeeded=0 exit=0 (export failed)"
+  log_debug "export_failed" "{\"ok\":false}"
+  echo "[CI] SUMMARY upload_attempted=0 upload_succeeded=0 exit=0"
   exit 0
 fi
 
 IPA="$(find "$EXPORT_DIR" -maxdepth 1 -name '*.ipa' | head -1)"
 if [ -z "$IPA" ] || [ ! -f "$IPA" ]; then
-  echo "[CI] WARN: IPA not found"
-  echo "[CI] SUMMARY upload_attempted=0 upload_succeeded=0 exit=0 (no IPA)"
+  log_debug "ipa_missing" "{\"ok\":false}"
+  echo "[CI] SUMMARY upload_attempted=0 upload_succeeded=0 exit=0"
   exit 0
 fi
 
 UPLOAD_ATTEMPTED=1
-echo "[CI] upload via iTMSTransporter"
 if xcrun iTMSTransporter -m upload \
   -assetFile "$IPA" \
   -apiKey "$ASC_API_KEY_ID" \
   -apiIssuer "$ASC_ISSUER_ID" \
   -v informational; then
   UPLOAD_SUCCEEDED=1
-  echo "[CI] ✅ TestFlight upload requested — ASC → TestFlight 탭에서 1.0 (빌드 N) Processing 확인"
+  log_debug "upload_ok" "{\"ok\":true}"
 else
-  echo "[CI] WARN: iTMSTransporter failed — Issuer ID·API 권한·Bundle ID 확인"
-  echo "[CI] 로컬 검증: bash AlphaTradingIOS/scripts/verify-asc-api-key.sh"
+  log_debug "upload_fail" "{\"ok\":false}"
 fi
 
 echo "[CI] SUMMARY upload_attempted=${UPLOAD_ATTEMPTED} upload_succeeded=${UPLOAD_SUCCEEDED} exit=0"
-echo "[CI] NOTE: ci_post exit 0 does NOT mark Xcode Cloud build as succeeded."
-echo "[CI] NOTE: Overall failure is usually Prepare Build, Post-action, or Test - iOS."
 echo "[CI] ===== ci_post_xcodebuild.sh finished ====="
 exit 0

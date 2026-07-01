@@ -33,9 +33,12 @@ fi
 if [[ -f "$ROOT/.env.local" ]]; then
   # shellcheck disable=SC1090
   set -a
-  source <(grep -E '^(ASC_API_KEY_ID|ASC_API_ISSUER_ID|ASC_API_KEY_PATH|ASC_API_PRIVATE_KEY|APPLE_ID|APPLE_APP_PASSWORD)=' "$ROOT/.env.local" 2>/dev/null || true)
+  source <(grep -E '^(ASC_API_KEY_ID|ASC_ISSUER_ID|ASC_API_ISSUER_ID|ASC_API_KEY_PATH|ASC_API_PRIVATE_KEY|APPLE_ID|APPLE_APP_PASSWORD)=' "$ROOT/.env.local" 2>/dev/null || true)
   set +a
 fi
+
+# .env.local 표준 이름은 ASC_ISSUER_ID (구 ASC_API_ISSUER_ID 호환)
+ASC_ISSUER_ID="${ASC_ISSUER_ID:-${ASC_API_ISSUER_ID:-}}"
 
 # Downloads 의 AuthKey_*.p8 자동 감지
 if [[ -z "${ASC_API_KEY_PATH:-}" || ! -f "${ASC_API_KEY_PATH:-}" ]]; then
@@ -51,7 +54,7 @@ fi
 
 echo "==> TestFlight 업로드: $IPA"
 
-if [[ -n "${ASC_API_KEY_ID:-}" && -n "${ASC_API_ISSUER_ID:-}" ]]; then
+if [[ -n "${ASC_API_KEY_ID:-}" && -n "${ASC_ISSUER_ID:-}" ]]; then
   KEY_DIR="$HOME/private_keys"
   mkdir -p "$KEY_DIR"
   if [[ -n "${ASC_API_KEY_PATH:-}" && -f "${ASC_API_KEY_PATH}" ]]; then
@@ -65,7 +68,7 @@ if [[ -n "${ASC_API_KEY_ID:-}" && -n "${ASC_API_ISSUER_ID:-}" ]]; then
     xcrun iTMSTransporter -m upload \
       -assetFile "$IPA" \
       -apiKey "$ASC_API_KEY_ID" \
-      -apiIssuer "$ASC_API_ISSUER_ID" \
+      -apiIssuer "$ASC_ISSUER_ID" \
       -v informational
     UPLOADED=1
   fi
@@ -81,7 +84,7 @@ if [[ "$UPLOADED" -eq 0 && -n "${APPLE_ID:-}" && -n "${APPLE_APP_PASSWORD:-}" ]]
 fi
 
 if [[ "$UPLOADED" -eq 0 ]]; then
-  if [[ -n "${ASC_API_KEY_ID:-}" && -z "${ASC_API_ISSUER_ID:-}" ]]; then
+  if [[ -n "${ASC_API_KEY_ID:-}" && -z "${ASC_ISSUER_ID:-}" ]]; then
     echo "⚠️  API Key는 있으나 ASC_ISSUER_ID 가 없습니다."
     echo "   App Store Connect → 사용자 및 액세스 → 키 → Issuer ID 복사 후:"
     echo "   ASC_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx \\"
@@ -89,7 +92,7 @@ if [[ "$UPLOADED" -eq 0 ]]; then
     echo ""
   else
     echo "⚠️  .env.local 에 업로드 자격 증명이 없습니다."
-    echo "   ASC_API_KEY_ID / ASC_API_ISSUER_ID / ASC_API_KEY_PATH (또는 ASC_API_PRIVATE_KEY)"
+    echo "   ASC_API_KEY_ID / ASC_ISSUER_ID / ASC_API_KEY_PATH (또는 ASC_API_PRIVATE_KEY)"
     echo "   또는 APPLE_ID / APPLE_APP_PASSWORD (앱 전용 비밀번호)"
     echo ""
   fi
