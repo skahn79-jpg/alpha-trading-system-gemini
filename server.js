@@ -192,20 +192,42 @@ async function kisGet(path, trId, params) {
 
 // ── 분석용 일봉 데이터 가져오기 (내부 헬퍼) ─────────────────────
 // 베이스 지지선 판정에 필요한 최소 봉 수 = 120일 + 여유분
+function fmtYmd(d) {
+  return d.toISOString().slice(0, 10).replace(/-/g, "");
+}
+
+// KIS 일봉 API는 1회 최대 ~100봉(날짜 미지정 시 30봉)만 반환하므로
+// 날짜 범위를 뒤로 옮겨가며 페이지네이션 (MACD·MA120 등 장기 지표에 필요)
 async function fetchDailyCandles(code, count = 130) {
-  const data = await kisGet(
-    "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
-    "FHKST03010100",
-    {
-      FID_COND_MRKT_DIV_CODE: "J",
-      FID_INPUT_ISCD: code,
-      FID_INPUT_DATE_1: "",
-      FID_INPUT_DATE_2: "",
-      FID_PERIOD_DIV_CODE: "D",
-      FID_ORG_ADJ_PRC: "1",
-    }
-  );
-  return (data.output2 || []).slice(0, count).map((c) => ({
+  const rows = [];
+  const seen = new Set();
+  let end = new Date();
+
+  for (let page = 0; page < 5 && rows.length < count; page += 1) {
+    const start = new Date(end.getTime() - 200 * 86400000);
+    const data = await kisGet(
+      "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
+      "FHKST03010100",
+      {
+        FID_COND_MRKT_DIV_CODE: "J",
+        FID_INPUT_ISCD: code,
+        FID_INPUT_DATE_1: fmtYmd(start),
+        FID_INPUT_DATE_2: fmtYmd(end),
+        FID_PERIOD_DIV_CODE: "D",
+        FID_ORG_ADJ_PRC: "1",
+      }
+    );
+    const pageRows = (data.output2 || []).filter((c) => c && c.stck_bsop_date && !seen.has(c.stck_bsop_date));
+    if (pageRows.length === 0) break;
+    for (const c of pageRows) seen.add(c.stck_bsop_date);
+    rows.push(...pageRows); // 각 페이지는 최신순 → 뒤로 갈수록 과거
+
+    const oldest = pageRows[pageRows.length - 1].stck_bsop_date;
+    const oldestDate = new Date(`${oldest.slice(0, 4)}-${oldest.slice(4, 6)}-${oldest.slice(6, 8)}T00:00:00Z`);
+    end = new Date(oldestDate.getTime() - 86400000);
+  }
+
+  return rows.slice(0, count).map((c) => ({
     date: c.stck_bsop_date,
     open: parseInt(c.stck_oprc),
     high: parseInt(c.stck_hgpr),
@@ -395,8 +417,9 @@ app.get("/api/analyze/:code", async (req, res) => {
 });
 
 // AI 상승/하락 확률 예측 (온라인 학습 — 호출이 쌓일수록 정확도 개선)
-// GET /api/ai/predict/:code
-app.get("/api/ai/predict/:code", async (req, res) => {
+// 주의: /api/ai/* 는 APP_API_KEY 보호 구간이므로 /api/predict 로 분리 (Gemini 비용 없음)
+// GET /api/predict/:code
+app.get("/api/predict/:code", async (req, res) => {
   try {
     const code = req.params.code;
     const candles = await fetchDailyCandles(code, 130);
@@ -418,8 +441,8 @@ app.get("/api/ai/predict/:code", async (req, res) => {
 });
 
 // AI 모델 상태/성적표
-// GET /api/ai/model
-app.get("/api/ai/model", (req, res) => {
+// GET /api/predict-model
+app.get("/api/predict-model", (req, res) => {
   try {
     res.json({ ok: true, ...aiPredictor.getModelStats() });
   } catch (err) {

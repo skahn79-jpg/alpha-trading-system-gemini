@@ -25,7 +25,7 @@ final class AnalysisViewModel: ObservableObject {
             analysis = analyze.analysis ?? q.analysis
             quote = q
             // AI 예측은 부가 정보 — 실패해도 화면을 막지 않음
-            prediction = try? await APIClient.shared.get("/api/ai/predict/\(code)") as AIPrediction
+            prediction = try? await APIClient.shared.get("/api/predict/\(code)") as AIPrediction
             if let sector, !sector.isEmpty {
                 await loadSectorPeers(sector: sector, market: market)
             }
