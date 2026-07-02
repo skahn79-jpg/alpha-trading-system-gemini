@@ -166,6 +166,15 @@ CLI·Archive 시 `CodeSign failed: errSecInternalComponent` 가 나면:
 > 자동화 셸(AI 에이전트 터미널 포함)은 GUI 키체인 "항상 허용" 프롬프트를 띄울 수 없어서
 > ACL을 미리 `security set-key-partition-list`로 부여해야만 서명이 통과합니다 — 그래도 안 되면
 > Mac 재시작 또는 Xcode GUI Archive(자체 창 세션 보유)로 우회하세요.
+>
+> **근본 원인 확정(2026-07-02, `security dump-keychain -a` 분석):**
+> 1. Apple Development 개인키의 partition list에 `apple:`만 있고 `apple-tool:`(CLI용)이 없음
+>    → Xcode GUI 서명은 되지만 터미널 `codesign`은 항상 `errSecInternalComponent`.
+> 2. 키체인에 무효 키 항목 존재 (`SecKeychainItemCopyAccess: The specified item is no longer valid`)
+>    → 이 경우 ACL 수정(비밀번호 입력)도 실패할 수 있으며, **인증서 재발급이 확실한 해결책**:
+>    Xcode → Settings → Accounts에 Apple ID 로그인 → Manage Certificates에서 기존
+>    Apple Development 삭제 후 재생성 + Apple Distribution 추가.
+> 3. `set-key-partition-list`는 Mac 로그인 비밀번호가 반드시 필요 (비밀번호 없는 우회 불가).
 
 **1) Apple Distribution 인증서 추가 (TestFlight 필수)**
 

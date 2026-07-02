@@ -58,7 +58,21 @@ else
 fi
 
 security unlock-keychain -p "$PW" "$KEYCHAIN" 2>/dev/null || true
-security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PW" "$KEYCHAIN"
+ACL_OUT="$(security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PW" "$KEYCHAIN" 2>&1)" || ACL_FAILED=1
+if echo "$ACL_OUT" | grep -q "no longer valid"; then
+  echo ""
+  echo "❌ 키체인에 손상된(무효) 키 항목이 있습니다: 'The specified item is no longer valid'"
+  echo "   이 경우 ACL 수정으로 해결되지 않습니다. 인증서를 재발급하세요:"
+  echo "   1) Xcode → Settings (⌘,) → Accounts → Apple ID 로그인 (없으면 + 로 추가)"
+  echo "   2) Manage Certificates… → 기존 Apple Development 우클릭 → Delete Certificate"
+  echo "   3) + → Apple Development 재생성, + → Apple Distribution 추가"
+  echo "   4) 이 스크립트 재실행"
+  exit 1
+elif [[ "${ACL_FAILED:-0}" == "1" ]]; then
+  echo "❌ set-key-partition-list 실패 (비밀번호 오류 가능):"
+  echo "$ACL_OUT" | tail -3
+  exit 1
+fi
 
 echo ""
 echo "빠른 재검증 (임의 파일 서명)..."
