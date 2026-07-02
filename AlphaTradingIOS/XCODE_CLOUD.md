@@ -191,11 +191,22 @@ open AlphaTradingIOS/AlphaTrading.xcodeproj
 | Prepare Build for App Store Connect 실패 | **§6-1** — `ExportOptions.plist`를 프로젝트 루트에서 제거함 (MaterialDelivery와 동일) |
 | Test - iOS: `iPhone 16 is incompatible with iOS 16.4` | 워크플로 Test → **iPhone 15** + **iOS 18.x** (Xcode 16.4 기준). iPhone 16은 iOS 18+ 필요 |
 
-### 6-1. Prepare Build 실패 (빌드 8~20) — **코드 버그 아님**
+### 6-1. Prepare Build 실패 (빌드 8~20, 36) — **진짜 원인: 앱 아이콘 미컴파일 (2026-07-02 확정)**
 
 Archive·Test ✅ 인데 **Prepare Build for App Store Connect** 만 ❌:
 
-**원인:** Xcode Cloud가 App Store Connect에 인증할 때 `Session Proxy Provider` 오류 (Apple 서버/팀 권한 이슈). MaterialDelivery도 **배포 준비 없음**으로 1차 통과 후 TestFlight를 켰습니다.
+**확정된 원인:** Build 36의 app-store IPA를 `altool --upload-app`으로 수동 업로드하자 ASC 검증 오류가 그대로 드러남:
+- **90022** — 번들에 120×120 iPhone 아이콘 없음
+- **90713** — Info.plist에 `CFBundleIconName` 없음
+
+프로젝트에 `ASSETCATALOG_COMPILER_APPICON_NAME` 빌드 설정이 없어서 Assets.car가 컴파일돼도
+앱 아이콘으로 지정되지 않았던 것. Prepare Build는 이 ASC 검증을 클라우드에서 돌리다 실패한 것이며,
+UI에는 "Preparing build failed"라는 일반 메시지만 보여 오랫동안 인증 이슈로 오진됨.
+
+**수정:** `Config/Debug.xcconfig` · `Config/Release.xcconfig`에 `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` 추가
+(빌드 후 번들에 `AppIcon60x60@2x.png`와 `CFBundleIconName`이 들어가는지 확인).
+
+> (구 기록) 당시에는 `Session Proxy Provider` 오류로 추정했으나, 실제로는 위 아이콘 검증 실패였습니다.
 
 #### ✅ 해결 1 — 워크플로 변경 (필수, 2분)
 
