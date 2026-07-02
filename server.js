@@ -702,7 +702,9 @@ app.get("/api/crypto/report", async (req, res) => {
       regulation,
       disclaimer: "본 리포트는 투자 참고용 정보이며 투자 권유가 아닙니다.",
     };
-    cryptoReportCache.at = Date.now();
+    // 부분 실패(규제 뉴스·업황 누락) 시 짧은 캐시로 곧 재시도
+    const partial = !regulation.length || !fearGreed;
+    cryptoReportCache.at = partial ? Date.now() - CRYPTO_REPORT_TTL_MS + 3 * 60 * 1000 : Date.now();
     cryptoReportCache.data = report;
     res.json(report);
   } catch (err) {

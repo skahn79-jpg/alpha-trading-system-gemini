@@ -46,6 +46,27 @@ async function fetchGoogleNews(query, limit = 6) {
   return parseRssItems(data, limit);
 }
 
+async function fetchBingNews(query, limit = 6) {
+  const url = `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&format=rss`;
+  const { data } = await axios.get(url, { timeout: 15000, headers: UA, responseType: "text" });
+  return parseRssItems(data, limit);
+}
+
+/** 구글 뉴스 우선, 실패/빈 결과 시 Bing 뉴스 폴백 (데이터센터 IP 차단 대비) */
+async function fetchNewsWithFallback(query, limit = 6) {
+  try {
+    const items = await fetchGoogleNews(query, limit);
+    if (items.length) return items;
+  } catch {
+    // 폴백으로
+  }
+  try {
+    return await fetchBingNews(query, limit);
+  } catch {
+    return [];
+  }
+}
+
 // ── 공포탐욕 지수 ──
 async function fetchFearGreed() {
   const { data } = await axios.get("https://api.alternative.me/fng/?limit=30", { timeout: 15000, headers: UA });
@@ -98,12 +119,8 @@ const REGULATION_QUERIES = [
 async function fetchRegulationNews() {
   const out = [];
   for (const rq of REGULATION_QUERIES) {
-    try {
-      const items = await fetchGoogleNews(rq.query, 4);
-      out.push({ topic: rq.topic, items });
-    } catch {
-      // 개별 실패 생략
-    }
+    const items = await fetchNewsWithFallback(rq.query, 4);
+    if (items.length) out.push({ topic: rq.topic, items });
   }
   return out;
 }
