@@ -6,6 +6,26 @@ App Store Connect **Xcode Cloud** 탭에서 보이는 화면은 워크플로가 
 > **GitHub Actions** (`GITHUB_SETUP.md`)와 **Xcode Cloud** 중 하나만 써도 됩니다.  
 > Apple 생태계에 익숙하면 Xcode Cloud가 더 간단합니다 (인증서를 Xcode가 관리).
 
+## 빠른 시작 요약
+
+- Stage 1: `AlphaTrading-CI` 스킴, `Archive only`, `Deployment Preparation = 없음`, `Post-Actions = OFF`
+- Stage 2: `Archive` + `Deployment Preparation = TestFlight and App Store`, `TestFlight Internal Testing = OFF`
+- Stage 3: 빌드가 Processing 상태가 되면 `TestFlight Internal Testing = ON`
+- `AlphaTrading-CI`는 Archive 전용 스킴입니다. `Scheme "AlphaTrading-CI" is not configured for testing` 오류가 나오면 워크플로가 `AlphaTrading-CI`를 선택했는지, Test action이 비활성화되어 있는지를 먼저 확인하세요.
+- `ENABLE_CI_ASC_UPLOAD=1`이 아니면 `ci_post_xcodebuild.sh`는 업로드를 수행하지 않고 워크플로 모드를 사용합니다.
+
+### Stage 1 설정 체크리스트
+
+1. Scheme: `AlphaTrading-CI`
+2. 테스트: `OFF` 또는 `Test action` 비활성화
+3. Archive → Deployment Preparation: `없음`
+4. Post-Actions: 모두 `OFF`
+5. Xcode Version: `16.4 (16F6)`
+6. Test Device: `iPhone 15`, OS `iOS 18.x`
+7. `AlphaTrading-CI.xcscheme`에 `TestAction enabled = NO`가 설정되어 있는지 확인
+8. `ExportOptions.plist`가 프로젝트 루트에 없도록 확인
+
+
 ---
 
 ## 1. 사전 조건
@@ -26,13 +46,19 @@ App Store Connect **Xcode Cloud** 탭에서 보이는 화면은 워크플로가 
 
 ### 단계별 배포 준비 (권장)
 
-| 단계 | Archive → 배포 준비 | Post-Actions |
-|------|---------------------|--------------|
-| **1차** (Archive 검증) | **없음** | 모두 OFF |
-| **2차** (업로드) | **TestFlight and App Store** | TestFlight Internal OFF |
-| **3차** (내부 테스트) | **TestFlight and App Store** | **TestFlight Internal Testing** ON |
+| 단계 | Scheme | Actions | Archive → 배포 준비 | Post-Actions |
+|------|--------|---------|---------------------|--------------|
+| **1차** (Archive 검증) | `AlphaTrading-CI` | Archive only | **없음** | 모두 OFF |
+| **2차** (업로드) | `AlphaTrading-CI` 또는 `AlphaTrading` | Archive only | **TestFlight and App Store** | TestFlight Internal OFF |
+| **3차** (내부 테스트) | `AlphaTrading-CI` 또는 `AlphaTrading` | Archive only | **TestFlight and App Store** | **TestFlight Internal Testing** ON |
 
 1차 빌드가 ✅이면 2차로 올리고, TestFlight에 Processing이 보이면 3차를 켭니다.
+
+> **참고:** `AlphaTrading-CI` 스킴은 Archive 전용이며, 로컬 개발에서는 `AlphaTrading` 스킴을 사용합니다.
+> `AlphaTrading-CI`에서 테스트가 켜져 있으면 Xcode Cloud가 `not configured for testing` 오류를 낼 수 있습니다.
+
+> **중요:** Stage 1 워크플로는 `AlphaTrading-CI` 스킴을 사용하고, Test action을 반드시 **OFF**로 설정하세요.
+> `AlphaTrading` 스킴은 로컬 개발용이며, Xcode Cloud Stage 1에서는 `AlphaTrading-CI`를 권장합니다.
 
 ### A) App Store Connect (웹 — 권장)
 
@@ -55,8 +81,14 @@ open AlphaTradingIOS/AlphaTrading.xcodeproj
 
 1. **Product → Xcode Cloud → Manage Workflows…**
 2. **Default** → **Edit Workflow**
-3. 위 표와 동일하게 단계별 설정
-4. **Save**
+3. **Scheme**: `AlphaTrading-CI`
+4. **Actions**: `Archive`만 선택
+5. **Test**: OFF 또는 `iPhone 15 + iOS 18.x`
+6. **Archive - iOS** → **Deployment Preparation** = `없음`
+7. **Post-Actions**: 모두 OFF
+8. **Save**
+
+> `AlphaTrading-CI` 스킴은 `buildForTesting = NO`로 구성되어야 합니다. 로컬에서 `AlphaTrading` 스킴을 사용하는 것이 안정적입니다.
 
 ### C) TestFlight 테스터 (App Store Connect)
 
@@ -127,6 +159,11 @@ open AlphaTradingIOS/AlphaTrading.xcodeproj
 2. **App Store Connect** → **TestFlight** → 빌드 처리 (10~30분)
 3. **내부 테스트** → 본인 Apple ID 추가 → iPhone TestFlight 앱 설치
 
+> 로컬 사전검증: `bash AlphaTradingIOS/scripts/run-local-ci-preflight.sh` 또는 `npm run preflight:ios`
+>
+> Stage 2 자동화: `npm run xcode-cloud:stage2`
+> Stage 3 자동화: `npm run xcode-cloud:stage3`
+>
 ---
 
 ## 5. GitHub Actions vs Xcode Cloud

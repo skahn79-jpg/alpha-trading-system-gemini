@@ -160,6 +160,13 @@ CURRENT_PROJECT_VERSION = 2
 
 CLI·Archive 시 `CodeSign failed: errSecInternalComponent` 가 나면:
 
+> **진단 방법(2026-07-02 확인):** 프로젝트와 무관한 임의 파일에 대해 `codesign --sign <hash> file`을
+> 실행해서도 동일하게 실패하면, 이건 프로젝트 설정 문제가 아니라 **이 Mac의 키체인/보안 세션 문제**입니다.
+> `fix-codesign-keychain.sh`가 이제 이 프로브를 자동으로 먼저 실행해 알려줍니다.
+> 자동화 셸(AI 에이전트 터미널 포함)은 GUI 키체인 "항상 허용" 프롬프트를 띄울 수 없어서
+> ACL을 미리 `security set-key-partition-list`로 부여해야만 서명이 통과합니다 — 그래도 안 되면
+> Mac 재시작 또는 Xcode GUI Archive(자체 창 세션 보유)로 우회하세요.
+
 **1) Apple Distribution 인증서 추가 (TestFlight 필수)**
 
 1. Xcode → **Settings** (⌘,) → **Accounts**

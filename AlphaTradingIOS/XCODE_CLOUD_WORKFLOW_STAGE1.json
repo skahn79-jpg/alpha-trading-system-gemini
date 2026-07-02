@@ -9,12 +9,15 @@
     "xcode_version": "16.4 (16F6)",
     "xcode_version_avoid": ["26.x"]
   },
+  "workflow_name": "Stage 1 Archive-only",
+  "workflow_note": "Stage 1은 테스트를 제외한 Archive 검증만 수행합니다. AlphaTrading-CI 스킴을 사용하세요.",
   "test": {
     "enabled": false,
     "enabled_note": "1차는 Archive만. Test 켤 경우 아래 device/os 사용",
     "device": "iPhone 15",
     "os": "iOS 18.x",
-    "avoid": "iPhone 16 + iOS 16.4 (incompatible)"
+    "avoid": "iPhone 16 + iOS 16.4 (incompatible)",
+    "scheme_note": "AlphaTrading-CI 스킴은 Archive 전용입니다. 테스트가 필요하면 AlphaTrading 스킴을 사용하세요."
   },
   "archive": {
     "enabled": true,

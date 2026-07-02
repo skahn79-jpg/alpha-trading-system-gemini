@@ -24,6 +24,28 @@ echo ""
 [[ -f "$IOS/ci_scripts/ci_post_clone.sh" ]] || fail "ci_post_clone.sh missing"
 pass "ci_scripts present"
 
+check_scheme_configuration() {
+  local scheme_file="$IOS/AlphaTrading.xcodeproj/xcshareddata/xcschemes/AlphaTrading-CI.xcscheme"
+
+  if [[ ! -f "$scheme_file" ]]; then
+    fail "AlphaTrading-CI.xcscheme not found: $scheme_file"
+  fi
+
+  if ! grep -q 'TestAction' "$scheme_file"; then
+    fail "AlphaTrading-CI.xcscheme missing TestAction section"
+  fi
+  if ! grep -q 'enabled = \"NO\"' "$scheme_file"; then
+    fail "AlphaTrading-CI.xcscheme TestAction must have enabled = \"NO\""
+  fi
+  if ! grep -q 'buildForTesting = \"NO\"' "$scheme_file"; then
+    fail "AlphaTrading-CI.xcscheme BuildAction must have buildForTesting = \"NO\""
+  fi
+
+  pass "AlphaTrading-CI.xcscheme Stage 1 configuration verified"
+}
+
+check_scheme_configuration
+
 # 2) No ExportOptions at project root (Prepare Build trigger)
 if [[ -f "$IOS/ExportOptions.plist" ]]; then
   fail "Remove AlphaTradingIOS/ExportOptions.plist (MaterialDelivery: no root ExportOptions)"

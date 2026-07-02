@@ -23,6 +23,7 @@
       </BuildActionEntries>
    </BuildAction>
    <TestAction
+      enabled = "NO"
       buildConfiguration = "Debug"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"

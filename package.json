@@ -14,6 +14,8 @@
     "sync:ios": "node scripts/sync-ios-api-config.mjs",
     "sync:ios:release": "node scripts/sync-ios-api-config.mjs release",
     "archive:ios": "bash AlphaTradingIOS/scripts/archive-testflight.sh",
+    "archive:ios:auto": "bash AlphaTradingIOS/scripts/auto-archive.sh",
+    "fix-codesign-keychain": "bash AlphaTradingIOS/scripts/fix-codesign-keychain.sh",
     "setup:asc": "bash AlphaTradingIOS/scripts/setup-asc-api-key.sh",
     "verify:asc": "bash AlphaTradingIOS/scripts/verify-asc-api-key.sh",
     "probe:asc": "node AlphaTradingIOS/scripts/asc-jwt-probe.mjs",
@@ -22,6 +24,8 @@
     "encode:asc-cloud": "bash AlphaTradingIOS/scripts/encode-asc-key-for-cloud.sh",
     "xcode-cloud:md": "bash AlphaTradingIOS/scripts/fix-xcode-cloud-workflow.command",
     "xcode-cloud:stage1": "bash AlphaTradingIOS/scripts/apply-workflow-stage1-only.command",
+    "xcode-cloud:stage2": "bash AlphaTradingIOS/scripts/apply-stage2-workflow.command",
+    "xcode-cloud:stage3": "bash AlphaTradingIOS/scripts/apply-stage3-workflow.command",
     "xcode-cloud:setup": "bash AlphaTradingIOS/scripts/run-xcode-cloud-setup-and-build.command",
     "preflight:ios": "bash AlphaTradingIOS/scripts/run-local-ci-preflight.sh"
   },
