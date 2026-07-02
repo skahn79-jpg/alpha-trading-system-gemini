@@ -16,7 +16,8 @@ final class ChartViewModel: ObservableObject {
                 "/api/chart/\(code)",
                 query: [
                     URLQueryItem(name: "period", value: "D"),
-                    URLQueryItem(name: "count", value: "60"),
+                    // MA60·볼린저를 표시 구간(60봉) 전체에 그리려면 여유 데이터 필요
+                    URLQueryItem(name: "count", value: "120"),
                     URLQueryItem(name: "analyze", value: "0"),
                 ]
             )

@@ -173,6 +173,156 @@ function detectPatterns(candlesNewestFirst) {
   return patterns;
 }
 
+// ===== 최신 분석 기법 =====
+
+/** 일목균형표 — 전환선(9)/기준선(26)/구름(선행스팬 A·B) 대비 현재가 위치 */
+function ichimoku(candlesNewestFirst) {
+  const c = candlesNewestFirst;
+  if (!Array.isArray(c) || c.length < 78) return null; // 52 + 26(선행) 필요
+
+  const hl = (offset, period) => {
+    const win = c.slice(offset, offset + period);
+    if (win.length < period) return null;
+    return (Math.max(...win.map((x) => num(x.high))) + Math.min(...win.map((x) => num(x.low)))) / 2;
+  };
+
+  const tenkan = hl(0, 9);
+  const kijun = hl(0, 26);
+  // 현재 캔들 위치의 구름 = 26일 전에 계산된 선행스팬
+  const spanA = (() => {
+    const t = hl(26, 9);
+    const k = hl(26, 26);
+    return t !== null && k !== null ? (t + k) / 2 : null;
+  })();
+  const spanB = hl(26, 52);
+  if (tenkan === null || kijun === null || spanA === null || spanB === null) return null;
+
+  const close = num(c[0].close);
+  const cloudTop = Math.max(spanA, spanB);
+  const cloudBottom = Math.min(spanA, spanB);
+  const status = close > cloudTop ? 'above_cloud' : close < cloudBottom ? 'below_cloud' : 'in_cloud';
+
+  return {
+    tenkan: Math.round(tenkan),
+    kijun: Math.round(kijun),
+    spanA: Math.round(spanA),
+    spanB: Math.round(spanB),
+    status,
+    tkCross: tenkan > kijun ? 'bullish' : tenkan < kijun ? 'bearish' : 'flat',
+  };
+}
+
+/** ADX(14) — 추세 강도 + 방향(DI) (Wilder) */
+function adx(candlesNewestFirst, period = 14) {
+  const c = [...candlesNewestFirst].reverse(); // 과거→현재
+  if (c.length < period * 2 + 1) return null;
+
+  const trs = []; const plusDMs = []; const minusDMs = [];
+  for (let i = 1; i < c.length; i += 1) {
+    const high = num(c[i].high); const low = num(c[i].low);
+    const prevHigh = num(c[i - 1].high); const prevLow = num(c[i - 1].low);
+    const prevClose = num(c[i - 1].close);
+    trs.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+    const upMove = high - prevHigh;
+    const downMove = prevLow - low;
+    plusDMs.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    minusDMs.push(downMove > upMove && downMove > 0 ? downMove : 0);
+  }
+
+  const smooth = (arr) => {
+    let s = arr.slice(0, period).reduce((a, b) => a + b, 0);
+    const out = [s];
+    for (let i = period; i < arr.length; i += 1) {
+      s = s - s / period + arr[i];
+      out.push(s);
+    }
+    return out;
+  };
+
+  const trS = smooth(trs); const pS = smooth(plusDMs); const mS = smooth(minusDMs);
+  const dxs = [];
+  for (let i = 0; i < trS.length; i += 1) {
+    if (!trS[i]) continue;
+    const pdi = (pS[i] / trS[i]) * 100;
+    const mdi = (mS[i] / trS[i]) * 100;
+    const sum = pdi + mdi;
+    dxs.push(sum ? (Math.abs(pdi - mdi) / sum) * 100 : 0);
+  }
+  if (dxs.length < period) return null;
+  let adxVal = dxs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < dxs.length; i += 1) {
+    adxVal = (adxVal * (period - 1) + dxs[i]) / period;
+  }
+  const last = trS.length - 1;
+  const plusDI = trS[last] ? (pS[last] / trS[last]) * 100 : 0;
+  const minusDI = trS[last] ? (mS[last] / trS[last]) * 100 : 0;
+
+  return {
+    adx: Math.round(adxVal * 10) / 10,
+    plusDI: Math.round(plusDI * 10) / 10,
+    minusDI: Math.round(minusDI * 10) / 10,
+    strength: adxVal >= 40 ? 'very_strong' : adxVal >= 25 ? 'strong' : adxVal >= 20 ? 'moderate' : 'weak',
+    direction: plusDI > minusDI ? 'up' : plusDI < minusDI ? 'down' : 'flat',
+  };
+}
+
+/** OBV — 거래량 기반 자금 흐름 (20일 전 대비 추세) */
+function obv(candlesNewestFirst, lookback = 20) {
+  const c = [...candlesNewestFirst].reverse(); // 과거→현재
+  if (c.length < lookback + 2) return null;
+  let value = 0;
+  const series = [0];
+  for (let i = 1; i < c.length; i += 1) {
+    const close = num(c[i].close); const prev = num(c[i - 1].close);
+    if (close > prev) value += num(c[i].volume);
+    else if (close < prev) value -= num(c[i].volume);
+    series.push(value);
+  }
+  const nowVal = series[series.length - 1];
+  const pastVal = series[series.length - 1 - lookback];
+  const trend = nowVal > pastVal ? 'rising' : nowVal < pastVal ? 'falling' : 'flat';
+  return { value: nowVal, changeOverPeriod: nowVal - pastVal, lookback, trend };
+}
+
+/** ATR(14) — 변동성 (가격 대비 %) */
+function atr(candlesNewestFirst, period = 14) {
+  const c = [...candlesNewestFirst].reverse();
+  if (c.length < period + 1) return null;
+  const trs = [];
+  for (let i = 1; i < c.length; i += 1) {
+    const high = num(c[i].high); const low = num(c[i].low); const prevClose = num(c[i - 1].close);
+    trs.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+  }
+  let val = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < trs.length; i += 1) {
+    val = (val * (period - 1) + trs[i]) / period;
+  }
+  const close = num(c[c.length - 1].close);
+  return {
+    value: Math.round(val),
+    pct: close ? Math.round((val / close) * 1000) / 10 : null,
+  };
+}
+
+/** 피보나치 되돌림 — 최근 스윙 고저 기준 주요 레벨과 현재가 근접 레벨 */
+function fibonacci(candlesNewestFirst, lookback = 60) {
+  const win = candlesNewestFirst.slice(0, Math.min(lookback, candlesNewestFirst.length));
+  if (win.length < 20) return null;
+  const high = Math.max(...win.map((c) => num(c.high)));
+  const low = Math.min(...win.map((c) => num(c.low)));
+  if (high <= low) return null;
+  const range = high - low;
+  const ratios = [0.236, 0.382, 0.5, 0.618, 0.786];
+  const levels = ratios.map((r) => ({ ratio: r, price: Math.round(high - range * r) }));
+  const close = num(win[0].close);
+  let nearest = null;
+  for (const lv of levels) {
+    const dist = Math.abs(close - lv.price) / close * 100;
+    if (!nearest || dist < nearest.dist) nearest = { ratio: lv.ratio, price: lv.price, dist: Math.round(dist * 10) / 10 };
+  }
+  return { high, low, levels, nearest };
+}
+
 function supportResistance(candlesNewestFirst, lookback = 60) {
   const window = candlesNewestFirst.slice(0, Math.min(lookback, candlesNewestFirst.length));
   if (window.length < 10) return null;
@@ -276,6 +426,33 @@ function analyzeCandles(rawCandles = []) {
     if (sr.resistanceDist !== null && sr.resistanceDist <= 3) { score -= 3; signals.push(`저항선 근접 (${sr.resistanceDist}%)`); }
   }
 
+  const ichi = ichimoku(candles);
+  if (ichi) {
+    if (ichi.status === 'above_cloud') { score += 6; signals.push('일목 구름대 상단'); }
+    if (ichi.status === 'below_cloud') { score -= 6; signals.push('일목 구름대 하단'); }
+    if (ichi.tkCross === 'bullish' && ichi.status !== 'below_cloud') { score += 3; signals.push('전환선>기준선'); }
+  }
+
+  const adxData = adx(candles);
+  if (adxData) {
+    if (adxData.strength !== 'weak' && adxData.direction === 'up') { score += 5; signals.push(`ADX ${adxData.adx} 상승 추세`); }
+    if (adxData.strength !== 'weak' && adxData.direction === 'down') { score -= 5; signals.push(`ADX ${adxData.adx} 하락 추세`); }
+  }
+
+  const obvData = obv(candles);
+  if (obvData) {
+    if (obvData.trend === 'rising') { score += 4; signals.push('OBV 자금 유입'); }
+    if (obvData.trend === 'falling') { score -= 4; signals.push('OBV 자금 유출'); }
+  }
+
+  const atrData = atr(candles);
+  if (atrData && atrData.pct !== null && atrData.pct >= 5) {
+    score -= 2;
+    signals.push(`변동성 높음 (ATR ${atrData.pct}%)`);
+  }
+
+  const fib = fibonacci(candles);
+
   score = Math.max(0, Math.min(100, Math.round(score)));
   const grade = score >= 80 ? 'A' : score >= 65 ? 'B' : score >= 50 ? 'C' : 'D';
   const action = score >= 80 ? '관심 진입 후보' : score >= 65 ? '분할 관찰 후보' : score >= 50 ? '중립/대기' : '리스크 관리 우선';
@@ -302,6 +479,11 @@ function analyzeCandles(rawCandles = []) {
     stochastic: stoch,
     patterns,
     supportResistance: sr,
+    ichimoku: ichi,
+    adx: adxData,
+    obv: obvData,
+    atr: atrData,
+    fibonacci: fib,
     week52: { high: w52High, low: w52Low, position: w52Position },
     volume: { latest: num(latest.volume), avg20: avgVol20, ratio: volRatio },
     confluence: signals.length,
@@ -310,4 +492,7 @@ function analyzeCandles(rawCandles = []) {
   };
 }
 
-module.exports = { analyzeCandles, macd, stochastic, detectPatterns, supportResistance, rsi, bollinger, sma };
+module.exports = {
+  analyzeCandles, macd, stochastic, detectPatterns, supportResistance,
+  ichimoku, adx, obv, atr, fibonacci, rsi, bollinger, sma,
+};

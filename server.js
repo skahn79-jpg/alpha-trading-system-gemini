@@ -352,26 +352,32 @@ app.get("/api/quote/:code", async (req, res) => {
 app.get("/api/chart/:code", async (req, res) => {
   try {
     const { period = "D", count = 60, analyze = "1" } = req.query;
-    const data = await kisGet(
-      "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
-      "FHKST03010100",
-      {
-        FID_COND_MRKT_DIV_CODE: "J",
-        FID_INPUT_ISCD: req.params.code,
-        FID_INPUT_DATE_1: "",
-        FID_INPUT_DATE_2: "",
-        FID_PERIOD_DIV_CODE: period,
-        FID_ORG_ADJ_PRC: "1",
-      }
-    );
-    const candles = (data.output2 || []).slice(0, parseInt(count)).map((c) => ({
-      date: c.stck_bsop_date,
-      open: parseInt(c.stck_oprc),
-      high: parseInt(c.stck_hgpr),
-      low: parseInt(c.stck_lwpr),
-      close: parseInt(c.stck_clpr),
-      volume: parseInt(c.acml_vol),
-    }));
+    let candles;
+    if (period === "D") {
+      // 일봉은 날짜 페이지네이션으로 요청 개수만큼 확보 (KIS는 1회 ~30봉만 반환)
+      candles = await fetchDailyCandles(req.params.code, Math.min(parseInt(count) || 60, 300));
+    } else {
+      const data = await kisGet(
+        "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
+        "FHKST03010100",
+        {
+          FID_COND_MRKT_DIV_CODE: "J",
+          FID_INPUT_ISCD: req.params.code,
+          FID_INPUT_DATE_1: "",
+          FID_INPUT_DATE_2: "",
+          FID_PERIOD_DIV_CODE: period,
+          FID_ORG_ADJ_PRC: "1",
+        }
+      );
+      candles = (data.output2 || []).slice(0, parseInt(count)).map((c) => ({
+        date: c.stck_bsop_date,
+        open: parseInt(c.stck_oprc),
+        high: parseInt(c.stck_hgpr),
+        low: parseInt(c.stck_lwpr),
+        close: parseInt(c.stck_clpr),
+        volume: parseInt(c.acml_vol),
+      }));
+    }
 
     const result = { code: req.params.code, period, candles };
 

@@ -39,6 +39,11 @@ struct TechnicalAnalysisView: View {
                 KPICard(title: "스토캐스틱 %K", value: formatNum(analysis?.stochastic?.k), subtitle: stochHint)
                 KPICard(title: "지지선", value: formatInt(analysis?.supportResistance?.support), subtitle: srDist(analysis?.supportResistance?.supportDist, prefix: "이격"))
                 KPICard(title: "저항선", value: formatInt(analysis?.supportResistance?.resistance), subtitle: srDist(analysis?.supportResistance?.resistanceDist, prefix: "여력"))
+                KPICard(title: "일목균형", value: analysis?.ichimoku?.statusLabel ?? "-", subtitle: ichimokuHint)
+                KPICard(title: "ADX 추세강도", value: formatNum(analysis?.adx?.adx), subtitle: adxHint)
+                KPICard(title: "OBV 자금흐름", value: analysis?.obv?.trendLabel ?? "-", subtitle: obvHint)
+                KPICard(title: "ATR 변동성", value: atrValue, subtitle: atrHint)
+                KPICard(title: "피보나치", value: fibValue, subtitle: fibHint)
                 KPICard(title: "52주 고가", value: formatInt(quote?.w52High.map(Double.init)), subtitle: nil)
                 KPICard(title: "52주 저가", value: formatInt(quote?.w52Low.map(Double.init)), subtitle: w52Pos(analysis?.week52?.position))
             }
@@ -160,6 +165,47 @@ struct TechnicalAnalysisView: View {
         case "bearish": return AppTheme.down
         default: return AppTheme.accent
         }
+    }
+
+    private var ichimokuHint: String? {
+        switch analysis?.ichimoku?.tkCross {
+        case "bullish": return "전환>기준"
+        case "bearish": return "전환<기준"
+        default: return nil
+        }
+    }
+
+    private var adxHint: String? {
+        guard let adx = analysis?.adx else { return nil }
+        let dir = adx.direction == "up" ? "상승" : adx.direction == "down" ? "하락" : "중립"
+        return "\(adx.strengthLabel) · \(dir)"
+    }
+
+    private var obvHint: String? {
+        guard let lookback = analysis?.obv?.lookback else { return nil }
+        return "\(lookback)일 기준"
+    }
+
+    private var atrValue: String {
+        guard let pct = analysis?.atr?.pct else { return "-" }
+        return String(format: "%.1f%%", pct)
+    }
+
+    private var atrHint: String? {
+        guard let pct = analysis?.atr?.pct else { return nil }
+        if pct >= 5 { return "변동성 높음" }
+        if pct >= 3 { return "변동성 중간" }
+        return "변동성 낮음"
+    }
+
+    private var fibValue: String {
+        guard let n = analysis?.fibonacci?.nearest else { return "-" }
+        return String(format: "%.1f%%", n.ratio * 100)
+    }
+
+    private var fibHint: String? {
+        guard let n = analysis?.fibonacci?.nearest else { return nil }
+        return String(format: "레벨 %@ (이격 %.1f%%)", Int(n.price).formatted(.number.grouping(.automatic)), n.dist)
     }
 }
 

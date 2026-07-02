@@ -38,6 +38,10 @@ const DEFAULT_WEIGHTS = {
   w52Pos: 0.1,
   nearSupport: 0.25,
   nearResistance: -0.25,
+  ichimokuCloud: 0.3,
+  adxTrend: 0.3,
+  obvTrend: 0.25,
+  atrPct: -0.1,
 };
 
 const FEATURE_LABELS = {
@@ -55,6 +59,10 @@ const FEATURE_LABELS = {
   w52Pos: "52주 위치",
   nearSupport: "지지선 근접",
   nearResistance: "저항선 근접",
+  ichimokuCloud: "일목 구름대",
+  adxTrend: "ADX 추세",
+  obvTrend: "OBV 자금 흐름",
+  atrPct: "변동성(ATR)",
 };
 
 function clamp(v, min, max) {
@@ -119,6 +127,12 @@ function buildFeatures(analysis = {}, close = 0) {
   const sr = analysis.supportResistance || {};
   const nearSupport = sr.supportDist !== null && sr.supportDist !== undefined && sr.supportDist <= 3 ? 1 : 0;
   const nearResistance = sr.resistanceDist !== null && sr.resistanceDist !== undefined && sr.resistanceDist <= 3 ? 1 : 0;
+  const ichimokuCloud = analysis.ichimoku?.status === "above_cloud" ? 1
+    : analysis.ichimoku?.status === "below_cloud" ? -1 : 0;
+  const adxDir = analysis.adx?.direction === "up" ? 1 : analysis.adx?.direction === "down" ? -1 : 0;
+  const adxTrend = adxDir * clamp((analysis.adx?.adx ?? 0) / 40, 0, 1);
+  const obvTrend = analysis.obv?.trend === "rising" ? 1 : analysis.obv?.trend === "falling" ? -1 : 0;
+  const atrPct = clamp((analysis.atr?.pct ?? 2) / 5, 0, 2);
 
   return {
     bias: 1,
@@ -136,6 +150,10 @@ function buildFeatures(analysis = {}, close = 0) {
     w52Pos: ((w52Pos ?? 50) - 50) / 50,
     nearSupport,
     nearResistance,
+    ichimokuCloud,
+    adxTrend,
+    obvTrend,
+    atrPct,
   };
 }
 

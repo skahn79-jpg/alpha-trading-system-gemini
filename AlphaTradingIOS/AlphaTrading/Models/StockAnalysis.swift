@@ -26,6 +26,85 @@ struct CandleAnalysis: Decodable {
     let stochastic: StochasticData?
     let patterns: [CandlePattern]?
     let supportResistance: SupportResistance?
+    let ichimoku: IchimokuData?
+    let adx: ADXData?
+    let obv: OBVData?
+    let atr: ATRData?
+    let fibonacci: FibonacciData?
+}
+
+struct IchimokuData: Decodable {
+    let tenkan: Double?
+    let kijun: Double?
+    let spanA: Double?
+    let spanB: Double?
+    let status: String?
+    let tkCross: String?
+
+    var statusLabel: String {
+        switch status {
+        case "above_cloud": return "구름대 상단"
+        case "below_cloud": return "구름대 하단"
+        case "in_cloud": return "구름대 내부"
+        default: return "-"
+        }
+    }
+}
+
+struct ADXData: Decodable {
+    let adx: Double?
+    let plusDI: Double?
+    let minusDI: Double?
+    let strength: String?
+    let direction: String?
+
+    var strengthLabel: String {
+        switch strength {
+        case "very_strong": return "매우 강한 추세"
+        case "strong": return "강한 추세"
+        case "moderate": return "보통 추세"
+        default: return "약한 추세"
+        }
+    }
+}
+
+struct OBVData: Decodable {
+    let value: Double?
+    let changeOverPeriod: Double?
+    let lookback: Int?
+    let trend: String?
+
+    var trendLabel: String {
+        switch trend {
+        case "rising": return "자금 유입"
+        case "falling": return "자금 유출"
+        default: return "중립"
+        }
+    }
+}
+
+struct ATRData: Decodable {
+    let value: Double?
+    let pct: Double?
+}
+
+struct FibonacciData: Decodable {
+    let high: Double?
+    let low: Double?
+    let levels: [FibLevel]?
+    let nearest: FibNearest?
+}
+
+struct FibLevel: Decodable, Identifiable {
+    var id: Double { ratio }
+    let ratio: Double
+    let price: Double
+}
+
+struct FibNearest: Decodable {
+    let ratio: Double
+    let price: Double
+    let dist: Double
 }
 
 struct MACDData: Decodable {
