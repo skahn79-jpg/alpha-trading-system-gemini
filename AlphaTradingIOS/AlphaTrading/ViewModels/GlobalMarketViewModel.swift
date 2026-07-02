@@ -22,7 +22,7 @@ final class GlobalMarketViewModel: ObservableObject {
     }
 
     private let defaultUS = ["NVDA", "AAPL", "MSFT", "GOOGL", "META", "AMZN", "TSLA", "AMD"]
-    private let defaultCrypto = ["BTC", "ETH", "SOL", "XRP"]
+    private let defaultCrypto = ["BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "BNB"]
 
     func loadCatalog() async {
         isLoading = true
@@ -33,10 +33,12 @@ final class GlobalMarketViewModel: ObservableObject {
                 "/api/global/search",
                 query: [URLQueryItem(name: "q", value: query)]
             )
-            catalog = items
+            // 서버 카탈로그는 미국주식+코인 통합이므로 현재 세그먼트 타입만 표시
+            let want = segment == .us ? "us" : "crypto"
+            catalog = items.filter { ($0.type ?? "us").lowercased() == want }
             if catalog.isEmpty {
                 catalog = (segment == .us ? defaultUS : defaultCrypto).map {
-                    GlobalSearchItem(symbol: $0, name: $0, type: segment == .us ? "us" : "crypto", sector: nil)
+                    GlobalSearchItem(symbol: $0, name: $0, type: want, sector: nil)
                 }
             }
             await refreshQuotes()

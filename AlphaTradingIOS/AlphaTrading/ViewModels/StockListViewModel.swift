@@ -4,43 +4,18 @@ import Foundation
 final class StockListViewModel: ObservableObject {
     @Published var query = ""
     @Published var results: [MasterStock] = []
-    @Published var favorites: [Stock] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
 
-    private let favoritesKey = "alpha.favorites"
-
-    init() {
-        loadFavorites()
-    }
-
-    func loadFavorites() {
-        guard let data = UserDefaults.standard.data(forKey: favoritesKey),
-              let decoded = try? JSONDecoder().decode([Stock].self, from: data) else {
-            favorites = defaultFavorites
-            saveFavorites()
-            return
-        }
-        favorites = decoded
-    }
-
-    func saveFavorites() {
-        if let data = try? JSONEncoder().encode(favorites) {
-            UserDefaults.standard.set(data, forKey: favoritesKey)
-        }
-    }
+    // 관심종목은 전역 저장소로 이동 (FavoritesStore.shared) — 뷰 호환용 패스스루
+    var favorites: [Stock] { FavoritesStore.shared.favorites }
 
     func toggleFavorite(_ stock: Stock) {
-        if let idx = favorites.firstIndex(where: { $0.code == stock.code }) {
-            favorites.remove(at: idx)
-        } else {
-            favorites.insert(stock, at: 0)
-        }
-        saveFavorites()
+        FavoritesStore.shared.toggle(stock)
     }
 
     func isFavorite(_ code: String) -> Bool {
-        favorites.contains { $0.code == code }
+        FavoritesStore.shared.isFavorite(code)
     }
 
     func search() async {

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SectorBrowseView: View {
     @StateObject private var viewModel = SectorViewModel()
+    @ObservedObject private var favorites = FavoritesStore.shared
     @State private var quoteCache: [String: Quote] = [:]
 
     var body: some View {
@@ -108,7 +109,13 @@ struct SectorBrowseView: View {
                 List {
                     ForEach(viewModel.stocks) { item in
                         NavigationLink(value: item.asStock()) {
-                            StockRowView(stock: item.asStock(), quote: quoteCache[item.code])
+                            StockRowView(
+                                stock: item.asStock(),
+                                quote: quoteCache[item.code],
+                                showFavorite: true,
+                                isFavorite: favorites.isFavorite(item.code),
+                                onFavoriteToggle: { favorites.toggle(item.asStock()) }
+                            )
                         }
                         .listRowBackground(AppTheme.background)
                     }

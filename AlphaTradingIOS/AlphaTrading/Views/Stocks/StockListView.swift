@@ -11,6 +11,7 @@ struct StockDetailView: View {
     let stock: Stock
     @StateObject private var chartVM = ChartViewModel()
     @StateObject private var analysisVM = AnalysisViewModel()
+    @ObservedObject private var favorites = FavoritesStore.shared
     @State private var tab: StockDetailTab = .chart
 
     var body: some View {
@@ -51,6 +52,16 @@ struct StockDetailView: View {
         .background(AppTheme.background)
         .navigationTitle(stock.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    favorites.toggle(stock)
+                } label: {
+                    Image(systemName: favorites.isFavorite(stock.code) ? "star.fill" : "star")
+                        .foregroundStyle(.cyan)
+                }
+            }
+        }
         .refreshable {
             await chartVM.load(code: stock.code)
             await analysisVM.load(code: stock.code, sector: stock.sector, market: nil)
@@ -92,16 +103,33 @@ struct StockDetailView: View {
 
     private var chartSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("일봉 차트")
+            Text("차트")
                 .font(.paperlogy(16, weight: .semibold))
                 .foregroundStyle(AppTheme.textPrimary)
             ChartView(code: stock.code)
+
+            NavigationLink {
+                ChartLabView(stock: stock)
+            } label: {
+                HStack {
+                    Image(systemName: "flask.fill")
+                    Text("차트 랩 — 매물대 · 패턴 전망 · 자동 해설")
+                        .font(.paperlogy(14, weight: .semibold))
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                }
+                .foregroundStyle(AppTheme.accent)
+                .padding(14)
+                .background(AppTheme.card)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
         }
     }
 }
 
 struct StockListView: View {
     @ObservedObject var viewModel: StockListViewModel
+    @ObservedObject private var favorites = FavoritesStore.shared
     @State private var quoteCache: [String: Quote] = [:]
 
     var body: some View {
@@ -149,7 +177,10 @@ struct StockListView: View {
                             NavigationLink(value: item.asStock()) {
                                 StockRowView(
                                     stock: item.asStock(),
-                                    quote: quoteCache[item.code]
+                                    quote: quoteCache[item.code],
+                                    showFavorite: true,
+                                    isFavorite: favorites.isFavorite(item.code),
+                                    onFavoriteToggle: { favorites.toggle(item.asStock()) }
                                 )
                             }
                             .listRowBackground(AppTheme.background)
@@ -170,7 +201,7 @@ struct StockListView: View {
 
     private var displayItems: [MasterStock] {
         if viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return viewModel.favorites.map { MasterStock(code: $0.code, name: $0.name, market: nil, tag: $0.tag, sector: $0.sector) }
+            return favorites.favorites.map { MasterStock(code: $0.code, name: $0.name, market: nil, tag: $0.tag, sector: $0.sector) }
         }
         return viewModel.results
     }
@@ -196,19 +227,20 @@ struct StockListView: View {
 
 struct FavoritesView: View {
     @ObservedObject var viewModel: StockListViewModel
+    @ObservedObject private var favorites = FavoritesStore.shared
     @State private var quoteCache: [String: Quote] = [:]
 
     var body: some View {
         NavigationStack {
             List {
-                ForEach(viewModel.favorites) { stock in
+                ForEach(favorites.favorites) { stock in
                     NavigationLink(value: stock) {
                         StockRowView(
                             stock: stock,
                             quote: quoteCache[stock.code],
                             showFavorite: true,
                             isFavorite: true,
-                            onFavoriteToggle: { viewModel.toggleFavorite(stock) }
+                            onFavoriteToggle: { favorites.toggle(stock) }
                         )
                     }
                     .listRowBackground(AppTheme.background)
@@ -221,8 +253,8 @@ struct FavoritesView: View {
             .navigationDestination(for: Stock.self) { stock in
                 StockDetailView(stock: stock)
             }
-            .task(id: viewModel.favorites.map(\.code).joined()) {
-                for stock in viewModel.favorites {
+            .task(id: favorites.favorites.map(\.code).joined()) {
+                for stock in favorites.favorites {
                     do {
                         let q: Quote = try await APIClient.shared.get("/api/quote/\(stock.code)", query: [
                             URLQueryItem(name: "lite", value: "1"),

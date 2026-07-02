@@ -26,6 +26,7 @@ const { judgeBatch, computeStats, computeWeights, scoreSignal } = require("./sim
 const aiPredictor = require("./predictor.js");
 const { buildTradeReport } = require("./trade.js");
 const { buildMacroReport } = require("./macro.js");
+const { volumeProfile, patternOutlook, buildCommentary } = require("./chartlab.js");
 
 const app = express();
 // CORS: Firebase Hosting URL + 로컬 개발 모두 허용
@@ -640,6 +641,37 @@ app.get("/api/trade/picks", (req, res) => {
     return res.json({ ...tradePicksCache.data, refreshing: stale });
   }
   res.json({ ok: true, building: true, results: [], message: "분석 진행 중 — 잠시 후 다시 요청하세요." });
+});
+
+// 차트 랩 — 매물대·과거 유사 패턴 전망·전 지표 분석·자동 해설
+// GET /api/chartlab/:code
+app.get("/api/chartlab/:code", async (req, res) => {
+  try {
+    const code = req.params.code;
+    const candles = await fetchDailyCandles(code, 400); // 유사 패턴 검색용 장기 데이터
+    if (!candles || candles.length < 60) {
+      return res.status(400).json({ ok: false, error: "차트 랩에 필요한 일봉 데이터가 부족합니다.", count: candles?.length || 0 });
+    }
+    const analysis = analyzeCandles(candles);
+    const close = Number(candles[0]?.close) || 0;
+    const profile = volumeProfile(candles);
+    const outlook = patternOutlook(candles);
+    const commentary = buildCommentary({ analysis, profile, outlook, close });
+    res.json({
+      ok: true,
+      code,
+      close,
+      candleCount: candles.length,
+      analysis,
+      volumeProfile: profile,
+      outlook,
+      commentary,
+    });
+  } catch (err) {
+    const payload = buildKisErrorPayload(err, "CHARTLAB");
+    console.error("[chartlab]", payload);
+    res.status(payload.status || 500).json(payload);
+  }
 });
 
 // 거시경제 지표 (FRED 공개 데이터 — CPI·금리·연준 유동성·VIX·달러)
