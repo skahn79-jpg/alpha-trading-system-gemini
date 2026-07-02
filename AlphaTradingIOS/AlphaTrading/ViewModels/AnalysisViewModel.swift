@@ -79,10 +79,50 @@ final class AnalysisViewModel: ObservableObject {
             if response.ok, let text = response.text {
                 aiSummary = text
             } else {
-                aiError = response.error ?? "AI 분석 실패"
+                aiSummary = fallbackSummary(stock: stock)
             }
         } catch {
-            aiError = error.localizedDescription
+            // Gemini 미설정(APP_API_KEY) 등 서버 AI 불가 시 — 이미 로드된 지표로 규칙 기반 요약 생성
+            aiSummary = fallbackSummary(stock: stock)
         }
+    }
+
+    /// Gemini 없이 기술 지표·AI 예측만으로 구성하는 규칙 기반 빠른 요약
+    private func fallbackSummary(stock: Stock) -> String {
+        var lines: [String] = []
+
+        if let a = analysis {
+            if let score = a.score, let grade = a.grade {
+                lines.append("\(stock.name)의 기술적 종합 점수는 \(score)점(\(grade)등급)으로, 현재 시그널은 '\(a.signalBadge ?? "중립")'입니다.")
+            }
+            var trendBits: [String] = []
+            if let adx = a.adx, let val = adx.adx {
+                let dir = adx.direction == "up" ? "상승" : adx.direction == "down" ? "하락" : "중립"
+                trendBits.append("추세 강도(ADX)는 \(String(format: "%.1f", val))로 \(adx.strengthLabel), 방향은 \(dir)")
+            }
+            if let ichi = a.ichimoku {
+                trendBits.append("일목균형표상 \(ichi.statusLabel)")
+            }
+            if let st = a.supertrend {
+                trendBits.append("SuperTrend는 \(st.direction == "up" ? "상승" : "하락") 추세\(st.flipped == true ? " (직전 전환)" : "")")
+            }
+            if !trendBits.isEmpty {
+                lines.append(trendBits.joined(separator: ", ") + "입니다.")
+            }
+            if let signals = a.signals, !signals.isEmpty {
+                lines.append("주요 시그널: " + signals.prefix(4).joined(separator: " · "))
+            }
+        }
+
+        if let p = prediction {
+            let prob = p.isUp ? p.probUp : (p.probDown ?? 100 - p.probUp)
+            lines.append(String(format: "AI 학습 모델은 %@ 확률을 %.1f%%로 추정합니다 (신뢰도 %@).", p.isUp ? "상승" : "하락", prob, p.confidenceLabel))
+        }
+
+        if lines.isEmpty {
+            return "분석 데이터를 아직 불러오지 못했습니다. 새로고침 후 다시 시도해주세요."
+        }
+        lines.append("\n※ Gemini 서버 미설정으로 규칙 기반 자동 요약으로 대체되었습니다. (Render에 APP_API_KEY·GEMINI_API_KEY 설정 시 AI 문장 분석 활성화) 투자 권유가 아닙니다.")
+        return lines.joined(separator: "\n\n")
     }
 }

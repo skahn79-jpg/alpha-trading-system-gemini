@@ -57,8 +57,43 @@ struct TradeYear: Decodable, Identifiable {
 struct TradeCategory: Decodable, Identifiable {
     var id: String { name }
     let name: String
+    let latestMonth: String?
     let exports: Double?
     let imports: Double?
+    let exportsMoM: Double?
+    let exportsYoY: Double?
+    let importsYoY: Double?
+    let trend: String?
+    let monthly: [CategoryMonth]?
+    let quarters: [CategoryQuarter]?
+
+    var trendLabel: String {
+        switch trend {
+        case "increase": return "증가"
+        case "decrease": return "감소"
+        case "flat": return "보합"
+        default: return "-"
+        }
+    }
+}
+
+struct CategoryMonth: Decodable, Identifiable {
+    var id: String { month }
+    let month: String
+    let exports: Double
+    let imports: Double
+    let exportsMoM: Double?
+    let exportsYoY: Double?
+    let importsYoY: Double?
+}
+
+struct CategoryQuarter: Decodable, Identifiable {
+    var id: String { quarter }
+    let quarter: String
+    let exports: Double
+    let imports: Double
+    let partial: Bool?
+    let exportsQoQ: Double?
 }
 
 struct TradeSectorHint: Decodable, Identifiable {

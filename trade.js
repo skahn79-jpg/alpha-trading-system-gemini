@@ -63,29 +63,105 @@ function mom(series, idx) {
   return Math.round(((cur.value - prev.value) / prev.value) * 1000) / 10;
 }
 
-/** 관세청 품목별 수출입 (TRADE_API_KEY 있을 때만) */
+/**
+ * 관세청 품목별 수출입 (TRADE_API_KEY 있을 때만) — 최근 14개월 시리즈를 받아
+ * 품목별 월별 증감(MoM·YoY)과 분기별 집계(QoQ)까지 계산합니다.
+ */
 async function fetchCategoryTrade() {
   const key = process.env.TRADE_API_KEY || process.env.DATA_GO_KR_KEY;
   if (!key) return null;
   try {
     const now = new Date();
     const end = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
-    const startDate = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+    const startDate = new Date(now.getFullYear(), now.getMonth() - 14, 1);
     const start = `${startDate.getFullYear()}${String(startDate.getMonth() + 1).padStart(2, "0")}`;
     const url = "https://apis.data.go.kr/1220000/nitemtrade/getNitemtradeList";
     const { data } = await axios.get(url, {
-      timeout: 15000,
-      params: { serviceKey: key, strtYymm: start, endYymm: end, type: "json", numOfRows: 100 },
+      timeout: 20000,
+      params: { serviceKey: key, strtYymm: start, endYymm: end, type: "json", numOfRows: 3000 },
     });
     const items = data?.response?.body?.items?.item;
     if (!Array.isArray(items)) return null;
-    return items.map((it) => ({
-      name: it.statKor || it.statCd,
-      exports: Number(it.expDlr) || 0,
-      imports: Number(it.impDlr) || 0,
-      period: it.year || null,
-    }));
-  } catch {
+
+    // 품목명 → 월별 시리즈 병합
+    const byName = new Map();
+    for (const it of items) {
+      const name = String(it.statKor || it.statCd || "").trim();
+      const period = String(it.year || it.priod || "").replace(/[^0-9]/g, ""); // "2026.05" → "202605"
+      if (!name || period.length < 6 || name.includes("총계")) continue;
+      const month = `${period.slice(0, 4)}-${period.slice(4, 6)}`;
+      if (!byName.has(name)) byName.set(name, new Map());
+      const cur = byName.get(name).get(month) || { exports: 0, imports: 0 };
+      cur.exports += Number(it.expDlr) || 0;
+      cur.imports += Number(it.impDlr) || 0;
+      byName.get(name).set(month, cur);
+    }
+
+    const pctChange = (cur, prev) => (prev ? Math.round(((cur - prev) / prev) * 1000) / 10 : null);
+    const quarterOf = (month) => `${month.slice(0, 4)}-Q${Math.ceil(Number(month.slice(5, 7)) / 3)}`;
+
+    const categories = [];
+    for (const [name, monthMap] of byName) {
+      const months = [...monthMap.entries()]
+        .map(([month, v]) => ({ month, exports: v.exports, imports: v.imports }))
+        .sort((a, b) => a.month.localeCompare(b.month));
+      if (months.length < 2) continue;
+
+      // 월별 증감 (최근 6개월 반환)
+      const monthly = months.map((m, i) => {
+        const prev = months[i - 1];
+        const yearAgo = months.find((x) => {
+          const [y, mm] = m.month.split("-");
+          return x.month === `${Number(y) - 1}-${mm}`;
+        });
+        return {
+          month: m.month,
+          exports: m.exports,
+          imports: m.imports,
+          exportsMoM: prev ? pctChange(m.exports, prev.exports) : null,
+          exportsYoY: yearAgo ? pctChange(m.exports, yearAgo.exports) : null,
+          importsYoY: yearAgo ? pctChange(m.imports, yearAgo.imports) : null,
+        };
+      });
+
+      // 분기별 집계 (완결 여부 무관, 최근 5분기)
+      const qMap = new Map();
+      for (const m of months) {
+        const q = quarterOf(m.month);
+        const cur = qMap.get(q) || { exports: 0, imports: 0, months: 0 };
+        cur.exports += m.exports;
+        cur.imports += m.imports;
+        cur.months += 1;
+        qMap.set(q, cur);
+      }
+      const quarters = [...qMap.entries()]
+        .map(([quarter, v]) => ({ quarter, ...v, partial: v.months < 3 }))
+        .sort((a, b) => a.quarter.localeCompare(b.quarter))
+        .map((q, i, arr) => ({
+          ...q,
+          exportsQoQ: i > 0 && !q.partial && !arr[i - 1].partial ? pctChange(q.exports, arr[i - 1].exports) : null,
+        }))
+        .slice(-5);
+
+      const latest = monthly[monthly.length - 1];
+      categories.push({
+        name,
+        latestMonth: latest.month,
+        exports: latest.exports,
+        imports: latest.imports,
+        exportsMoM: latest.exportsMoM,
+        exportsYoY: latest.exportsYoY,
+        importsYoY: latest.importsYoY,
+        trend: latest.exportsYoY === null ? "unknown" : latest.exportsYoY > 2 ? "increase" : latest.exportsYoY < -2 ? "decrease" : "flat",
+        monthly: monthly.slice(-6),
+        quarters,
+      });
+    }
+
+    categories.sort((a, b) => b.exports - a.exports);
+    return categories.slice(0, 20);
+  } catch (e) {
+    console.error("[trade-category]", e.message);
     return null;
   }
 }
@@ -182,7 +258,7 @@ async function buildTradeReport() {
     categories: categories || [],
     categoriesNote: categories
       ? null
-      : "품목별 상세는 TRADE_API_KEY(data.go.kr 관세청 수출입무역통계) 설정 시 제공됩니다.",
+      : "품목별 월별·분기별 증감은 무료 API 키 설정 시 제공됩니다: data.go.kr에서 '관세청_신성질별 수출입실적' 활용신청 → Render 환경변수 TRADE_API_KEY에 인증키 입력",
     sectorHints: SECTOR_HINTS,
     disclaimer: "본 리포트는 투자 참고용 정보이며 투자 권유가 아닙니다. 모든 투자 판단의 책임은 투자자 본인에게 있습니다.",
   };

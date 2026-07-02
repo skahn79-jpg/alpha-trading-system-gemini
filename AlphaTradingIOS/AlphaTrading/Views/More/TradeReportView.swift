@@ -8,6 +8,8 @@ struct TradeReportView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var viewMode = "monthly" // monthly | yearly
+    @State private var categoryMode = "monthly" // 품목별 보기: monthly | quarterly
+    @State private var expandedCategory: String?
 
     var body: some View {
         ScrollView {
@@ -37,6 +39,7 @@ struct TradeReportView: View {
                         yearsTable(report)
                     }
 
+                    categoriesCard(report)
                     picksCard
                     sectorHintsCard(report)
                     if let disclaimer = report.disclaimer {
@@ -141,6 +144,139 @@ struct TradeReportView: View {
         .padding(16)
         .background(AppTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    // MARK: - 품목별 수출입 증감 (관세청 데이터)
+
+    @ViewBuilder
+    private func categoriesCard(_ report: TradeReport) -> some View {
+        if let categories = report.categories, !categories.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("품목별 수출입 증감")
+                        .font(.paperlogy(15, weight: .semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Spacer()
+                    Picker("", selection: $categoryMode) {
+                        Text("월별").tag("monthly")
+                        Text("분기별").tag("quarterly")
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 140)
+                }
+                Text("품목을 탭하면 \(categoryMode == "monthly" ? "최근 6개월" : "최근 5분기") 추이가 열립니다. 단위: 천 달러")
+                    .font(.paperlogy(10))
+                    .foregroundStyle(AppTheme.textSecondary)
+
+                ForEach(categories.prefix(12)) { category in
+                    categoryRow(category)
+                }
+            }
+            .padding(16)
+            .background(AppTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        } else if let note = report.categoriesNote {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("품목별 수출입 증감")
+                    .font(.paperlogy(15, weight: .semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                Text(note)
+                    .font(.paperlogy(12))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .lineSpacing(3)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    private func categoryRow(_ category: TradeCategory) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation { expandedCategory = expandedCategory == category.name ? nil : category.name }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(category.trendLabel)
+                        .font(.paperlogy(10, weight: .bold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(catTrendColor(category.trend).opacity(0.2))
+                        .foregroundStyle(catTrendColor(category.trend))
+                        .clipShape(Capsule())
+                    Text(category.name)
+                        .font(.paperlogy(13, weight: .semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .lineLimit(1)
+                    Spacer()
+                    if let yoy = category.exportsYoY {
+                        Text(String(format: "수출 %+.1f%%", yoy))
+                            .font(.paperlogy(12, weight: .bold))
+                            .foregroundStyle(yoy >= 0 ? AppTheme.up : AppTheme.down)
+                    }
+                    Image(systemName: expandedCategory == category.name ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+            }
+
+            if expandedCategory == category.name {
+                if categoryMode == "monthly" {
+                    ForEach((category.monthly ?? []).reversed()) { m in
+                        HStack {
+                            Text(m.month)
+                                .font(.paperlogy(11))
+                                .foregroundStyle(AppTheme.textSecondary)
+                                .frame(width: 62, alignment: .leading)
+                            Text("수출 \(Int(m.exports).formatted())")
+                                .font(.paperlogy(11))
+                                .foregroundStyle(AppTheme.textPrimary)
+                            Spacer()
+                            if let mom = m.exportsMoM {
+                                Text(String(format: "전월 %+.1f%%", mom))
+                                    .font(.paperlogy(10))
+                                    .foregroundStyle(mom >= 0 ? AppTheme.up : AppTheme.down)
+                            }
+                            if let yoy = m.exportsYoY {
+                                Text(String(format: "전년 %+.1f%%", yoy))
+                                    .font(.paperlogy(10, weight: .bold))
+                                    .foregroundStyle(yoy >= 0 ? AppTheme.up : AppTheme.down)
+                            }
+                        }
+                        .padding(.leading, 8)
+                    }
+                } else {
+                    ForEach((category.quarters ?? []).reversed()) { q in
+                        HStack {
+                            Text(q.quarter + ((q.partial ?? false) ? "*" : ""))
+                                .font(.paperlogy(11))
+                                .foregroundStyle(AppTheme.textSecondary)
+                                .frame(width: 70, alignment: .leading)
+                            Text("수출 \(Int(q.exports).formatted())")
+                                .font(.paperlogy(11))
+                                .foregroundStyle(AppTheme.textPrimary)
+                            Spacer()
+                            if let qoq = q.exportsQoQ {
+                                Text(String(format: "전분기 %+.1f%%", qoq))
+                                    .font(.paperlogy(10, weight: .bold))
+                                    .foregroundStyle(qoq >= 0 ? AppTheme.up : AppTheme.down)
+                            }
+                        }
+                        .padding(.leading, 8)
+                    }
+                }
+            }
+            Divider().background(AppTheme.textSecondary.opacity(0.1))
+        }
+    }
+
+    private func catTrendColor(_ trend: String?) -> Color {
+        switch trend {
+        case "increase": return AppTheme.up
+        case "decrease": return AppTheme.down
+        default: return AppTheme.accent
+        }
     }
 
     // MARK: - AI 수출 연계 저평가 후보
