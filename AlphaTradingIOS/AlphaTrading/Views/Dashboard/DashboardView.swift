@@ -4,6 +4,7 @@ struct DashboardView: View {
     @StateObject private var viewModel = DashboardViewModel()
     @State private var tradeReport: TradeReport?
     @State private var featured: FeaturedSignalsResponse?
+    @State private var axiosNews: AxiosNewsResponse?
 
     var body: some View {
         NavigationStack {
@@ -30,6 +31,7 @@ struct DashboardView: View {
 
                     tradeSummarySection
                     featuredSection
+                    axiosNewsSection
                 }
                 .padding(16)
             }
@@ -48,9 +50,57 @@ struct DashboardView: View {
         // 부가 섹션은 실패해도 대시보드를 막지 않음
         async let tradeTask = try? APIClient.shared.get("/api/trade/report") as TradeReport
         async let featuredTask = try? APIClient.shared.get("/api/signals/featured") as FeaturedSignalsResponse
+        async let newsTask = try? APIClient.shared.get("/api/news/axios") as AxiosNewsResponse
         _ = await indexTask
         tradeReport = await tradeTask
         featured = await featuredTask
+        axiosNews = await newsTask
+    }
+
+    // MARK: - 악시오스 뉴스
+
+    @ViewBuilder
+    private var axiosNewsSection: some View {
+        if let news = axiosNews, let items = news.items, !items.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Image(systemName: "newspaper.fill")
+                        .foregroundStyle(AppTheme.accent)
+                    Text("Axios 뉴스")
+                        .font(.paperlogy(16, weight: .semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Spacer()
+                }
+                ForEach(items.prefix(5)) { item in
+                    if let url = URL(string: item.link) {
+                        Link(destination: url) {
+                            HStack(alignment: .top, spacing: 8) {
+                                Text("·")
+                                    .foregroundStyle(AppTheme.accent)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.title)
+                                        .font(.paperlogy(13))
+                                        .foregroundStyle(AppTheme.textPrimary)
+                                        .multilineTextAlignment(.leading)
+                                        .lineLimit(2)
+                                    Text(item.timeAgoText)
+                                        .font(.paperlogy(10))
+                                        .foregroundStyle(AppTheme.textSecondary)
+                                }
+                                Spacer()
+                                Image(systemName: "arrow.up.right")
+                                    .font(.caption2)
+                                    .foregroundStyle(AppTheme.textSecondary)
+                            }
+                            .padding(.vertical, 3)
+                        }
+                    }
+                }
+            }
+            .padding(16)
+            .background(AppTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
     }
 
     // MARK: - 수출입 요약

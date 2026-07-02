@@ -27,6 +27,7 @@ const aiPredictor = require("./predictor.js");
 const { buildTradeReport } = require("./trade.js");
 const { buildMacroReport } = require("./macro.js");
 const { volumeProfile, patternOutlook, buildCommentary } = require("./chartlab.js");
+const cryptoReport = require("./crypto-report.js");
 
 const app = express();
 // CORS: Firebase Hosting URL + 로컬 개발 모두 허용
@@ -641,6 +642,84 @@ app.get("/api/trade/picks", (req, res) => {
     return res.json({ ...tradePicksCache.data, refreshing: stale });
   }
   res.json({ ok: true, building: true, results: [], message: "분석 진행 중 — 잠시 후 다시 요청하세요." });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 암호화폐 관찰 리포트 — 차트 분석 + 업황 + 규제(CLARITY 법안 등) 뉴스
+// ═══════════════════════════════════════════════════════════════
+const cryptoReportCache = { at: 0, data: null };
+const CRYPTO_REPORT_TTL_MS = 30 * 60 * 1000;
+
+// GET /api/crypto/report
+app.get("/api/crypto/report", async (req, res) => {
+  try {
+    if (cryptoReportCache.data && Date.now() - cryptoReportCache.at < CRYPTO_REPORT_TTL_MS) {
+      return res.json(cryptoReportCache.data);
+    }
+
+    // 1) BTC·ETH 차트 분석 (Yahoo 일봉 → 국내 주식과 동일한 분석 엔진)
+    const markets = [];
+    for (const symbol of ["BTC", "ETH"]) {
+      try {
+        const candles = await fetchYahooChart(symbol, "crypto", "D", "2Y", 400);
+        if (!Array.isArray(candles) || candles.length < 60) continue;
+        const newest = [...candles].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+        const analysis = analyzeCandles(newest);
+        const close = Number(newest[0]?.close) || 0;
+        const prevClose = Number(newest[1]?.close) || 0;
+        markets.push({
+          symbol,
+          price: close,
+          changeRate: prevClose ? Math.round(((close - prevClose) / prevClose) * 1000) / 10 : null,
+          score: analysis.score,
+          grade: analysis.grade,
+          signalBadge: analysis.signalBadge,
+          signals: (analysis.signals || []).slice(0, 6),
+          macd: analysis.macd,
+          ichimoku: analysis.ichimoku ? { status: analysis.ichimoku.status, tkCross: analysis.ichimoku.tkCross } : null,
+          supertrend: analysis.supertrend,
+          mayer: analysis.mayer,
+          summary: analysis.summary,
+        });
+      } catch (e) {
+        console.error(`[crypto-report:${symbol}]`, e.message);
+      }
+    }
+
+    // 2) 업황 + 3) 규제 뉴스 (병렬)
+    const [fearGreed, globalData, regulation] = await Promise.all([
+      cryptoReport.fetchFearGreed().catch(() => null),
+      cryptoReport.fetchGlobalCrypto(),
+      cryptoReport.fetchRegulationNews().catch(() => []),
+    ]);
+
+    const report = {
+      ok: true,
+      updatedAt: new Date().toISOString(),
+      markets,
+      sentiment: fearGreed,
+      global: globalData,
+      regulation,
+      disclaimer: "본 리포트는 투자 참고용 정보이며 투자 권유가 아닙니다.",
+    };
+    cryptoReportCache.at = Date.now();
+    cryptoReportCache.data = report;
+    res.json(report);
+  } catch (err) {
+    console.error("[crypto-report]", err.message);
+    res.status(502).json({ ok: false, error: "암호화폐 리포트 생성 실패: " + err.message });
+  }
+});
+
+// 악시오스 뉴스 (대시보드용)
+// GET /api/news/axios
+app.get("/api/news/axios", async (req, res) => {
+  try {
+    const news = await cryptoReport.fetchAxiosNews(8);
+    res.json(news);
+  } catch (err) {
+    res.status(502).json({ ok: false, error: "뉴스 조회 실패: " + err.message });
+  }
 });
 
 // 차트 랩 — 매물대·과거 유사 패턴 전망·전 지표 분석·자동 해설

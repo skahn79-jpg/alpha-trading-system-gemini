@@ -67,6 +67,8 @@
 		A10000000000000000000049 /* FavoritesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000049 /* FavoritesStore.swift */; };
 		A1000000000000000000004A /* ChartLab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004A /* ChartLab.swift */; };
 		A1000000000000000000004B /* ChartLabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004B /* ChartLabView.swift */; };
+		A1000000000000000000004C /* CryptoReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004C /* CryptoReport.swift */; };
+		A1000000000000000000004D /* CryptoReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004D /* CryptoReportView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -82,6 +84,8 @@
 		A20000000000000000000049 /* FavoritesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesStore.swift; sourceTree = "<group>"; };
 		A2000000000000000000004A /* ChartLab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartLab.swift; sourceTree = "<group>"; };
 		A2000000000000000000004B /* ChartLabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartLabView.swift; sourceTree = "<group>"; };
+		A2000000000000000000004C /* CryptoReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CryptoReport.swift; sourceTree = "<group>"; };
+		A2000000000000000000004D /* CryptoReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CryptoReportView.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		A20000000000000000000003 /* APIConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIConfig.swift; sourceTree = "<group>"; };
 		A20000000000000000000004 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
@@ -253,6 +257,7 @@
 				A20000000000000000000044 /* MacroReport.swift */,
 				A20000000000000000000046 /* FeaturedSignals.swift */,
 				A2000000000000000000004A /* ChartLab.swift */,
+				A2000000000000000000004C /* CryptoReport.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -346,6 +351,7 @@
 				A20000000000000000000043 /* TradeReportView.swift */,
 				A20000000000000000000045 /* MacroView.swift */,
 				A20000000000000000000047 /* FeaturedSignalsView.swift */,
+				A2000000000000000000004D /* CryptoReportView.swift */,
 			);
 			path = More;
 			sourceTree = "<group>";
@@ -550,6 +556,8 @@
 				A10000000000000000000049 /* FavoritesStore.swift in Sources */,
 				A1000000000000000000004A /* ChartLab.swift in Sources */,
 				A1000000000000000000004B /* ChartLabView.swift in Sources */,
+				A1000000000000000000004C /* CryptoReport.swift in Sources */,
+				A1000000000000000000004D /* CryptoReportView.swift in Sources */,
 				A10000000000000000000025 /* CertificatePinner.swift in Sources */,
 				A10000000000000000000026 /* SecureSessionFactory.swift in Sources */,
 				A10000000000000000000027 /* GlobalQuote.swift in Sources */,

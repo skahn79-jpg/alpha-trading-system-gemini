@@ -26,6 +26,12 @@ struct MoreView: View {
                     }
 
                     NavigationLink {
+                        CryptoReportView()
+                    } label: {
+                        moreRow(icon: "bitcoinsign.circle.fill", title: "크립토 리포트", subtitle: "BTC/ETH 차트분석 · 업황 · CLARITY 법안 관찰")
+                    }
+
+                    NavigationLink {
                         AlertCenterView()
                     } label: {
                         moreRow(icon: "bell.badge.fill", title: "알림 센터", subtitle: "가격 · 20일선 알림 + Telegram 연동")
