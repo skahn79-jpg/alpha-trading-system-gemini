@@ -38,6 +38,12 @@ struct MoreView: View {
                     }
 
                     NavigationLink {
+                        MacroView()
+                    } label: {
+                        moreRow(icon: "building.columns.fill", title: "거시 지표", subtitle: "CPI · 금리 · 연준 유동성 · VIX")
+                    }
+
+                    NavigationLink {
                         SectorBrowseView()
                     } label: {
                         moreRow(icon: "square.grid.2x2", title: "업종별 종목 검색", subtitle: "코스피 · 코스닥 업종 탐색")

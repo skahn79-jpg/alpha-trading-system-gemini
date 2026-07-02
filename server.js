@@ -25,6 +25,7 @@ const { fetchNpsChanges, fetchNpsForStock } = require("./dart.js");
 const { judgeBatch, computeStats, computeWeights, scoreSignal } = require("./simulation.js");
 const aiPredictor = require("./predictor.js");
 const { buildTradeReport } = require("./trade.js");
+const { buildMacroReport } = require("./macro.js");
 
 const app = express();
 // CORS: Firebase Hosting URL + 로컬 개발 모두 허용
@@ -453,6 +454,18 @@ app.get("/api/predict-model", (req, res) => {
     res.json({ ok: true, ...aiPredictor.getModelStats() });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 거시경제 지표 (FRED 공개 데이터 — CPI·금리·연준 유동성·VIX·달러)
+// GET /api/macro/indicators
+app.get("/api/macro/indicators", async (req, res) => {
+  try {
+    const report = await buildMacroReport();
+    res.json(report);
+  } catch (err) {
+    console.error("[macro]", err.message);
+    res.status(502).json({ ok: false, error: "거시 지표 조회 실패: " + err.message });
   }
 });
 

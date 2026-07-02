@@ -59,6 +59,8 @@
 		A10000000000000000000041 /* AIPrediction.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000041 /* AIPrediction.swift */; };
 		A10000000000000000000042 /* TradeReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000042 /* TradeReport.swift */; };
 		A10000000000000000000043 /* TradeReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000043 /* TradeReportView.swift */; };
+		A10000000000000000000044 /* MacroReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000044 /* MacroReport.swift */; };
+		A10000000000000000000045 /* MacroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000045 /* MacroView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -66,6 +68,8 @@
 		A20000000000000000000041 /* AIPrediction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPrediction.swift; sourceTree = "<group>"; };
 		A20000000000000000000042 /* TradeReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeReport.swift; sourceTree = "<group>"; };
 		A20000000000000000000043 /* TradeReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeReportView.swift; sourceTree = "<group>"; };
+		A20000000000000000000044 /* MacroReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroReport.swift; sourceTree = "<group>"; };
+		A20000000000000000000045 /* MacroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroView.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		A20000000000000000000003 /* APIConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIConfig.swift; sourceTree = "<group>"; };
 		A20000000000000000000004 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
@@ -232,6 +236,7 @@
 				A2000000000000000000002B /* TradingAlert.swift */,
 				A20000000000000000000041 /* AIPrediction.swift */,
 				A20000000000000000000042 /* TradeReport.swift */,
+				A20000000000000000000044 /* MacroReport.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -322,6 +327,7 @@
 				A20000000000000000000031 /* AlertCenterView.swift */,
 				A20000000000000000000032 /* AIReportView.swift */,
 				A20000000000000000000043 /* TradeReportView.swift */,
+				A20000000000000000000045 /* MacroView.swift */,
 			);
 			path = More;
 			sourceTree = "<group>";
@@ -518,6 +524,8 @@
 				A10000000000000000000041 /* AIPrediction.swift in Sources */,
 				A10000000000000000000042 /* TradeReport.swift in Sources */,
 				A10000000000000000000043 /* TradeReportView.swift in Sources */,
+				A10000000000000000000044 /* MacroReport.swift in Sources */,
+				A10000000000000000000045 /* MacroView.swift in Sources */,
 				A10000000000000000000025 /* CertificatePinner.swift in Sources */,
 				A10000000000000000000026 /* SecureSessionFactory.swift in Sources */,
 				A10000000000000000000027 /* GlobalQuote.swift in Sources */,
