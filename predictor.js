@@ -42,6 +42,12 @@ const DEFAULT_WEIGHTS = {
   adxTrend: 0.3,
   obvTrend: 0.25,
   atrPct: -0.1,
+  supertrendDir: 0.35,
+  stochSlowWell: 0.3,
+  vixFixSpike: 0.25,
+  mfiNorm: -0.2,
+  mayerDev: -0.2,
+  minerviniScore: 0.3,
 };
 
 const FEATURE_LABELS = {
@@ -63,6 +69,12 @@ const FEATURE_LABELS = {
   adxTrend: "ADX 추세",
   obvTrend: "OBV 자금 흐름",
   atrPct: "변동성(ATR)",
+  supertrendDir: "SuperTrend",
+  stochSlowWell: "스토캐스틱 슬로우 우물",
+  vixFixSpike: "VixFix 공포 스파이크",
+  mfiNorm: "MFI 자금흐름",
+  mayerDev: "200일선 배율",
+  minerviniScore: "미너비니 템플릿",
 };
 
 function clamp(v, min, max) {
@@ -133,6 +145,13 @@ function buildFeatures(analysis = {}, close = 0) {
   const adxTrend = adxDir * clamp((analysis.adx?.adx ?? 0) / 40, 0, 1);
   const obvTrend = analysis.obv?.trend === "rising" ? 1 : analysis.obv?.trend === "falling" ? -1 : 0;
   const atrPct = clamp((analysis.atr?.pct ?? 2) / 5, 0, 2);
+  const supertrendDir = analysis.supertrend?.direction === "up" ? 1
+    : analysis.supertrend?.direction === "down" ? -1 : 0;
+  const stochSlowWell = analysis.stochasticSlow?.inWell ? 1 : 0;
+  const vixFixSpike = analysis.vixFix?.spike ? 1 : 0;
+  const mfiNorm = ((analysis.mfi?.value ?? 50) - 50) / 50;
+  const mayerDev = clamp((analysis.mayer?.multiple ?? 1) - 1, -1, 1.5);
+  const minerviniScore = ((analysis.minervini?.passed ?? 4) - 4) / 4;
 
   return {
     bias: 1,
@@ -154,6 +173,12 @@ function buildFeatures(analysis = {}, close = 0) {
     adxTrend,
     obvTrend,
     atrPct,
+    supertrendDir,
+    stochSlowWell,
+    vixFixSpike,
+    mfiNorm,
+    mayerDev,
+    minerviniScore,
   };
 }
 

@@ -293,7 +293,7 @@ app.get("/api/quote/:code", async (req, res) => {
       "FHKST01010100",
       { FID_COND_MRKT_DIV_CODE: "J", FID_INPUT_ISCD: code }
     );
-    const dailyPromise = lite ? Promise.resolve(null) : fetchDailyCandles(code, 130);
+    const dailyPromise = lite ? Promise.resolve(null) : fetchDailyCandles(code, 260);
     const [quoteData, candles] = await Promise.all([quotePromise, dailyPromise]);
 
     const o = quoteData.output;
@@ -404,7 +404,7 @@ app.get("/api/chart/:code", async (req, res) => {
 app.get("/api/analyze/:code", async (req, res) => {
   try {
     const code = req.params.code;
-    const candles = await fetchDailyCandles(code, 130);
+    const candles = await fetchDailyCandles(code, 260);
     if (!candles || candles.length < 5) {
       return res.status(400).json({ error: "분석에 필요한 일봉 데이터가 부족합니다.", count: candles?.length || 0 });
     }
@@ -428,7 +428,7 @@ app.get("/api/analyze/:code", async (req, res) => {
 app.get("/api/predict/:code", async (req, res) => {
   try {
     const code = req.params.code;
-    const candles = await fetchDailyCandles(code, 130);
+    const candles = await fetchDailyCandles(code, 260);
     if (!candles || candles.length < 30) {
       return res.status(400).json({ error: "예측에 필요한 일봉 데이터가 부족합니다.", count: candles?.length || 0 });
     }
@@ -487,7 +487,7 @@ app.get("/api/quotes", async (req, res) => {
         let analysis = null;
         if (withAnalysis) {
           try {
-            const candles = await fetchDailyCandles(trimmed, 130);
+            const candles = await fetchDailyCandles(trimmed, 260);
             if (candles.length >= 5) analysis = analyzeCandles(candles);
           } catch (e) {
             // 분석 실패해도 시세는 반환

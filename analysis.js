@@ -323,6 +323,202 @@ function fibonacci(candlesNewestFirst, lookback = 60) {
   return { high, low, levels, nearest };
 }
 
+// ===== 스펙터 지표 시트 기반 추가 지표 =====
+
+/** 스토캐스틱 슬로우 — 스펙터 69 시그널 설정 (Length 20, Smooth K 12, Smooth D 6). "우물" = 깊은 과매도 */
+function stochasticSlow(candlesNewestFirst, kPeriod = 20, smoothK = 12, smoothD = 6) {
+  const c = [...candlesNewestFirst].reverse(); // 과거→현재
+  const need = kPeriod + smoothK + smoothD;
+  if (c.length < need) return null;
+
+  const rawK = [];
+  for (let i = kPeriod - 1; i < c.length; i += 1) {
+    const win = c.slice(i - kPeriod + 1, i + 1);
+    const hi = Math.max(...win.map((x) => num(x.high)));
+    const lo = Math.min(...win.map((x) => num(x.low)));
+    rawK.push(hi > lo ? ((num(c[i].close) - lo) / (hi - lo)) * 100 : 50);
+  }
+  const smooth = (arr, p) => {
+    const out = [];
+    for (let i = p - 1; i < arr.length; i += 1) {
+      out.push(arr.slice(i - p + 1, i + 1).reduce((a, b) => a + b, 0) / p);
+    }
+    return out;
+  };
+  const slowK = smooth(rawK, smoothK);
+  const slowD = smooth(slowK, smoothD);
+  if (!slowK.length || !slowD.length) return null;
+  const k = slowK[slowK.length - 1];
+  const d = slowD[slowD.length - 1];
+  return {
+    k: Math.round(k * 10) / 10,
+    d: Math.round(d * 10) / 10,
+    // 시트: "바닥에서는 스토캐스틱 슬로우가 우물로 들어감"
+    inWell: k <= 20 && d <= 20,
+    status: k <= 20 ? 'oversold' : k >= 80 ? 'overbought' : 'neutral',
+  };
+}
+
+/** Mayer Multiple — 종가/200일선 배율 (시트: 사이클 변곡점 밴드) */
+function mayerMultiple(closesNewestFirst, period = 200) {
+  if (closesNewestFirst.length < period) return null;
+  const ma = sma(closesNewestFirst, period);
+  if (!ma) return null;
+  const multiple = num(closesNewestFirst[0]) / ma;
+  return {
+    multiple: Math.round(multiple * 100) / 100,
+    ma200: Math.round(ma),
+    // 주식용 해석: 1 미만 = 200일선 아래(기회 구간 후보), 1.5+ = 과열 주의
+    zone: multiple < 0.75 ? 'deep_value' : multiple < 1 ? 'below_ma' : multiple < 1.5 ? 'normal' : multiple < 2 ? 'hot' : 'extreme',
+  };
+}
+
+/** Williams VixFix — 공포 스파이크로 바닥 포착 (CM_Williams_Vix_Fix) */
+function williamsVixFix(candlesNewestFirst, period = 22, bbPeriod = 20, bbMult = 2) {
+  const c = [...candlesNewestFirst].reverse();
+  if (c.length < period + bbPeriod) return null;
+  const wvf = [];
+  for (let i = period - 1; i < c.length; i += 1) {
+    const win = c.slice(i - period + 1, i + 1);
+    const highestClose = Math.max(...win.map((x) => num(x.close)));
+    wvf.push(highestClose ? ((highestClose - num(c[i].low)) / highestClose) * 100 : 0);
+  }
+  const recent = wvf.slice(-bbPeriod);
+  const mean = recent.reduce((a, b) => a + b, 0) / recent.length;
+  const std = Math.sqrt(recent.reduce((a, b) => a + ((b - mean) ** 2), 0) / recent.length);
+  const upperBand = mean + bbMult * std;
+  const value = wvf[wvf.length - 1];
+  return {
+    value: Math.round(value * 10) / 10,
+    upperBand: Math.round(upperBand * 10) / 10,
+    // 시트: "녹색이 급격히 튀어 오르면 바닥 혹은 큰 기회"
+    spike: value >= upperBand,
+  };
+}
+
+/** SuperTrend(10, 3) — ATR 기반 추세 시그널 */
+function supertrend(candlesNewestFirst, period = 10, mult = 3) {
+  const c = [...candlesNewestFirst].reverse();
+  if (c.length < period + 2) return null;
+
+  const trs = [];
+  for (let i = 1; i < c.length; i += 1) {
+    const high = num(c[i].high); const low = num(c[i].low); const prevClose = num(c[i - 1].close);
+    trs.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+  }
+  let atrVal = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  const atrs = [atrVal];
+  for (let i = period; i < trs.length; i += 1) {
+    atrVal = (atrVal * (period - 1) + trs[i]) / period;
+    atrs.push(atrVal);
+  }
+
+  let direction = 1; // 1 상승 / -1 하락
+  let upper = 0; let lower = 0;
+  let flipped = false;
+  for (let i = period; i < c.length; i += 1) {
+    const mid = (num(c[i].high) + num(c[i].low)) / 2;
+    const a = atrs[i - period];
+    const basicUpper = mid + mult * a;
+    const basicLower = mid - mult * a;
+    const prevClose = num(c[i - 1].close);
+    upper = basicUpper < upper || prevClose > upper ? basicUpper : upper || basicUpper;
+    lower = basicLower > lower || prevClose < lower ? basicLower : lower || basicLower;
+    const close = num(c[i].close);
+    const prevDirection = direction;
+    if (close > upper) direction = 1;
+    else if (close < lower) direction = -1;
+    flipped = i === c.length - 1 && direction !== prevDirection;
+  }
+  return {
+    direction: direction === 1 ? 'up' : 'down',
+    line: Math.round(direction === 1 ? lower : upper),
+    flipped, // 마지막 봉에서 추세 전환 발생
+  };
+}
+
+/** Elliott Wave Oscillator — SMA5-SMA35 (중간가격) */
+function ewo(candlesNewestFirst) {
+  if (candlesNewestFirst.length < 35) return null;
+  const median = candlesNewestFirst.map((c) => (num(c.high) + num(c.low)) / 2);
+  const s5 = sma(median, 5);
+  const s35 = sma(median, 35);
+  if (s5 === null || s35 === null) return null;
+  const value = s5 - s35;
+  const close = num(candlesNewestFirst[0].close);
+  return {
+    value: Math.round(value),
+    pct: close ? Math.round((value / close) * 1000) / 10 : null,
+    trend: value > 0 ? 'bullish' : value < 0 ? 'bearish' : 'flat',
+  };
+}
+
+/** MFI(14) — 거래량 가중 RSI (시트: RSI+MFI 조합) */
+function mfi(candlesNewestFirst, period = 14) {
+  const c = [...candlesNewestFirst].reverse();
+  if (c.length < period + 1) return null;
+  let pos = 0; let neg = 0;
+  for (let i = c.length - period; i < c.length; i += 1) {
+    const tp = (num(c[i].high) + num(c[i].low) + num(c[i].close)) / 3;
+    const prevTp = (num(c[i - 1].high) + num(c[i - 1].low) + num(c[i - 1].close)) / 3;
+    const flow = tp * num(c[i].volume);
+    if (tp > prevTp) pos += flow;
+    else if (tp < prevTp) neg += flow;
+  }
+  if (!neg) return { value: 100, status: 'overbought' };
+  const value = 100 - 100 / (1 + pos / neg);
+  return {
+    value: Math.round(value * 10) / 10,
+    status: value <= 20 ? 'oversold' : value >= 80 ? 'overbought' : 'neutral',
+  };
+}
+
+/** MA Slope — 20일선 기울기 각도 (시트: 단기 추세 판단) */
+function maSlope(closesNewestFirst, period = 20, atrValue = null) {
+  if (closesNewestFirst.length < period + 5) return null;
+  const maNow = sma(closesNewestFirst, period);
+  const maPrev = sma(closesNewestFirst.slice(5), period);
+  if (maNow === null || maPrev === null) return null;
+  const denom = atrValue || Math.abs(maNow) * 0.01 || 1;
+  const angle = Math.atan((maNow - maPrev) / denom) * (180 / Math.PI);
+  return {
+    angle: Math.round(angle * 10) / 10,
+    trend: angle > 10 ? 'rising' : angle < -10 ? 'falling' : 'flat',
+  };
+}
+
+/** Minervini Trend Template — 8개 조건 체크리스트 */
+function minervini(candlesNewestFirst) {
+  const closes = candlesNewestFirst.map((c) => num(c.close));
+  if (closes.length < 200) return null;
+  const close = closes[0];
+  const ma50 = sma(closes, 50);
+  const ma150 = sma(closes, 150);
+  const ma200 = sma(closes, 200);
+  const ma200Month = closes.length >= 220 ? sma(closes.slice(20), 200) : null;
+  const yearSlice = candlesNewestFirst.slice(0, Math.min(252, candlesNewestFirst.length));
+  const w52High = Math.max(...yearSlice.map((c) => num(c.high)));
+  const w52Low = Math.min(...yearSlice.map((c) => num(c.low)));
+
+  const checks = [
+    { name: '주가 > 150일선', pass: ma150 !== null && close > ma150 },
+    { name: '주가 > 200일선', pass: ma200 !== null && close > ma200 },
+    { name: '150일선 > 200일선', pass: ma150 !== null && ma200 !== null && ma150 > ma200 },
+    { name: '200일선 상승 중', pass: ma200 !== null && ma200Month !== null && ma200 > ma200Month },
+    { name: '50일선 > 150·200일선', pass: ma50 !== null && ma150 !== null && ma200 !== null && ma50 > ma150 && ma50 > ma200 },
+    { name: '주가 > 50일선', pass: ma50 !== null && close > ma50 },
+    { name: '52주 저가 대비 +25% 이상', pass: w52Low > 0 && close >= w52Low * 1.25 },
+    { name: '52주 고가의 75% 이상', pass: w52High > 0 && close >= w52High * 0.75 },
+  ];
+  const passed = checks.filter((x) => x.pass).length;
+  return {
+    passed,
+    total: checks.length,
+    checks,
+    verdict: passed >= 7 ? 'strong_uptrend' : passed >= 5 ? 'uptrend' : passed >= 3 ? 'mixed' : 'downtrend',
+  };
+}
+
 function supportResistance(candlesNewestFirst, lookback = 60) {
   const window = candlesNewestFirst.slice(0, Math.min(lookback, candlesNewestFirst.length));
   if (window.length < 10) return null;
@@ -451,6 +647,55 @@ function analyzeCandles(rawCandles = []) {
     signals.push(`변동성 높음 (ATR ${atrData.pct}%)`);
   }
 
+  // 스펙터 지표 시트 기반
+  const stochSlow = stochasticSlow(candles);
+  if (stochSlow) {
+    if (stochSlow.inWell) { score += 6; signals.push(`스토캐스틱 슬로우 우물 진입 (K ${stochSlow.k})`); }
+    if (stochSlow.status === 'overbought') { score -= 4; signals.push(`스토캐스틱 슬로우 과매수 ${stochSlow.k}`); }
+  }
+
+  const mayer = mayerMultiple(closes);
+  if (mayer) {
+    if (mayer.zone === 'deep_value') { score += 5; signals.push(`200일선 대비 저평가 (Mayer ${mayer.multiple})`); }
+    if (mayer.zone === 'below_ma') { score += 2; signals.push('200일선 하단 (기회 구간 후보)'); }
+    if (mayer.zone === 'hot' || mayer.zone === 'extreme') { score -= 5; signals.push(`200일선 과열 (Mayer ${mayer.multiple})`); }
+  }
+
+  const vixFix = williamsVixFix(candles);
+  if (vixFix && vixFix.spike) { score += 5; signals.push(`VixFix 공포 스파이크 ${vixFix.value} (바닥 신호 후보)`); }
+
+  const st = supertrend(candles);
+  if (st) {
+    if (st.direction === 'up') { score += 4; signals.push(st.flipped ? 'SuperTrend 상승 전환!' : 'SuperTrend 상승 추세'); }
+    else { score -= 4; signals.push(st.flipped ? 'SuperTrend 하락 전환!' : 'SuperTrend 하락 추세'); }
+    if (st.flipped) score += st.direction === 'up' ? 3 : -3;
+  }
+
+  const ewoData = ewo(candles);
+  if (ewoData) {
+    if (ewoData.trend === 'bullish') { score += 2; signals.push('EWO 상승 모멘텀'); }
+    if (ewoData.trend === 'bearish') { score -= 2; signals.push('EWO 하락 모멘텀'); }
+  }
+
+  const mfiData = mfi(candles);
+  if (mfiData) {
+    if (mfiData.status === 'oversold') { score += 4; signals.push(`MFI 과매도 ${mfiData.value} (자금 유입 대기)`); }
+    if (mfiData.status === 'overbought') { score -= 4; signals.push(`MFI 과매수 ${mfiData.value}`); }
+  }
+
+  const slope = maSlope(closes, 20, atrData?.value);
+  if (slope) {
+    if (slope.trend === 'rising') { score += 3; signals.push(`20일선 기울기 상승 (${slope.angle}°)`); }
+    if (slope.trend === 'falling') { score -= 3; signals.push(`20일선 기울기 하락 (${slope.angle}°)`); }
+  }
+
+  const minerviniData = minervini(candles);
+  if (minerviniData) {
+    if (minerviniData.verdict === 'strong_uptrend') { score += 6; signals.push(`미너비니 추세 템플릿 ${minerviniData.passed}/8 통과`); }
+    else if (minerviniData.verdict === 'uptrend') { score += 3; signals.push(`미너비니 추세 템플릿 ${minerviniData.passed}/8`); }
+    else if (minerviniData.verdict === 'downtrend') { score -= 4; signals.push(`미너비니 추세 템플릿 ${minerviniData.passed}/8 (하락 구조)`); }
+  }
+
   const fib = fibonacci(candles);
 
   score = Math.max(0, Math.min(100, Math.round(score)));
@@ -484,6 +729,14 @@ function analyzeCandles(rawCandles = []) {
     obv: obvData,
     atr: atrData,
     fibonacci: fib,
+    stochasticSlow: stochSlow,
+    mayer,
+    vixFix,
+    supertrend: st,
+    ewo: ewoData,
+    mfi: mfiData,
+    maSlope: slope,
+    minervini: minerviniData,
     week52: { high: w52High, low: w52Low, position: w52Position },
     volume: { latest: num(latest.volume), avg20: avgVol20, ratio: volRatio },
     confluence: signals.length,
@@ -495,4 +748,5 @@ function analyzeCandles(rawCandles = []) {
 module.exports = {
   analyzeCandles, macd, stochastic, detectPatterns, supportResistance,
   ichimoku, adx, obv, atr, fibonacci, rsi, bollinger, sma,
+  stochasticSlow, mayerMultiple, williamsVixFix, supertrend, ewo, mfi, maSlope, minervini,
 };

@@ -31,6 +31,81 @@ struct CandleAnalysis: Decodable {
     let obv: OBVData?
     let atr: ATRData?
     let fibonacci: FibonacciData?
+    let stochasticSlow: StochasticSlowData?
+    let mayer: MayerData?
+    let vixFix: VixFixData?
+    let supertrend: SupertrendData?
+    let ewo: EWOData?
+    let mfi: MFIData?
+    let maSlope: MASlopeData?
+    let minervini: MinerviniData?
+}
+
+struct StochasticSlowData: Decodable {
+    let k: Double?
+    let d: Double?
+    let inWell: Bool?
+    let status: String?
+}
+
+struct MayerData: Decodable {
+    let multiple: Double?
+    let ma200: Double?
+    let zone: String?
+
+    var zoneLabel: String {
+        switch zone {
+        case "deep_value": return "깊은 저평가"
+        case "below_ma": return "200일선 하단"
+        case "normal": return "정상 범위"
+        case "hot": return "과열 주의"
+        case "extreme": return "극단 과열"
+        default: return "-"
+        }
+    }
+}
+
+struct VixFixData: Decodable {
+    let value: Double?
+    let upperBand: Double?
+    let spike: Bool?
+}
+
+struct SupertrendData: Decodable {
+    let direction: String?
+    let line: Double?
+    let flipped: Bool?
+}
+
+struct EWOData: Decodable {
+    let value: Double?
+    let pct: Double?
+    let trend: String?
+}
+
+struct MFIData: Decodable {
+    let value: Double?
+    let status: String?
+}
+
+struct MASlopeData: Decodable {
+    let angle: Double?
+    let trend: String?
+}
+
+struct MinerviniData: Decodable {
+    let passed: Int?
+    let total: Int?
+    let verdict: String?
+
+    var verdictLabel: String {
+        switch verdict {
+        case "strong_uptrend": return "강한 상승 구조"
+        case "uptrend": return "상승 구조"
+        case "mixed": return "혼조"
+        default: return "하락 구조"
+        }
+    }
 }
 
 struct IchimokuData: Decodable {

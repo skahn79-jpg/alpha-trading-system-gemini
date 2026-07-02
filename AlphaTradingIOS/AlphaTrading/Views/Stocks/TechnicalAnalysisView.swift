@@ -44,6 +44,14 @@ struct TechnicalAnalysisView: View {
                 KPICard(title: "OBV 자금흐름", value: analysis?.obv?.trendLabel ?? "-", subtitle: obvHint)
                 KPICard(title: "ATR 변동성", value: atrValue, subtitle: atrHint)
                 KPICard(title: "피보나치", value: fibValue, subtitle: fibHint)
+                KPICard(title: "SuperTrend", value: supertrendValue, subtitle: supertrendHint)
+                KPICard(title: "스토캐스틱 슬로우", value: formatNum(analysis?.stochasticSlow?.k), subtitle: stochSlowHint)
+                KPICard(title: "Mayer 배율", value: mayerValue, subtitle: analysis?.mayer?.zoneLabel)
+                KPICard(title: "VixFix 공포", value: formatNum(analysis?.vixFix?.value), subtitle: vixFixHint)
+                KPICard(title: "MFI(14)", value: formatNum(analysis?.mfi?.value), subtitle: mfiHint)
+                KPICard(title: "EWO 모멘텀", value: ewoValue, subtitle: ewoHint)
+                KPICard(title: "20일선 기울기", value: slopeValue, subtitle: slopeHint)
+                KPICard(title: "미너비니", value: minerviniValue, subtitle: analysis?.minervini?.verdictLabel)
                 KPICard(title: "52주 고가", value: formatInt(quote?.w52High.map(Double.init)), subtitle: nil)
                 KPICard(title: "52주 저가", value: formatInt(quote?.w52Low.map(Double.init)), subtitle: w52Pos(analysis?.week52?.position))
             }
@@ -206,6 +214,80 @@ struct TechnicalAnalysisView: View {
     private var fibHint: String? {
         guard let n = analysis?.fibonacci?.nearest else { return nil }
         return String(format: "레벨 %@ (이격 %.1f%%)", Int(n.price).formatted(.number.grouping(.automatic)), n.dist)
+    }
+
+    private var supertrendValue: String {
+        switch analysis?.supertrend?.direction {
+        case "up": return "상승"
+        case "down": return "하락"
+        default: return "-"
+        }
+    }
+
+    private var supertrendHint: String? {
+        guard let st = analysis?.supertrend else { return nil }
+        if st.flipped == true { return "추세 전환!" }
+        guard let line = st.line else { return nil }
+        return "기준선 \(Int(line).formatted(.number.grouping(.automatic)))"
+    }
+
+    private var stochSlowHint: String? {
+        guard let s = analysis?.stochasticSlow else { return nil }
+        if s.inWell == true { return "우물 진입 (바닥권)" }
+        switch s.status {
+        case "overbought": return "과매수"
+        case "oversold": return "과매도"
+        default: return "20/12/6 설정"
+        }
+    }
+
+    private var mayerValue: String {
+        guard let m = analysis?.mayer?.multiple else { return "-" }
+        return String(format: "%.2f", m)
+    }
+
+    private var vixFixHint: String? {
+        guard let v = analysis?.vixFix else { return nil }
+        return v.spike == true ? "공포 스파이크 (기회 후보)" : "정상 범위"
+    }
+
+    private var mfiHint: String? {
+        switch analysis?.mfi?.status {
+        case "oversold": return "과매도 (유입 대기)"
+        case "overbought": return "과매수"
+        default: return "자금 흐름 중립"
+        }
+    }
+
+    private var ewoValue: String {
+        guard let pct = analysis?.ewo?.pct else { return "-" }
+        return String(format: "%+.1f%%", pct)
+    }
+
+    private var ewoHint: String? {
+        switch analysis?.ewo?.trend {
+        case "bullish": return "상승 모멘텀"
+        case "bearish": return "하락 모멘텀"
+        default: return nil
+        }
+    }
+
+    private var slopeValue: String {
+        guard let angle = analysis?.maSlope?.angle else { return "-" }
+        return String(format: "%+.0f°", angle)
+    }
+
+    private var slopeHint: String? {
+        switch analysis?.maSlope?.trend {
+        case "rising": return "우상향"
+        case "falling": return "우하향"
+        default: return "횡보"
+        }
+    }
+
+    private var minerviniValue: String {
+        guard let m = analysis?.minervini, let p = m.passed, let t = m.total else { return "-" }
+        return "\(p)/\(t)"
     }
 }
 
