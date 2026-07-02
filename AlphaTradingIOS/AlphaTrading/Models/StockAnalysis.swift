@@ -39,6 +39,54 @@ struct CandleAnalysis: Decodable {
     let mfi: MFIData?
     let maSlope: MASlopeData?
     let minervini: MinerviniData?
+    let divergence: DivergenceData?
+    let stochHeatmap: StochHeatmapData?
+    let painMeter: PainMeterData?
+    let bullBearPower: BBPData?
+}
+
+struct DivergenceData: Decodable {
+    let bullish: DivergenceSignal?
+    let bearish: DivergenceSignal?
+}
+
+struct DivergenceSignal: Decodable {
+    let indicators: [String]
+    let barsAgo: Int
+}
+
+struct StochHeatmapData: Decodable {
+    let bullCount: Int?
+    let total: Int?
+    let pct: Int?
+    let zone: String?
+
+    var zoneLabel: String {
+        switch zone {
+        case "bottom_paint": return "바닥 도배"
+        case "top_paint": return "고점 도배"
+        default: return "혼조"
+        }
+    }
+}
+
+struct PainMeterData: Decodable {
+    let loss: Double?
+    let bullDiv: Bool?
+}
+
+struct BBPData: Decodable {
+    let value: Double?
+    let percentile: Int?
+    let zone: String?
+
+    var zoneLabel: String {
+        switch zone {
+        case "wave_top": return "파동 고점권"
+        case "wave_bottom": return "파동 바닥권"
+        default: return "중간"
+        }
+    }
 }
 
 struct StochasticSlowData: Decodable {

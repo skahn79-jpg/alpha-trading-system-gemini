@@ -52,6 +52,10 @@ struct TechnicalAnalysisView: View {
                 KPICard(title: "EWO 모멘텀", value: ewoValue, subtitle: ewoHint)
                 KPICard(title: "20일선 기울기", value: slopeValue, subtitle: slopeHint)
                 KPICard(title: "미너비니", value: minerviniValue, subtitle: analysis?.minervini?.verdictLabel)
+                KPICard(title: "다이버전스", value: divergenceValue, subtitle: divergenceHint)
+                KPICard(title: "스토캐스틱 히트맵", value: heatmapValue, subtitle: analysis?.stochHeatmap?.zoneLabel)
+                KPICard(title: "고통지수", value: painValue, subtitle: painHint)
+                KPICard(title: "Bull&Bear 파동", value: bbpValue, subtitle: analysis?.bullBearPower?.zoneLabel)
                 KPICard(title: "52주 고가", value: formatInt(quote?.w52High.map(Double.init)), subtitle: nil)
                 KPICard(title: "52주 저가", value: formatInt(quote?.w52Low.map(Double.init)), subtitle: w52Pos(analysis?.week52?.position))
             }
@@ -288,6 +292,42 @@ struct TechnicalAnalysisView: View {
     private var minerviniValue: String {
         guard let m = analysis?.minervini, let p = m.passed, let t = m.total else { return "-" }
         return "\(p)/\(t)"
+    }
+
+    private var divergenceValue: String {
+        if analysis?.divergence?.bullish != nil { return "강세" }
+        if analysis?.divergence?.bearish != nil { return "약세" }
+        return "없음"
+    }
+
+    private var divergenceHint: String? {
+        if let bull = analysis?.divergence?.bullish {
+            return "\(bull.indicators.joined(separator: "·")) · \(bull.barsAgo)봉 전"
+        }
+        if let bear = analysis?.divergence?.bearish {
+            return "\(bear.indicators.joined(separator: "·")) · \(bear.barsAgo)봉 전"
+        }
+        return "가격·지표 불일치 미검출"
+    }
+
+    private var heatmapValue: String {
+        guard let h = analysis?.stochHeatmap, let b = h.bullCount, let t = h.total else { return "-" }
+        return "\(b)/\(t)"
+    }
+
+    private var painValue: String {
+        guard let loss = analysis?.painMeter?.loss else { return "-" }
+        return String(format: "%.1f%%", loss)
+    }
+
+    private var painHint: String? {
+        guard let p = analysis?.painMeter else { return nil }
+        return p.bullDiv == true ? "바닥 다이버전스!" : "50봉 고점 대비 하락폭"
+    }
+
+    private var bbpValue: String {
+        guard let v = analysis?.bullBearPower?.value else { return "-" }
+        return String(format: "%.1f", v)
     }
 }
 

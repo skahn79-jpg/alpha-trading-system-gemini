@@ -48,6 +48,10 @@ const DEFAULT_WEIGHTS = {
   mfiNorm: -0.2,
   mayerDev: -0.2,
   minerviniScore: 0.3,
+  divergenceSig: 0.45,
+  heatmapPaint: 0.3,
+  painBottomDiv: 0.3,
+  bbpZone: 0.25,
 };
 
 const FEATURE_LABELS = {
@@ -75,6 +79,10 @@ const FEATURE_LABELS = {
   mfiNorm: "MFI 자금흐름",
   mayerDev: "200일선 배율",
   minerviniScore: "미너비니 템플릿",
+  divergenceSig: "다이버전스",
+  heatmapPaint: "히트맵 도배",
+  painBottomDiv: "고통지수 바닥",
+  bbpZone: "파동 위치(BBP)",
 };
 
 function clamp(v, min, max) {
@@ -152,6 +160,12 @@ function buildFeatures(analysis = {}, close = 0) {
   const mfiNorm = ((analysis.mfi?.value ?? 50) - 50) / 50;
   const mayerDev = clamp((analysis.mayer?.multiple ?? 1) - 1, -1, 1.5);
   const minerviniScore = ((analysis.minervini?.passed ?? 4) - 4) / 4;
+  const divergenceSig = analysis.divergence?.bullish ? 1 : analysis.divergence?.bearish ? -1 : 0;
+  const heatmapPaint = analysis.stochHeatmap?.zone === "bottom_paint" ? 1
+    : analysis.stochHeatmap?.zone === "top_paint" ? -1 : 0;
+  const painBottomDiv = analysis.painMeter?.bullDiv ? 1 : 0;
+  const bbpZone = analysis.bullBearPower?.zone === "wave_bottom" ? 1
+    : analysis.bullBearPower?.zone === "wave_top" ? -1 : 0;
 
   return {
     bias: 1,
@@ -179,6 +193,10 @@ function buildFeatures(analysis = {}, close = 0) {
     mfiNorm,
     mayerDev,
     minerviniScore,
+    divergenceSig,
+    heatmapPaint,
+    painBottomDiv,
+    bbpZone,
   };
 }
 

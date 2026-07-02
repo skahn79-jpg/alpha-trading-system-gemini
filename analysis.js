@@ -519,6 +519,239 @@ function minervini(candlesNewestFirst) {
   };
 }
 
+// ===== 커뮤니티 앱(UsStockAI/CoinAI) 벤치마킹 지표 =====
+
+function wilderRsiSeries(closes, period = 14) {
+  const out = Array(closes.length).fill(null);
+  if (closes.length <= period) return out;
+  let ag = 0; let al = 0;
+  for (let i = 1; i <= period; i += 1) {
+    const ch = closes[i] - closes[i - 1];
+    ag += Math.max(ch, 0); al += Math.max(-ch, 0);
+  }
+  ag /= period; al /= period;
+  out[period] = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+  for (let i = period + 1; i < closes.length; i += 1) {
+    const ch = closes[i] - closes[i - 1];
+    ag = (ag * (period - 1) + Math.max(ch, 0)) / period;
+    al = (al * (period - 1) + Math.max(-ch, 0)) / period;
+    out[i] = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+  }
+  return out;
+}
+
+/**
+ * 다중 지표 다이버전스 감지 — 피벗 저점/고점에서 가격과 지표(RSI·MACD·OBV·MFI)의 방향 불일치 검사.
+ * 강세: 가격은 더 낮은 저점(LL)인데 지표는 더 높은 저점(HL) → 반전 상승 신호.
+ */
+function divergence(candlesNewestFirst, { pivot = 5, maxBars = 100, recentBars = 30 } = {}) {
+  const c = [...candlesNewestFirst].reverse(); // 과거→현재
+  const N = c.length;
+  if (N < pivot * 4 + 30) return null;
+  const C = c.map((x) => num(x.close));
+  const H = c.map((x) => num(x.high));
+  const L = c.map((x) => num(x.low));
+  const V = c.map((x) => num(x.volume));
+
+  // 지표 시리즈
+  const rsiS = wilderRsiSeries(C, 14);
+  const emaS = (arr, p) => {
+    const k = 2 / (p + 1); const out = [arr[0]];
+    for (let i = 1; i < arr.length; i += 1) out.push(arr[i] * k + out[i - 1] * (1 - k));
+    return out;
+  };
+  const macdS = emaS(C, 12).map((v, i) => v - emaS(C, 26)[i]);
+  const obvS = [0];
+  for (let i = 1; i < N; i += 1) obvS.push(obvS[i - 1] + (C[i] > C[i - 1] ? V[i] : C[i] < C[i - 1] ? -V[i] : 0));
+  const mfiS = Array(N).fill(null);
+  for (let i = 14; i < N; i += 1) {
+    let pos = 0; let neg = 0;
+    for (let j = i - 13; j <= i; j += 1) {
+      const tp = (H[j] + L[j] + C[j]) / 3; const prev = (H[j - 1] + L[j - 1] + C[j - 1]) / 3;
+      const mf = tp * V[j];
+      if (tp > prev) pos += mf; else if (tp < prev) neg += mf;
+    }
+    mfiS[i] = neg === 0 ? 100 : 100 - 100 / (1 + pos / neg);
+  }
+  const inds = [
+    { name: 'RSI', arr: rsiS },
+    { name: 'MACD', arr: macdS },
+    { name: 'OBV', arr: obvS },
+    { name: 'MFI', arr: mfiS },
+  ];
+
+  // 종가 피벗 (좌우 pivot봉 대비 극값, 최근 pivot봉은 미확정이라 제외)
+  const pivLows = []; const pivHighs = [];
+  for (let i = pivot; i < N - pivot; i += 1) {
+    let lo = true; let hi = true;
+    for (let j = i - pivot; j <= i + pivot; j += 1) {
+      if (j === i) continue;
+      if (C[j] <= C[i]) lo = false;
+      if (C[j] >= C[i]) hi = false;
+    }
+    if (lo) pivLows.push(i);
+    if (hi) pivHighs.push(i);
+  }
+
+  const detect = (pivots, isBull) => {
+    if (pivots.length < 2) return null;
+    const i2 = pivots[pivots.length - 1];
+    if (N - 1 - i2 > recentBars) return null; // 최근 신호만
+    const names = [];
+    for (const ind of inds) {
+      const a = ind.arr;
+      if (a[i2] === null || Number.isNaN(a[i2])) continue;
+      for (let q = pivots.length - 2; q >= 0; q -= 1) {
+        const i1 = pivots[q];
+        if (i2 - i1 > maxBars) break;
+        if (i2 - i1 <= pivot || a[i1] === null || Number.isNaN(a[i1])) continue;
+        const priceLL = C[i2] < C[i1];
+        const indHL = a[i2] > a[i1];
+        if (isBull ? (priceLL && indHL) : (!priceLL && !indHL && C[i2] > C[i1] && a[i2] < a[i1])) {
+          names.push(ind.name);
+          break;
+        }
+      }
+    }
+    return names.length >= 2 ? { indicators: names, barsAgo: N - 1 - i2 } : null;
+  };
+
+  return {
+    bullish: detect(pivLows, true),
+    bearish: detect(pivHighs, false),
+  };
+}
+
+/**
+ * 스토캐스틱 히트맵 — 길이 10~200의 스토캐스틱 20개 중 강세(≥50) 개수.
+ * 시트 규칙: "파란색 도배 = 바닥, 빨간색 도배 = 고점"
+ */
+function stochHeatmap(candlesNewestFirst, { inc = 10, maxLines = 20 } = {}) {
+  const c = [...candlesNewestFirst].reverse();
+  const N = c.length;
+  if (N < inc * 2 + 4) return null;
+  const H = c.map((x) => num(x.high));
+  const L = c.map((x) => num(x.low));
+  const C = c.map((x) => num(x.close));
+
+  let bullCount = 0; let valid = 0;
+  for (let k = 0; k < maxLines; k += 1) {
+    const len = inc * (k + 1);
+    if (len >= N) break;
+    let hi = -Infinity; let lo = Infinity;
+    for (let j = N - len; j < N; j += 1) {
+      if (H[j] > hi) hi = H[j];
+      if (L[j] < lo) lo = L[j];
+    }
+    if (hi <= lo) continue;
+    const v = ((C[N - 1] - lo) / (hi - lo)) * 100;
+    valid += 1;
+    if (v >= 50) bullCount += 1;
+  }
+  if (!valid) return null;
+  const pct = Math.round((bullCount / valid) * 100);
+  return {
+    bullCount,
+    total: valid,
+    pct,
+    zone: pct <= 15 ? 'bottom_paint' : pct >= 85 ? 'top_paint' : 'mixed',
+  };
+}
+
+/**
+ * 고통지수(Pain Meter) — 50봉 고점 대비 하락%(5봉 평균) + UO(7/14/28) 강세 다이버전스로 바닥 판정
+ */
+function painMeter(candlesNewestFirst, { length = 50, smooth = 5, spacing = 10 } = {}) {
+  const c = [...candlesNewestFirst].reverse();
+  const N = c.length;
+  if (N < length + spacing * 3 + 2) return null;
+  const C = c.map((x) => num(x.close));
+  const H = c.map((x) => num(x.high));
+  const L = c.map((x) => num(x.low));
+
+  // 고점 대비 손실% (smooth봉 평균)
+  let lossSum = 0;
+  for (let s = 0; s < smooth; s += 1) {
+    const i = N - 1 - s;
+    let hm = -Infinity;
+    for (let j = i - length + 1; j <= i; j += 1) if (H[j] > hm) hm = H[j];
+    lossSum += hm > 0 ? (100 * (hm - L[i])) / hm : 0;
+  }
+  const loss = Math.round((lossSum / smooth) * 10) / 10;
+
+  // Ultimate Oscillator
+  const bp = Array(N).fill(0); const tr = Array(N).fill(0);
+  for (let i = 1; i < N; i += 1) {
+    const pc = C[i - 1]; const lo = Math.min(L[i], pc); const hi = Math.max(H[i], pc);
+    bp[i] = C[i] - lo; tr[i] = hi - lo;
+  }
+  const sumN = (arr, p, i) => {
+    let s = 0;
+    for (let k = i - p + 1; k <= i; k += 1) s += arr[k];
+    return s;
+  };
+  const uoAt = (i) => {
+    const t7 = sumN(tr, 7, i); const t14 = sumN(tr, 14, i); const t28 = sumN(tr, 28, i);
+    if (!(t7 > 0 && t14 > 0 && t28 > 0)) return null;
+    return (100 * (4 * (sumN(bp, 7, i) / t7) + 2 * (sumN(bp, 14, i) / t14) + sumN(bp, 28, i) / t28)) / 7;
+  };
+  const lowestN = (arr, p, end) => {
+    let m = Infinity;
+    for (let k = end - p + 1; k <= end; k += 1) if (arr[k] < m) m = arr[k];
+    return m;
+  };
+  const i = N - 1;
+  const v1 = lowestN(C, spacing, i);
+  const v2 = lowestN(C, spacing, i - spacing);
+  const uoNow = uoAt(i); const uoPrev = uoAt(i - spacing);
+  const bullDiv = uoNow !== null && uoPrev !== null && v1 < v2 && uoNow > uoPrev && uoNow < 50;
+
+  return { loss, bullDiv };
+}
+
+/**
+ * Bull&Bear Power Trend — BearTrend = -(50봉 최고가 - 종가)/ATR(5, Wilder RMA).
+ * 0 근처 = 파동 꼭대기(고가 근접), 깊은 음수 = 파동 바닥. 히스토리 백분위로 구간 판정.
+ */
+function bullBearPower(candlesNewestFirst, { length = 50, atrPeriod = 5 } = {}) {
+  const c = [...candlesNewestFirst].reverse();
+  const N = c.length;
+  if (N < length + atrPeriod + 10) return null;
+  const C = c.map((x) => num(x.close));
+  const H = c.map((x) => num(x.high));
+  const L = c.map((x) => num(x.low));
+
+  // Wilder RMA ATR(5) 시리즈
+  const atrS = Array(N).fill(null);
+  let a = 0;
+  for (let i = 1; i <= atrPeriod; i += 1) {
+    a += Math.max(H[i] - L[i], Math.abs(H[i] - C[i - 1]), Math.abs(L[i] - C[i - 1]));
+  }
+  a /= atrPeriod;
+  atrS[atrPeriod] = a;
+  for (let i = atrPeriod + 1; i < N; i += 1) {
+    const trv = Math.max(H[i] - L[i], Math.abs(H[i] - C[i - 1]), Math.abs(L[i] - C[i - 1]));
+    a = (a * (atrPeriod - 1) + trv) / atrPeriod;
+    atrS[i] = a;
+  }
+
+  const series = [];
+  for (let i = length - 1; i < N; i += 1) {
+    if (!atrS[i]) continue;
+    let hi = -Infinity;
+    for (let j = i - length + 1; j <= i; j += 1) if (H[j] > hi) hi = H[j];
+    series.push(-((hi - C[i]) / atrS[i]));
+  }
+  if (series.length < 20) return null;
+  const value = series[series.length - 1];
+  const rank = series.filter((v) => v <= value).length / series.length;
+  return {
+    value: Math.round(value * 100) / 100,
+    percentile: Math.round(rank * 100),
+    zone: rank >= 0.85 ? 'wave_top' : rank <= 0.15 ? 'wave_bottom' : 'mid',
+  };
+}
+
 function supportResistance(candlesNewestFirst, lookback = 60) {
   const window = candlesNewestFirst.slice(0, Math.min(lookback, candlesNewestFirst.length));
   if (window.length < 10) return null;
@@ -696,6 +929,26 @@ function analyzeCandles(rawCandles = []) {
     else if (minerviniData.verdict === 'downtrend') { score -= 4; signals.push(`미너비니 추세 템플릿 ${minerviniData.passed}/8 (하락 구조)`); }
   }
 
+  // 커뮤니티 앱 벤치마킹 지표
+  const div = divergence(candles);
+  if (div?.bullish) { score += 8; signals.push(`강세 다이버전스 (${div.bullish.indicators.join('·')})`); }
+  if (div?.bearish) { score -= 8; signals.push(`약세 다이버전스 (${div.bearish.indicators.join('·')})`); }
+
+  const heatmap = stochHeatmap(candles);
+  if (heatmap) {
+    if (heatmap.zone === 'bottom_paint') { score += 6; signals.push(`히트맵 바닥 도배 (강세 ${heatmap.bullCount}/${heatmap.total})`); }
+    if (heatmap.zone === 'top_paint') { score -= 6; signals.push(`히트맵 고점 도배 (강세 ${heatmap.bullCount}/${heatmap.total})`); }
+  }
+
+  const pain = painMeter(candles);
+  if (pain?.bullDiv) { score += 5; signals.push(`고통지수 바닥 다이버전스 (하락폭 ${pain.loss}%)`); }
+
+  const bbp = bullBearPower(candles);
+  if (bbp) {
+    if (bbp.zone === 'wave_bottom') { score += 4; signals.push(`파동 바닥권 (BBP ${bbp.value})`); }
+    if (bbp.zone === 'wave_top') { score -= 3; signals.push(`파동 고점권 (BBP ${bbp.value})`); }
+  }
+
   const fib = fibonacci(candles);
 
   score = Math.max(0, Math.min(100, Math.round(score)));
@@ -737,6 +990,10 @@ function analyzeCandles(rawCandles = []) {
     mfi: mfiData,
     maSlope: slope,
     minervini: minerviniData,
+    divergence: div,
+    stochHeatmap: heatmap,
+    painMeter: pain,
+    bullBearPower: bbp,
     week52: { high: w52High, low: w52Low, position: w52Position },
     volume: { latest: num(latest.volume), avg20: avgVol20, ratio: volRatio },
     confluence: signals.length,
@@ -749,4 +1006,5 @@ module.exports = {
   analyzeCandles, macd, stochastic, detectPatterns, supportResistance,
   ichimoku, adx, obv, atr, fibonacci, rsi, bollinger, sma,
   stochasticSlow, mayerMultiple, williamsVixFix, supertrend, ewo, mfi, maSlope, minervini,
+  divergence, stochHeatmap, painMeter, bullBearPower,
 };
