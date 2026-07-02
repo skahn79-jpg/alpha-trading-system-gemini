@@ -121,6 +121,34 @@ async function buildTradeReport() {
     };
   }).slice(-13); // 최근 13개월 (YoY 계산 후)
 
+  // 연도별 집계 (완결 연도 + 진행 중 올해, 최근 15년)
+  const byYear = new Map();
+  for (const row of merged) {
+    const year = row.month.slice(0, 4);
+    if (!byYear.has(year)) byYear.set(year, { exports: 0, imports: 0, months: 0 });
+    const y = byYear.get(year);
+    y.exports += row.exports;
+    y.imports += row.imports;
+    y.months += 1;
+  }
+  const yearKeys = [...byYear.keys()].sort();
+  const years = yearKeys.slice(-15).map((year) => {
+    const y = byYear.get(year);
+    const prevY = byYear.get(String(Number(year) - 1));
+    const yoyComparable = prevY && prevY.months === 12 && y.months === 12;
+    return {
+      year,
+      exports: Math.round(y.exports / 1e6),
+      imports: Math.round(y.imports / 1e6),
+      balance: Math.round((y.exports - y.imports) / 1e6),
+      monthsCounted: y.months,
+      partial: y.months < 12,
+      exportsYoY: yoyComparable
+        ? Math.round(((y.exports - prevY.exports) / prevY.exports) * 1000) / 10
+        : null,
+    };
+  });
+
   const latest = months[months.length - 1] || null;
   const prev = months[months.length - 2] || null;
 
@@ -150,6 +178,7 @@ async function buildTradeReport() {
     summary: summaryParts.join(" · ") || "데이터 없음",
     latest,
     months,
+    years,
     categories: categories || [],
     categoriesNote: categories
       ? null

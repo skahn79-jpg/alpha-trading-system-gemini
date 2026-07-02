@@ -8,6 +8,12 @@ struct MoreView: View {
                     apiInfoCard
 
                     NavigationLink {
+                        FeaturedSignalsView()
+                    } label: {
+                        moreRow(icon: "sparkle.magnifyingglass", title: "특징 종목", subtitle: "상승 전환 · 바닥 신호 자동 감지")
+                    }
+
+                    NavigationLink {
                         ScreenerView()
                     } label: {
                         moreRow(icon: "chart.bar.doc.horizontal", title: "스크리너", subtitle: "KOSPI/KOSDAQ AI 점수 랭킹")

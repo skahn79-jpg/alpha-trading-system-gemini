@@ -4,12 +4,23 @@ import Charts
 struct ChartView: View {
     let code: String
     @StateObject private var viewModel = ChartViewModel()
+    // 주봉/월봉 = 시트의 사이클 판단 타임프레임 (커뮤니티 앱에서는 구독 기능)
+    @State private var period = "D"
 
     // 표시 구간: 최근 60봉 (MA/볼린저 계산은 전체 데이터 사용)
     private let displayCount = 60
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Picker("기간", selection: $period) {
+                Text("일봉").tag("D")
+                Text("주봉").tag("W")
+                Text("월봉").tag("M")
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+
             if viewModel.isLoading && viewModel.candles.isEmpty {
                 LoadingView(message: "차트 로딩...")
                     .frame(height: 300)
@@ -31,7 +42,7 @@ struct ChartView: View {
         }
         .background(AppTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .task(id: code) { await viewModel.load(code: code) }
+        .task(id: "\(code)-\(period)") { await viewModel.load(code: code, period: period) }
     }
 
     // MARK: - 가격 차트 (캔들 + MA + 볼린저밴드)

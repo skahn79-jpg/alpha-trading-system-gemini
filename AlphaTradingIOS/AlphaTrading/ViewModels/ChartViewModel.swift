@@ -7,7 +7,7 @@ final class ChartViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
 
-    func load(code: String) async {
+    func load(code: String, period: String = "D") async {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
@@ -15,9 +15,9 @@ final class ChartViewModel: ObservableObject {
             async let chartTask: ChartResponse = APIClient.shared.get(
                 "/api/chart/\(code)",
                 query: [
-                    URLQueryItem(name: "period", value: "D"),
-                    // MA60·볼린저를 표시 구간(60봉) 전체에 그리려면 여유 데이터 필요
-                    URLQueryItem(name: "count", value: "120"),
+                    URLQueryItem(name: "period", value: period),
+                    // MA60·볼린저를 표시 구간(60봉) 전체에 그리려면 여유 데이터 필요 (주/월봉은 KIS가 ~30봉 제공)
+                    URLQueryItem(name: "count", value: period == "D" ? "120" : "60"),
                     URLQueryItem(name: "analyze", value: "0"),
                 ]
             )

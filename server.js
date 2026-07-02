@@ -70,7 +70,8 @@ function requireAppAuth(req, res, next) {
 
 const generalRateLimit = rateLimit({
   windowMs: 60 * 1000,
-  max: Number(process.env.RATE_LIMIT_GENERAL || 60),
+  // iOS 앱은 화면당 여러 요청(시세+분석+예측+차트)을 병렬로 보내므로 60은 정상 사용에도 걸림
+  max: Number(process.env.RATE_LIMIT_GENERAL || 300),
   standardHeaders: true,
   legacyHeaders: false,
   message: { ok: false, error: "Too many requests" },
@@ -455,6 +456,190 @@ app.get("/api/predict-model", (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 특징 종목 스캐너 — 상승 전환·바닥 신호가 뜬 종목만 골라서 보여줌
+// ═══════════════════════════════════════════════════════════════
+// 스캔은 KIS 호출이 많아(종목당 ~3회) 백그라운드로 돌리고 30분 캐시.
+const featuredCache = { at: 0, data: null, building: false };
+const FEATURED_TTL_MS = 30 * 60 * 1000;
+const FEATURED_SCAN_LIMIT = 30; // 마스터 앞쪽(큐레이션 주요 종목) N개만 스캔
+
+function extractFeaturedSignals(code, name, sector, analysis, close) {
+  const reasons = [];
+  let kind = null; // bottom(바닥 신호) | turn(상승 전환)
+
+  if (analysis.supertrend?.flipped && analysis.supertrend?.direction === 'up') {
+    reasons.push('SuperTrend 상승 전환'); kind = 'turn';
+  }
+  if (analysis.divergence?.bullish) {
+    reasons.push(`강세 다이버전스 (${analysis.divergence.bullish.indicators.join('·')})`); kind = kind || 'bottom';
+  }
+  if (analysis.stochasticSlow?.inWell) {
+    reasons.push(`스토캐스틱 슬로우 우물 (K ${analysis.stochasticSlow.k})`); kind = kind || 'bottom';
+  }
+  if (analysis.vixFix?.spike) {
+    reasons.push(`VixFix 공포 스파이크 ${analysis.vixFix.value}`); kind = kind || 'bottom';
+  }
+  if (analysis.stochHeatmap?.zone === 'bottom_paint') {
+    reasons.push('히트맵 바닥 도배'); kind = kind || 'bottom';
+  }
+  if (analysis.painMeter?.bullDiv) {
+    reasons.push('고통지수 바닥 다이버전스'); kind = kind || 'bottom';
+  }
+  if (analysis.bullBearPower?.zone === 'wave_bottom') {
+    reasons.push(`파동 바닥권 (BBP ${analysis.bullBearPower.value})`); kind = kind || 'bottom';
+  }
+  if (analysis.macd?.cross === 'golden') {
+    reasons.push('MACD 골든크로스'); kind = kind || 'turn';
+  }
+  if (analysis.ichimoku?.tkCross === 'bullish' && analysis.ichimoku?.status === 'above_cloud'
+    && (analysis.minervini?.passed ?? 0) >= 7) {
+    reasons.push(`미너비니 ${analysis.minervini.passed}/8 + 일목 정배열`); kind = kind || 'turn';
+  }
+
+  if (reasons.length === 0) return null;
+  return {
+    code, name, sector,
+    price: close,
+    kind,
+    score: analysis.score,
+    signalBadge: analysis.signalBadge,
+    reasons,
+  };
+}
+
+async function buildFeaturedSignals() {
+  if (featuredCache.building) return;
+  featuredCache.building = true;
+  try {
+    const universe = KRX_MASTER_ALL.slice(0, FEATURED_SCAN_LIMIT);
+    const found = [];
+    for (const stock of universe) {
+      try {
+        const candles = await fetchDailyCandles(stock.code, 260);
+        if (!candles || candles.length < 60) continue;
+        const analysis = analyzeCandles(candles);
+        const item = extractFeaturedSignals(stock.code, stock.name, stock.sector, analysis, Number(candles[0]?.close) || 0);
+        if (item) found.push(item);
+      } catch (e) {
+        // 개별 종목 실패는 건너뜀
+      }
+    }
+    found.sort((a, b) => b.reasons.length - a.reasons.length || b.score - a.score);
+    featuredCache.data = {
+      ok: true,
+      scanned: universe.length,
+      count: found.length,
+      updatedAt: new Date().toISOString(),
+      results: found,
+      disclaimer: '기술적 신호 기반 참고 정보이며 투자 권유가 아닙니다.',
+    };
+    featuredCache.at = Date.now();
+  } finally {
+    featuredCache.building = false;
+  }
+}
+
+// GET /api/signals/featured — 캐시 반환, 만료 시 백그라운드 재스캔
+app.get("/api/signals/featured", (req, res) => {
+  const stale = Date.now() - featuredCache.at > FEATURED_TTL_MS;
+  if (stale && !featuredCache.building) {
+    buildFeaturedSignals().catch((e) => console.error("[featured]", e.message));
+  }
+  if (featuredCache.data) {
+    return res.json({ ...featuredCache.data, refreshing: stale });
+  }
+  res.json({ ok: true, building: true, results: [], message: "첫 스캔 진행 중 — 1~2분 후 다시 요청하세요." });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// AI 수출입 연계 저평가 종목 — 수출 주력 품목 업종에서 저평가 후보 추출
+// ═══════════════════════════════════════════════════════════════
+const tradePicksCache = { at: 0, data: null, building: false };
+const TRADE_PICKS_TTL_MS = 6 * 60 * 60 * 1000;
+
+async function buildTradePicks() {
+  if (tradePicksCache.building) return;
+  tradePicksCache.building = true;
+  try {
+    const tradeReport = await buildTradeReport();
+    const hints = tradeReport.sectorHints || [];
+    const exportTrend = tradeReport.trend; // increase | decrease | flat
+    const picks = [];
+
+    for (const hint of hints.slice(0, 6)) {
+      const sectorStocks = KRX_MASTER_ALL
+        .filter((x) => x.sector === hint.sector)
+        .slice(0, 3);
+      for (const stock of sectorStocks) {
+        try {
+          const quoteData = await kisGet(
+            "/uapi/domestic-stock/v1/quotations/inquire-price",
+            "FHKST01010100",
+            { FID_COND_MRKT_DIV_CODE: "J", FID_INPUT_ISCD: stock.code }
+          );
+          const o = quoteData.output;
+          const per = parseFloat(o.per) || null;
+          const pbr = parseFloat(o.pbr) || null;
+          const price = parseInt(o.stck_prpr) || 0;
+          const changeRate = parseFloat(o.prdy_ctrt) || 0;
+          const w52High = parseInt(o.w52_hgpr) || null;
+          const w52Pos = w52High && price ? Math.round((price / w52High) * 100) : null;
+
+          // 저평가 점수: PER·PBR 낮을수록 + 52주 고점 대비 낮을수록
+          let valueScore = 50;
+          if (per !== null && per > 0) valueScore += per < 8 ? 20 : per < 12 ? 12 : per < 20 ? 4 : -8;
+          if (pbr !== null && pbr > 0) valueScore += pbr < 0.8 ? 18 : pbr < 1.2 ? 10 : pbr < 2 ? 2 : -6;
+          if (w52Pos !== null) valueScore += w52Pos < 60 ? 12 : w52Pos < 80 ? 6 : -4;
+
+          picks.push({
+            code: stock.code,
+            name: stock.name,
+            sector: hint.sector,
+            category: hint.category,
+            categoryNote: hint.note,
+            price,
+            changeRate,
+            per,
+            pbr,
+            w52Pos,
+            valueScore: Math.max(0, Math.min(100, valueScore)),
+          });
+        } catch {
+          // skip
+        }
+      }
+    }
+
+    picks.sort((a, b) => b.valueScore - a.valueScore);
+    tradePicksCache.data = {
+      ok: true,
+      exportTrend,
+      basis: exportTrend === 'increase'
+        ? '수출 증가 국면 — 수출 주력 품목 연계 업종의 저평가 후보'
+        : '수출 주력 품목 연계 업종의 저평가 후보 (수출 국면 참고)',
+      updatedAt: new Date().toISOString(),
+      results: picks.slice(0, 12),
+      disclaimer: 'PER·PBR 기반 참고 정보이며 투자 권유가 아닙니다.',
+    };
+    tradePicksCache.at = Date.now();
+  } finally {
+    tradePicksCache.building = false;
+  }
+}
+
+// GET /api/trade/picks — 수출입 연계 저평가 후보
+app.get("/api/trade/picks", (req, res) => {
+  const stale = Date.now() - tradePicksCache.at > TRADE_PICKS_TTL_MS;
+  if (stale && !tradePicksCache.building) {
+    buildTradePicks().catch((e) => console.error("[trade-picks]", e.message));
+  }
+  if (tradePicksCache.data) {
+    return res.json({ ...tradePicksCache.data, refreshing: stale });
+  }
+  res.json({ ok: true, building: true, results: [], message: "분석 진행 중 — 잠시 후 다시 요청하세요." });
 });
 
 // 거시경제 지표 (FRED 공개 데이터 — CPI·금리·연준 유동성·VIX·달러)

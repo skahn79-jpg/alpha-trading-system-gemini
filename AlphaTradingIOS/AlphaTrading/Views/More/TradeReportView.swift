@@ -4,8 +4,10 @@ import Charts
 /// 한국 수출입 리포트 — 월별 증감 추이 + 업종/종목 힌트 (투자 검토 참고용)
 struct TradeReportView: View {
     @State private var report: TradeReport?
+    @State private var picks: TradePicksResponse?
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var viewMode = "monthly" // monthly | yearly
 
     var body: some View {
         ScrollView {
@@ -20,8 +22,22 @@ struct TradeReportView: View {
                         .padding()
                 } else if let report {
                     summaryCard(report)
-                    trendChart(report)
-                    monthsTable(report)
+
+                    Picker("보기", selection: $viewMode) {
+                        Text("월별").tag("monthly")
+                        Text("년도별").tag("yearly")
+                    }
+                    .pickerStyle(.segmented)
+
+                    if viewMode == "monthly" {
+                        trendChart(report)
+                        monthsTable(report)
+                    } else {
+                        yearsChart(report)
+                        yearsTable(report)
+                    }
+
+                    picksCard
                     sectorHintsCard(report)
                     if let disclaimer = report.disclaimer {
                         Text(disclaimer)
@@ -48,7 +64,144 @@ struct TradeReportView: View {
         } catch {
             errorMessage = "수출입 데이터를 불러오지 못했습니다: \(error.localizedDescription)"
         }
+        // 저평가 후보는 부가 정보 — 실패해도 리포트를 막지 않음
+        picks = try? await APIClient.shared.get("/api/trade/picks") as TradePicksResponse
         isLoading = false
+    }
+
+    // MARK: - 년도별
+
+    private func yearsChart(_ report: TradeReport) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("연간 수출입 (백만 달러)")
+                .font(.paperlogy(15, weight: .semibold))
+                .foregroundStyle(AppTheme.textPrimary)
+            if let years = report.years, !years.isEmpty {
+                Chart(years) { y in
+                    BarMark(x: .value("연도", y.year), y: .value("수출", y.exports))
+                        .foregroundStyle(AppTheme.up.opacity(0.8))
+                        .position(by: .value("구분", "수출"))
+                    BarMark(x: .value("연도", y.year), y: .value("수입", y.imports))
+                        .foregroundStyle(AppTheme.down.opacity(0.8))
+                        .position(by: .value("구분", "수입"))
+                }
+                .chartXAxis {
+                    AxisMarks { value in
+                        AxisValueLabel {
+                            if let raw = value.as(String.self) {
+                                Text(String(raw.suffix(2)))
+                                    .font(.paperlogy(9))
+                            }
+                        }
+                    }
+                }
+                .frame(height: 180)
+                HStack(spacing: 12) {
+                    legendDot(color: AppTheme.up, label: "수출")
+                    legendDot(color: AppTheme.down, label: "수입")
+                    Spacer()
+                }
+            }
+        }
+        .padding(16)
+        .background(AppTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func yearsTable(_ report: TradeReport) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("연도별 실적 (전년 대비)")
+                .font(.paperlogy(15, weight: .semibold))
+                .foregroundStyle(AppTheme.textPrimary)
+            ForEach((report.years ?? []).reversed()) { y in
+                HStack {
+                    Text(y.year + ((y.partial ?? false) ? "*" : ""))
+                        .font(.paperlogy(13, weight: .medium))
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .frame(width: 56, alignment: .leading)
+                    Text("수출 \(y.exportsBillionText)")
+                        .font(.paperlogy(12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                    Text(y.balanceBillionText)
+                        .font(.paperlogy(12))
+                        .foregroundStyle(y.balance >= 0 ? AppTheme.up : AppTheme.down)
+                    Spacer()
+                    if let yoy = y.exportsYoY {
+                        Text(String(format: "%+.1f%%", yoy))
+                            .font(.paperlogy(13, weight: .bold))
+                            .foregroundStyle(yoy >= 0 ? AppTheme.up : AppTheme.down)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            Text("* 진행 중인 연도 (누적)")
+                .font(.paperlogy(9))
+                .foregroundStyle(AppTheme.textSecondary.opacity(0.8))
+        }
+        .padding(16)
+        .background(AppTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    // MARK: - AI 수출 연계 저평가 후보
+
+    @ViewBuilder
+    private var picksCard: some View {
+        if let picks, !picks.results.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Image(systemName: "brain.head.profile")
+                        .foregroundStyle(AppTheme.accent)
+                    Text("수출 연계 저평가 후보")
+                        .font(.paperlogy(15, weight: .semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+                if let basis = picks.basis {
+                    Text(basis)
+                        .font(.paperlogy(11))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                ForEach(picks.results.prefix(8)) { pick in
+                    NavigationLink {
+                        StockDetailView(stock: pick.asStock)
+                    } label: {
+                        HStack(spacing: 8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(pick.name)
+                                    .font(.paperlogy(13, weight: .semibold))
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                Text("\(pick.category ?? "-") · \(pick.sector ?? "-")")
+                                    .font(.paperlogy(10))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text("PER \(pick.per.map { String(format: "%.1f", $0) } ?? "-") · PBR \(pick.pbr.map { String(format: "%.2f", $0) } ?? "-")")
+                                    .font(.paperlogy(11))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                if let vs = pick.valueScore {
+                                    Text("저평가 \(vs)점")
+                                        .font(.paperlogy(11, weight: .bold))
+                                        .foregroundStyle(AppTheme.accent)
+                                }
+                            }
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                if let disclaimer = picks.disclaimer {
+                    Text(disclaimer)
+                        .font(.paperlogy(9))
+                        .foregroundStyle(AppTheme.textSecondary.opacity(0.7))
+                }
+            }
+            .padding(16)
+            .background(AppTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
     }
 
     private func summaryCard(_ report: TradeReport) -> some View {

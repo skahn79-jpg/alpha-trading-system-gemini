@@ -9,6 +9,7 @@ struct TradeReport: Decodable {
     let summary: String?
     let latest: TradeMonth?
     let months: [TradeMonth]?
+    let years: [TradeYear]?
     let categories: [TradeCategory]?
     let categoriesNote: String?
     let sectorHints: [TradeSectorHint]?
@@ -37,6 +38,20 @@ struct TradeMonth: Decodable, Identifiable {
     /// 백만 달러 → 억 달러 표기
     var exportsBillionText: String { String(format: "%.1f억$", exports / 100) }
     var balanceBillionText: String { String(format: "%@%.1f억$", balance >= 0 ? "+" : "", balance / 100) }
+}
+
+struct TradeYear: Decodable, Identifiable {
+    var id: String { year }
+    let year: String
+    let exports: Double
+    let imports: Double
+    let balance: Double
+    let monthsCounted: Int?
+    let partial: Bool?
+    let exportsYoY: Double?
+
+    var exportsBillionText: String { String(format: "%.0f억$", exports / 100) }
+    var balanceBillionText: String { String(format: "%@%.0f억$", balance >= 0 ? "+" : "", balance / 100) }
 }
 
 struct TradeCategory: Decodable, Identifiable {
