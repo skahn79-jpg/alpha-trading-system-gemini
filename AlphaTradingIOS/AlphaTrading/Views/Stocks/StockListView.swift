@@ -32,7 +32,11 @@ struct StockDetailView: View {
                     if analysisVM.isLoading {
                         LoadingView().frame(height: 120)
                     } else {
-                        TechnicalAnalysisView(analysis: analysisVM.analysis, quote: analysisVM.quote)
+                        TechnicalAnalysisView(
+                            analysis: analysisVM.analysis,
+                            quote: analysisVM.quote,
+                            prediction: analysisVM.prediction
+                        )
                     }
                 case .summary:
                     if analysisVM.isLoading {

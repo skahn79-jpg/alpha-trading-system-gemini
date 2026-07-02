@@ -4,6 +4,7 @@ import Foundation
 final class AnalysisViewModel: ObservableObject {
     @Published var analysis: CandleAnalysis?
     @Published var quote: FullQuote?
+    @Published var prediction: AIPrediction?
     @Published var sectorPeers: [MasterStock] = []
     @Published var aiSummary = ""
     @Published var isLoading = false
@@ -23,6 +24,8 @@ final class AnalysisViewModel: ObservableObject {
             let (analyze, q) = try await (analyzeTask, quoteTask)
             analysis = analyze.analysis ?? q.analysis
             quote = q
+            // AI 예측은 부가 정보 — 실패해도 화면을 막지 않음
+            prediction = try? await APIClient.shared.get("/api/ai/predict/\(code)") as AIPrediction
             if let sector, !sector.isEmpty {
                 await loadSectorPeers(sector: sector, market: market)
             }

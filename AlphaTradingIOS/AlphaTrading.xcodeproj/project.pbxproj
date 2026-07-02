@@ -56,10 +56,16 @@
 		A1000000000000000000002F /* AIReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000032 /* AIReportView.swift */; };
 		A10000000000000000000030 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000033 /* PrivacyInfo.xcprivacy */; };
 		B10000000000000000000001 /* AlphaTradingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* AlphaTradingTests.swift */; };
+		A10000000000000000000041 /* AIPrediction.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000041 /* AIPrediction.swift */; };
+		A10000000000000000000042 /* TradeReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000042 /* TradeReport.swift */; };
+		A10000000000000000000043 /* TradeReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000043 /* TradeReportView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A20000000000000000000001 /* AlphaTradingApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlphaTradingApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000041 /* AIPrediction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPrediction.swift; sourceTree = "<group>"; };
+		A20000000000000000000042 /* TradeReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeReport.swift; sourceTree = "<group>"; };
+		A20000000000000000000043 /* TradeReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeReportView.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		A20000000000000000000003 /* APIConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIConfig.swift; sourceTree = "<group>"; };
 		A20000000000000000000004 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
@@ -224,6 +230,8 @@
 				A20000000000000000000022 /* StockAnalysis.swift */,
 				A2000000000000000000002A /* GlobalQuote.swift */,
 				A2000000000000000000002B /* TradingAlert.swift */,
+				A20000000000000000000041 /* AIPrediction.swift */,
+				A20000000000000000000042 /* TradeReport.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -313,6 +321,7 @@
 				A20000000000000000000030 /* GlobalMarketView.swift */,
 				A20000000000000000000031 /* AlertCenterView.swift */,
 				A20000000000000000000032 /* AIReportView.swift */,
+				A20000000000000000000043 /* TradeReportView.swift */,
 			);
 			path = More;
 			sourceTree = "<group>";
@@ -506,6 +515,9 @@
 				A10000000000000000000022 /* SectorBrowseView.swift in Sources */,
 				A10000000000000000000023 /* TechnicalAnalysisView.swift in Sources */,
 				A10000000000000000000024 /* AnalysisSummaryView.swift in Sources */,
+				A10000000000000000000041 /* AIPrediction.swift in Sources */,
+				A10000000000000000000042 /* TradeReport.swift in Sources */,
+				A10000000000000000000043 /* TradeReportView.swift in Sources */,
 				A10000000000000000000025 /* CertificatePinner.swift in Sources */,
 				A10000000000000000000026 /* SecureSessionFactory.swift in Sources */,
 				A10000000000000000000027 /* GlobalQuote.swift in Sources */,

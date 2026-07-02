@@ -32,6 +32,12 @@ struct MoreView: View {
                     }
 
                     NavigationLink {
+                        TradeReportView()
+                    } label: {
+                        moreRow(icon: "shippingbox.fill", title: "수출입 리포트", subtitle: "한국 월별 수출입 증감 · 업종 힌트")
+                    }
+
+                    NavigationLink {
                         SectorBrowseView()
                     } label: {
                         moreRow(icon: "square.grid.2x2", title: "업종별 종목 검색", subtitle: "코스피 · 코스닥 업종 탐색")

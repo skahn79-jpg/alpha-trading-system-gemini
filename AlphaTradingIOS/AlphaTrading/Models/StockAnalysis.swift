@@ -22,6 +22,38 @@ struct CandleAnalysis: Decodable {
     let bollinger: BollingerBands?
     let week52: Week52Range?
     let volume: VolumeAnalysis?
+    let macd: MACDData?
+    let stochastic: StochasticData?
+    let patterns: [CandlePattern]?
+    let supportResistance: SupportResistance?
+}
+
+struct MACDData: Decodable {
+    let macd: Double?
+    let signal: Double?
+    let histogram: Double?
+    let cross: String?
+    let trend: String?
+}
+
+struct StochasticData: Decodable {
+    let k: Double?
+    let d: Double?
+    let status: String?
+}
+
+struct CandlePattern: Decodable, Identifiable {
+    var id: String { name }
+    let name: String
+    let type: String?
+    let note: String?
+}
+
+struct SupportResistance: Decodable {
+    let support: Double?
+    let resistance: Double?
+    let supportDist: Double?
+    let resistanceDist: Double?
 }
 
 struct MovingAverages: Decodable {

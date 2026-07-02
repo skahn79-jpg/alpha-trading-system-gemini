@@ -23,6 +23,8 @@ const path = require("path");
 const { analyzeCandles } = require("./analysis.js");
 const { fetchNpsChanges, fetchNpsForStock } = require("./dart.js");
 const { judgeBatch, computeStats, computeWeights, scoreSignal } = require("./simulation.js");
+const aiPredictor = require("./predictor.js");
+const { buildTradeReport } = require("./trade.js");
 
 const app = express();
 // CORS: Firebase Hosting URL + 로컬 개발 모두 허용
@@ -389,6 +391,51 @@ app.get("/api/analyze/:code", async (req, res) => {
     const payload = buildKisErrorPayload(err, "KIS_ANALYZE");
     console.error("[analyze-endpoint]", payload);
     res.status(payload.status || 500).json(payload);
+  }
+});
+
+// AI 상승/하락 확률 예측 (온라인 학습 — 호출이 쌓일수록 정확도 개선)
+// GET /api/ai/predict/:code
+app.get("/api/ai/predict/:code", async (req, res) => {
+  try {
+    const code = req.params.code;
+    const candles = await fetchDailyCandles(code, 130);
+    if (!candles || candles.length < 30) {
+      return res.status(400).json({ error: "예측에 필요한 일봉 데이터가 부족합니다.", count: candles?.length || 0 });
+    }
+    const analysis = analyzeCandles(candles);
+    const close = Number(candles[0]?.close) || 0;
+    const prediction = aiPredictor.predict(code, analysis, close);
+    // 만기된 과거 예측 채점 + 가중치 자동 학습 (요청당 소량 처리)
+    aiPredictor.processMatured((c, n) => fetchDailyCandles(c, n), { maxPerRun: 5 })
+      .catch((e) => console.error("[ai-learn]", e.message));
+    res.json({ code, ...prediction });
+  } catch (err) {
+    const payload = buildKisErrorPayload(err, "AI_PREDICT");
+    console.error("[ai-predict]", payload);
+    res.status(payload.status || 500).json(payload);
+  }
+});
+
+// AI 모델 상태/성적표
+// GET /api/ai/model
+app.get("/api/ai/model", (req, res) => {
+  try {
+    res.json({ ok: true, ...aiPredictor.getModelStats() });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 한국 수출입 리포트 (총괄: FRED 공개 데이터, 품목별: 관세청 API 키 설정 시)
+// GET /api/trade/report
+app.get("/api/trade/report", async (req, res) => {
+  try {
+    const report = await buildTradeReport();
+    res.json(report);
+  } catch (err) {
+    console.error("[trade-report]", err.message);
+    res.status(502).json({ ok: false, error: "수출입 데이터 조회 실패: " + err.message });
   }
 });
 
