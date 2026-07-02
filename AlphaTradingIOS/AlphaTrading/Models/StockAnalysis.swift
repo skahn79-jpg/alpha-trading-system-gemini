@@ -58,7 +58,8 @@ struct VolumeAnalysis: Decodable {
 
 struct FullQuote: Decodable {
     let code: String
-    let name: String
+    // 서버 응답에 name이 없으므로 옵셔널 (필수로 두면 전체 시세 디코딩이 실패함)
+    let name: String?
     let price: Int?
     let change: Int?
     let changeRate: Double?

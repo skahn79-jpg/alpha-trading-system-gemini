@@ -70,12 +70,15 @@ function main() {
   const apiBaseUrl = resolveApiBaseUrl(env);
   const appApiKey = resolveApiKey(env);
 
+  // xcconfig는 //를 주석으로 해석하므로 URL의 //를 /$()/ 로 끊어야 값이 잘리지 않음
+  const xcconfigSafeUrl = apiBaseUrl.replace("://", ":/$()/");
+
   const lines = [
     "// 자동 생성 — scripts/sync-ios-api-config.mjs (수동 편집 금지)",
     `// 소스: .env / .env.local (웹앱과 동일)`,
     `// 생성 시각: ${new Date().toISOString()}`,
     "",
-    `API_BASE_URL = ${apiBaseUrl}`,
+    `API_BASE_URL = ${xcconfigSafeUrl}`,
     `APP_API_KEY = ${appApiKey}`,
     "",
   ];
