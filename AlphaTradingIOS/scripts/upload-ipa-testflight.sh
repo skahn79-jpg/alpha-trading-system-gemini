@@ -31,22 +31,32 @@ if [[ -z "$IPA" || ! -f "$IPA" ]]; then
 fi
 
 if [[ -f "$ROOT/.env.local" ]]; then
+  # 프로세스 치환(<())은 일부 샌드박스 셸에서 조용히 실패하므로 임시 파일 사용
+  ENV_TMP="$(mktemp)"
+  grep -E '^(ASC_API_KEY_ID|ASC_ISSUER_ID|ASC_API_ISSUER_ID|ASC_API_KEY_PATH|ASC_API_PRIVATE_KEY|APPLE_ID|APPLE_APP_PASSWORD)=' "$ROOT/.env.local" > "$ENV_TMP" 2>/dev/null || true
   # shellcheck disable=SC1090
   set -a
-  source <(grep -E '^(ASC_API_KEY_ID|ASC_ISSUER_ID|ASC_API_ISSUER_ID|ASC_API_KEY_PATH|ASC_API_PRIVATE_KEY|APPLE_ID|APPLE_APP_PASSWORD)=' "$ROOT/.env.local" 2>/dev/null || true)
+  source "$ENV_TMP"
   set +a
+  rm -f "$ENV_TMP"
 fi
 
 # .env.local 표준 이름은 ASC_ISSUER_ID (구 ASC_API_ISSUER_ID 호환)
 ASC_ISSUER_ID="${ASC_ISSUER_ID:-${ASC_API_ISSUER_ID:-}}"
 
 # Downloads 의 AuthKey_*.p8 자동 감지
+# 주의: ASC_API_KEY_ID가 설정돼 있으면 해당 ID와 일치하는 키만 사용 (엉뚱한 키 선택 방지)
 if [[ -z "${ASC_API_KEY_PATH:-}" || ! -f "${ASC_API_KEY_PATH:-}" ]]; then
-  AUTO_P8="$(find "$HOME/Downloads" -maxdepth 2 -name 'AuthKey_*.p8' 2>/dev/null | head -1)"
+  if [[ -n "${ASC_API_KEY_ID:-}" ]]; then
+    AUTO_P8="$(find "$HOME/Downloads" -maxdepth 2 -name "AuthKey_${ASC_API_KEY_ID}.p8" 2>/dev/null | head -1)"
+  else
+    AUTO_P8="$(find "$HOME/Downloads" -maxdepth 2 -name 'AuthKey_*.p8' 2>/dev/null | head -1)"
+  fi
   if [[ -n "$AUTO_P8" && -f "$AUTO_P8" ]]; then
     ASC_API_KEY_PATH="$AUTO_P8"
     if [[ -z "${ASC_API_KEY_ID:-}" ]]; then
       ASC_API_KEY_ID="$(basename "$AUTO_P8" .p8 | sed 's/^AuthKey_//')"
+      echo "⚠️  .env.local에 ASC_API_KEY_ID가 없어 Downloads에서 자동 감지했습니다: $ASC_API_KEY_ID"
     fi
     echo "==> API Key 감지: $ASC_API_KEY_PATH (ID: $ASC_API_KEY_ID)"
   fi
@@ -54,32 +64,35 @@ fi
 
 echo "==> TestFlight 업로드: $IPA"
 
+# Xcode 26부터 iTMSTransporter가 제거됨 — altool(아직 포함됨) 우선 사용
 if [[ -n "${ASC_API_KEY_ID:-}" && -n "${ASC_ISSUER_ID:-}" ]]; then
+  # altool은 키 경로 인자가 없고 표준 디렉터리(~/private_keys 등)에서 ID로 찾음
   KEY_DIR="$HOME/private_keys"
   mkdir -p "$KEY_DIR"
-  if [[ -n "${ASC_API_KEY_PATH:-}" && -f "${ASC_API_KEY_PATH}" ]]; then
-    KEY_PATH="$ASC_API_KEY_PATH"
-  elif [[ -n "${ASC_API_PRIVATE_KEY:-}" ]]; then
-    KEY_PATH="$KEY_DIR/AuthKey_${ASC_API_KEY_ID}.p8"
-    printf '%s\n' "$ASC_API_PRIVATE_KEY" > "$KEY_PATH"
-    chmod 600 "$KEY_PATH"
+  KEY_PATH="$KEY_DIR/AuthKey_${ASC_API_KEY_ID}.p8"
+  if [[ ! -f "$KEY_PATH" ]]; then
+    if [[ -n "${ASC_API_KEY_PATH:-}" && -f "${ASC_API_KEY_PATH}" ]]; then
+      cp "$ASC_API_KEY_PATH" "$KEY_PATH"
+      chmod 600 "$KEY_PATH"
+    elif [[ -n "${ASC_API_PRIVATE_KEY:-}" ]]; then
+      printf '%s\n' "$ASC_API_PRIVATE_KEY" > "$KEY_PATH"
+      chmod 600 "$KEY_PATH"
+    fi
   fi
-  if [[ -n "${KEY_PATH:-}" && -f "$KEY_PATH" ]]; then
-    xcrun iTMSTransporter -m upload \
-      -assetFile "$IPA" \
-      -apiKey "$ASC_API_KEY_ID" \
-      -apiIssuer "$ASC_ISSUER_ID" \
-      -v informational
+  if [[ -f "$KEY_PATH" ]]; then
+    xcrun altool --upload-app --type ios \
+      -f "$IPA" \
+      --apiKey "$ASC_API_KEY_ID" \
+      --apiIssuer "$ASC_ISSUER_ID"
     UPLOADED=1
   fi
 fi
 
 if [[ "$UPLOADED" -eq 0 && -n "${APPLE_ID:-}" && -n "${APPLE_APP_PASSWORD:-}" ]]; then
-  xcrun iTMSTransporter -m upload \
-    -assetFile "$IPA" \
+  xcrun altool --upload-app --type ios \
+    -f "$IPA" \
     -u "$APPLE_ID" \
-    -p "$APPLE_APP_PASSWORD" \
-    -v informational
+    -p "$APPLE_APP_PASSWORD"
   UPLOADED=1
 fi
 

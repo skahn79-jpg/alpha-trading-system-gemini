@@ -35,8 +35,12 @@ echo "   IPA: $IPA"
 
 # App Store Connect 업로드 (환경변수 또는 .env.local)
 if [[ -f "$ROOT/.env.local" ]]; then
+  # 프로세스 치환(<())은 일부 샌드박스 셸에서 조용히 실패하므로 임시 파일 사용
+  ENV_TMP="$(mktemp)"
+  grep -E '^(ASC_API_KEY_ID|ASC_ISSUER_ID|ASC_API_ISSUER_ID|ASC_API_KEY_PATH|APPLE_ID|APPLE_APP_PASSWORD)=' "$ROOT/.env.local" > "$ENV_TMP" 2>/dev/null || true
   # shellcheck disable=SC1090
-  set -a && source <(grep -E '^(ASC_API_KEY_ID|ASC_ISSUER_ID|ASC_API_ISSUER_ID|ASC_API_KEY_PATH|APPLE_ID|APPLE_APP_PASSWORD)=' "$ROOT/.env.local" 2>/dev/null || true) && set +a
+  set -a && source "$ENV_TMP" && set +a
+  rm -f "$ENV_TMP"
 fi
 
 ASC_ISSUER_ID="${ASC_ISSUER_ID:-${ASC_API_ISSUER_ID:-}}"
