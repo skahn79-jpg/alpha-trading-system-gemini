@@ -128,7 +128,9 @@ async function fetchCategoryTrade() {
         if (resultMsg && resultMsg[1] !== "00" && resultMsg[1] !== "0") {
           throw new Error(`관세청 API 응답 코드 ${resultMsg[1]}: ${resultMsg[2]}`);
         }
-        all.push(...parseDataGoKrXml(xml));
+        // 대용량 응답에서 스프레드 push는 스택 초과 → 루프로 추가
+        const parsed = parseDataGoKrXml(xml);
+        for (const it of parsed) all.push(it);
       }
       return all;
     };
