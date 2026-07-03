@@ -69,6 +69,21 @@ function mom(series, idx) {
  */
 let categoryLastError = null;
 
+/** data.go.kr 표준 XML에서 <item> 블록들을 {태그: 값} 객체 배열로 파싱 */
+function parseDataGoKrXml(xml) {
+  const items = [];
+  const itemRe = /<item>([\s\S]*?)<\/item>/g;
+  let m;
+  while ((m = itemRe.exec(xml)) !== null) {
+    const obj = {};
+    const tagRe = /<([A-Za-z0-9_]+)>([^<]*)<\/\1>/g;
+    let t;
+    while ((t = tagRe.exec(m[1])) !== null) obj[t[1]] = t[2].trim();
+    items.push(obj);
+  }
+  return items;
+}
+
 async function fetchCategoryTrade() {
   const key = process.env.TRADE_API_KEY || process.env.DATA_GO_KR_KEY;
   categoryLastError = null;
@@ -82,62 +97,66 @@ async function fetchCategoryTrade() {
     const startDate = new Date(now.getFullYear(), now.getMonth() - 14, 1);
     const start = `${startDate.getFullYear()}${String(startDate.getMonth() + 1).padStart(2, "0")}`;
 
-    // data.go.kr 키는 Decoding/Encoding 두 형태가 있음 — 디코딩 키(axios가 인코딩) 우선,
-    // 인증 오류 시 이미 인코딩된 키로 간주하고 URL에 직접 붙여 재시도
-    const call = async (useRawKey) => {
-      const base = "https://apis.data.go.kr/1220000/nitemtrade/getNitemtradeList";
-      const common = `strtYymm=${start}&endYymm=${end}&type=json&numOfRows=999`;
-      const url = useRawKey
-        ? `${base}?serviceKey=${key}&${common}`
-        : `${base}?serviceKey=${encodeURIComponent(key)}&${common}`;
-      const { data } = await axios.get(url, { timeout: 20000, responseType: "text" });
-      return data;
+    // 관세청_신성질별 수출입실적: newtempertrade/getNewtempertradeList (XML 전용)
+    // imexTpcd: 1=수출, 2=수입 — 두 번 호출해 병합
+    const call = async (imexTpcd, useRawKey) => {
+      const base = "https://apis.data.go.kr/1220000/newtempertrade/getNewtempertradeList";
+      const sk = useRawKey ? key : encodeURIComponent(key);
+      const url = `${base}?serviceKey=${sk}&strtYymm=${start}&endYymm=${end}&imexTpcd=${imexTpcd}&numOfRows=9999&pageNo=1`;
+      const { data } = await axios.get(url, { timeout: 25000, responseType: "text" });
+      return String(data);
     };
 
-    let raw = await call(false);
-    let text = typeof raw === "string" ? raw : JSON.stringify(raw);
-    if (text.includes("SERVICE_KEY") || text.includes("SERVICE KEY")) {
-      raw = await call(true);
-      text = typeof raw === "string" ? raw : JSON.stringify(raw);
+    const fetchSide = async (imexTpcd) => {
+      let xml = await call(imexTpcd, false);
+      if (xml.includes("SERVICE_KEY") || xml.includes("SERVICE KEY")) {
+        xml = await call(imexTpcd, true); // 인코딩된 키로 재시도
+      }
+      const authErr = /<returnAuthMsg>([^<]+)<\/returnAuthMsg>/.exec(xml)?.[1];
+      if (authErr) throw new Error("관세청 API 인증 오류: " + authErr);
+      const resultMsg = /<resultCode>(\d+)<\/resultCode>[\s\S]*?<resultMsg>([^<]*)<\/resultMsg>/.exec(xml);
+      if (resultMsg && resultMsg[1] !== "00" && resultMsg[1] !== "0") {
+        throw new Error(`관세청 API 응답 코드 ${resultMsg[1]}: ${resultMsg[2]}`);
+      }
+      return parseDataGoKrXml(xml);
+    };
+
+    const [expItems, impItems] = await Promise.all([fetchSide(1), fetchSide(2)]);
+    if (!expItems.length && !impItems.length) {
+      categoryLastError = "관세청 API 응답에 품목 데이터 없음 (기간 내 데이터 미제공 가능)";
+      return null;
     }
 
-    if (text.trim().startsWith("<")) {
-      // XML 오류 응답 (인증/등록 문제)
-      const msg = /<returnAuthMsg>([^<]+)<\/returnAuthMsg>/.exec(text)?.[1]
-        || /<errMsg>([^<]+)<\/errMsg>/.exec(text)?.[1]
-        || text.slice(0, 120);
-      categoryLastError = `관세청 API 오류: ${msg}`;
+    // 항목 구조 자동 감지: 이름(…Nm/…Kor), 기간(6자리 년월), 금액(달러 필드)
+    const sample = expItems[0] || impItems[0];
+    const keys = Object.keys(sample);
+    const nameKey = keys.find((k) => /nm$|kor$/i.test(k) && isNaN(Number(sample[k])))
+      || keys.find((k) => isNaN(Number(sample[k])) && !/^(year|yymm|priod)/i.test(k));
+    const periodKey = keys.find((k) => /^(year|yymm|priod|baseYymm)/i.test(k))
+      || keys.find((k) => /^\d{6}(\.\d{2})?$/.test(String(sample[k]).replace(/[^0-9.]/g, "")));
+    const amountKey = keys.find((k) => /dlr|usd|dollar|amt/i.test(k) && !isNaN(Number(sample[k])));
+    if (!nameKey || !periodKey || !amountKey) {
+      categoryLastError = "관세청 응답 구조 미인식 — 필드: " + keys.join(",");
       console.error("[trade-category]", categoryLastError);
       return null;
     }
 
-    const data = typeof raw === "string" ? JSON.parse(raw) : raw;
-    const header = data?.response?.header;
-    if (header && header.resultCode && header.resultCode !== "00") {
-      categoryLastError = `관세청 API 응답 코드 ${header.resultCode}: ${header.resultMsg || ""}`;
-      console.error("[trade-category]", categoryLastError);
-      return null;
-    }
-    const items = data?.response?.body?.items?.item;
-    if (!Array.isArray(items)) {
-      categoryLastError = "관세청 API 응답에 품목 데이터 없음: " + JSON.stringify(data).slice(0, 150);
-      console.error("[trade-category]", categoryLastError);
-      return null;
-    }
-
-    // 품목명 → 월별 시리즈 병합
+    // (품목, 월)별 수출/수입 병합
     const byName = new Map();
-    for (const it of items) {
-      const name = String(it.statKor || it.statCd || "").trim();
-      const period = String(it.year || it.priod || "").replace(/[^0-9]/g, ""); // "2026.05" → "202605"
-      if (!name || period.length < 6 || name.includes("총계")) continue;
-      const month = `${period.slice(0, 4)}-${period.slice(4, 6)}`;
-      if (!byName.has(name)) byName.set(name, new Map());
-      const cur = byName.get(name).get(month) || { exports: 0, imports: 0 };
-      cur.exports += Number(it.expDlr) || 0;
-      cur.imports += Number(it.impDlr) || 0;
-      byName.get(name).set(month, cur);
-    }
+    const ingest = (items, side) => {
+      for (const it of items) {
+        const name = String(it[nameKey] || "").trim();
+        const period = String(it[periodKey] || "").replace(/[^0-9]/g, "");
+        if (!name || period.length < 6 || name.includes("총계") || name.includes("합계")) continue;
+        const month = `${period.slice(0, 4)}-${period.slice(4, 6)}`;
+        if (!byName.has(name)) byName.set(name, new Map());
+        const cur = byName.get(name).get(month) || { exports: 0, imports: 0 };
+        cur[side] += Number(it[amountKey]) || 0;
+        byName.get(name).set(month, cur);
+      }
+    };
+    ingest(expItems, "exports");
+    ingest(impItems, "imports");
 
     const pctChange = (cur, prev) => (prev ? Math.round(((cur - prev) / prev) * 1000) / 10 : null);
     const quarterOf = (month) => `${month.slice(0, 4)}-Q${Math.ceil(Number(month.slice(5, 7)) / 3)}`;
