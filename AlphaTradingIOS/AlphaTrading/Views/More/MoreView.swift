@@ -32,6 +32,12 @@ struct MoreView: View {
                     }
 
                     NavigationLink {
+                        LiveLiquidationView()
+                    } label: {
+                        moreRow(icon: "bolt.horizontal.circle.fill", title: "실시간 청산 모니터", subtitle: "BTC/ETH 실시간 가격 · 청산 피드 · 분포")
+                    }
+
+                    NavigationLink {
                         AlertCenterView()
                     } label: {
                         moreRow(icon: "bell.badge.fill", title: "알림 센터", subtitle: "가격 · 20일선 알림 + Telegram 연동")
