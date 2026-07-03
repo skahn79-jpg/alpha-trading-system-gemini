@@ -31,7 +31,9 @@ struct GlobalMarketView: View {
                     .frame(maxHeight: .infinity)
             } else {
                 List(viewModel.catalog) { item in
-                    NavigationLink(value: globalStock(item)) {
+                    NavigationLink {
+                        StockDetailView(stock: globalStock(item))
+                    } label: {
                         GlobalQuoteRow(
                             item: item,
                             quote: viewModel.quotes[item.symbol],
@@ -51,9 +53,6 @@ struct GlobalMarketView: View {
         }
         .background(AppTheme.background)
         .navigationTitle("US / CRYPTO")
-        .navigationDestination(for: Stock.self) { stock in
-            StockDetailView(stock: stock)
-        }
         .task { await viewModel.loadCatalog() }
         .onChange(of: viewModel.segment) { _ in
             Task { await viewModel.loadCatalog() }

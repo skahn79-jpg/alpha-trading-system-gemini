@@ -271,21 +271,21 @@ struct MADistance: Decodable {
 }
 
 struct BollingerBands: Decodable {
-    let upper: Int?
-    let mid: Int?
-    let lower: Int?
+    let upper: Double?
+    let mid: Double?
+    let lower: Double?
     let bandwidth: Double?
     let position: Double?
 }
 
 struct Week52Range: Decodable {
-    let high: Int?
-    let low: Int?
+    let high: Double?
+    let low: Double?
     let position: Double?
 }
 
 struct VolumeAnalysis: Decodable {
-    let latest: Int?
+    let latest: Double?
     let avg20: Double?
     let ratio: Double?
 }

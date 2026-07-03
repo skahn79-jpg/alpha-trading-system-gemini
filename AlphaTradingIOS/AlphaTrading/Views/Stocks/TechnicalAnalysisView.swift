@@ -33,7 +33,7 @@ struct TechnicalAnalysisView: View {
                 KPICard(title: "MA20", value: formatInt(analysis?.movingAverages?.ma20), subtitle: distText(analysis?.distance?.ma20))
                 KPICard(title: "MA60", value: formatInt(analysis?.movingAverages?.ma60), subtitle: distText(analysis?.distance?.ma60))
                 KPICard(title: "MA120", value: formatInt(analysis?.movingAverages?.ma120), subtitle: nil)
-                KPICard(title: "볼린저 중심", value: formatInt(analysis?.bollinger?.mid.map(Double.init)), subtitle: bbPosition(analysis?.bollinger?.position))
+                KPICard(title: "볼린저 중심", value: formatInt(analysis?.bollinger?.mid), subtitle: bbPosition(analysis?.bollinger?.position))
                 KPICard(title: "거래량비", value: volRatioText(analysis?.volume?.ratio), subtitle: "20일 평균 대비")
                 KPICard(title: "MACD", value: macdValue, subtitle: macdHint)
                 KPICard(title: "스토캐스틱 %K", value: formatNum(analysis?.stochastic?.k), subtitle: stochHint)
