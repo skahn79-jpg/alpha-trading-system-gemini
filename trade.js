@@ -220,7 +220,14 @@ async function fetchCategoryTrade() {
     categories.sort((a, b) => b.exports - a.exports);
     return categories.slice(0, 20);
   } catch (e) {
-    categoryLastError = "관세청 API 호출 실패: " + e.message;
+    const status = e.response?.status;
+    if (status === 403) {
+      categoryLastError = "관세청 API 403 — 키는 유효하나 '신성질별 수출입실적' 활용신청 승인이 아직 반영되지 않았습니다 (신청 후 최대 1시간 소요, 자동 재시도 중)";
+    } else if (status === 401) {
+      categoryLastError = "관세청 API 401 — 인증키가 올바르지 않습니다. data.go.kr 마이페이지의 일반 인증키(Decoding)를 확인하세요";
+    } else {
+      categoryLastError = "관세청 API 호출 실패: " + e.message;
+    }
     console.error("[trade-category]", categoryLastError);
     return null;
   }
