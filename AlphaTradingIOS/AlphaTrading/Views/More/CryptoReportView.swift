@@ -223,6 +223,22 @@ struct CryptoReportView: View {
                         color: w.zone == "opportunity" ? AppTheme.up : w.zone == "hot" ? AppTheme.down : AppTheme.accent
                     )
                 }
+                if let bubble = cycle.bubble {
+                    cycleStat(
+                        "거품지수 (20주선)",
+                        String(format: "%+.1f%%", bubble.dev),
+                        bubble.zoneLabel,
+                        color: bubble.zone == "undervalued" ? AppTheme.up : bubble.zone == "bubble" ? AppTheme.down : AppTheme.accent
+                    )
+                }
+                if let margin = cycle.margin {
+                    cycleStat(
+                        "마진 롱/숏 (Bitfinex)",
+                        String(format: "%.0f배", margin.longShortRatio),
+                        "롱 \(Int(margin.longBtc).formatted()) BTC — 바닥 매집 참고",
+                        color: margin.longShortRatio >= 10 ? AppTheme.up : AppTheme.accent
+                    )
+                }
             }
 
             if let halving = cycle.halving {

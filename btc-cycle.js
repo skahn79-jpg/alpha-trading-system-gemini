@@ -151,6 +151,47 @@ function ma200Week(closes) {
   };
 }
 
+/** 거품지수 — 20주 SMA 대비 이격률% (CoinAI bubble.js / Bubble Risk Indicator 벤치마킹)
+ *  0 이하 = 저평가, 33+ = 과열, 66+ = 거품 */
+function bubbleIndex(rows) {
+  if (rows.length < 160) return null;
+  // 일봉 → 7일 버킷 리샘플로 주봉 종가 근사
+  const weekly = [];
+  for (let i = rows.length - 1; i >= 0; i -= 7) weekly.unshift(rows[i].close);
+  if (weekly.length < 21) return null;
+  const sma20w = weekly.slice(-21, -1).reduce((a, b) => a + b, 0) / 20; // 직전 완성 주봉 기준
+  const close = rows[rows.length - 1].close;
+  const dev = Math.round(((close - sma20w) / sma20w) * 1000) / 10;
+  return {
+    dev,
+    zone: dev >= 66 ? "bubble" : dev >= 33 ? "hot" : dev >= 0 ? "normal" : "undervalued",
+    note: "20주선 대비 이격률 — 66%+ 거품, 0 이하 저평가",
+  };
+}
+
+/** Bitfinex 마진 롱/숏 (공개 API, 키 불필요) — 시트: "바닥에서 롱이 급증" */
+async function fetchBitfinexMargin() {
+  try {
+    const get = async (side) => {
+      const { data } = await axios.get(
+        `https://api-pub.bitfinex.com/v2/stats1/pos.size:1m:tBTCUSD:${side}/last`,
+        { timeout: 12000, headers: UA },
+      );
+      return Array.isArray(data) ? Number(data[1]) : null;
+    };
+    const [longSize, shortSize] = await Promise.all([get("long"), get("short")]);
+    if (!longSize || !shortSize) return null;
+    return {
+      longBtc: Math.round(longSize),
+      shortBtc: Math.round(shortSize),
+      longShortRatio: Math.round((longSize / shortSize) * 10) / 10,
+      note: "시트: 바닥에서 마진 롱 급증 = 고래 매집 신호",
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** 반감기 사이클 국면 — Halving Cycle Profit 모델 (40주/80주/135주) */
 function halvingPhase() {
   const weeks = Math.floor((Date.now() - HALVING_4TH) / (7 * 86400000));
@@ -210,6 +251,11 @@ function btiRisk(rows, extras) {
     subs.push({ key: "ma200w", label: "200주선 배율", prox: Math.min(extras.w200.multiple / histMax, 1) });
   }
 
+  // 6) 거품지수 (20주선 이격 66%+ = 거품)
+  if (extras.bubble) {
+    subs.push({ key: "bubble", label: "거품지수", prox: Math.max(0, Math.min(extras.bubble.dev / 66, 1)) });
+  }
+
   const nearTop = subs.filter((s) => s.prox >= 0.85).length;
   const risk = subs.reduce((a, b) => a + b.prox, 0) / subs.length;
   const riskPct = Math.round(risk * 100);
@@ -226,7 +272,11 @@ function btiRisk(rows, extras) {
 async function buildBtcCycle() {
   if (cache.data && Date.now() - cache.at < TTL_MS) return cache.data;
 
-  const [rows, difficulty] = await Promise.all([fetchBtcDaily(), fetchDifficulty()]);
+  const [rows, difficulty, margin] = await Promise.all([
+    fetchBtcDaily(),
+    fetchDifficulty(),
+    fetchBitfinexMargin(),
+  ]);
   if (!rows.length) return null;
   const closes = rows.map((r) => r.close);
   const price = closes[closes.length - 1];
@@ -234,6 +284,7 @@ async function buildBtcCycle() {
   const pl = powerLawCorridor(rows);
   const pi = piCycle(closes);
   const w200 = ma200Week(closes);
+  const bubble = bubbleIndex(rows);
 
   const result = {
     updatedAt: new Date().toISOString(),
@@ -242,8 +293,10 @@ async function buildBtcCycle() {
     powerLaw: pl,
     piCycle: pi,
     ma200w: w200,
+    bubble,
+    margin,
     halving: halvingPhase(),
-    bti: btiRisk(rows, { pi, pl, w200 }),
+    bti: btiRisk(rows, { pi, pl, w200, bubble }),
   };
   cache = { at: Date.now(), data: result };
   return result;

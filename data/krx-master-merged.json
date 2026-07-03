@@ -23525,5 +23525,428 @@
     "market": "KOSDAQ",
     "indexes": [],
     "industry": "상품 종합 도매업"
+  },
+  {
+    "code": "069500",
+    "name": "KODEX 200",
+    "tag": "ETF",
+    "sector": "ETF·시장대표",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "시장대표"
+  },
+  {
+    "code": "102110",
+    "name": "TIGER 200",
+    "tag": "ETF",
+    "sector": "ETF·시장대표",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "시장대표"
+  },
+  {
+    "code": "278530",
+    "name": "KODEX 200TR",
+    "tag": "ETF",
+    "sector": "ETF·시장대표",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "시장대표"
+  },
+  {
+    "code": "226490",
+    "name": "KODEX 코스피",
+    "tag": "ETF",
+    "sector": "ETF·시장대표",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "시장대표"
+  },
+  {
+    "code": "229200",
+    "name": "KODEX 코스닥150",
+    "tag": "ETF",
+    "sector": "ETF·시장대표",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "시장대표"
+  },
+  {
+    "code": "232080",
+    "name": "TIGER 코스닥150",
+    "tag": "ETF",
+    "sector": "ETF·시장대표",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "시장대표"
+  },
+  {
+    "code": "091160",
+    "name": "KODEX 반도체",
+    "tag": "ETF",
+    "sector": "ETF·섹터",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "섹터"
+  },
+  {
+    "code": "091230",
+    "name": "TIGER 반도체",
+    "tag": "ETF",
+    "sector": "ETF·섹터",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "섹터"
+  },
+  {
+    "code": "396500",
+    "name": "TIGER 반도체TOP10",
+    "tag": "ETF",
+    "sector": "ETF·섹터",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "섹터"
+  },
+  {
+    "code": "091170",
+    "name": "KODEX 은행",
+    "tag": "ETF",
+    "sector": "ETF·섹터",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "섹터"
+  },
+  {
+    "code": "091220",
+    "name": "TIGER 은행",
+    "tag": "ETF",
+    "sector": "ETF·섹터",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "섹터"
+  },
+  {
+    "code": "091180",
+    "name": "KODEX 자동차",
+    "tag": "ETF",
+    "sector": "ETF·섹터",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "섹터"
+  },
+  {
+    "code": "102970",
+    "name": "KODEX 증권",
+    "tag": "ETF",
+    "sector": "ETF·섹터",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "섹터"
+  },
+  {
+    "code": "139260",
+    "name": "TIGER 200 IT",
+    "tag": "ETF",
+    "sector": "ETF·섹터",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "섹터"
+  },
+  {
+    "code": "266420",
+    "name": "KODEX 헬스케어",
+    "tag": "ETF",
+    "sector": "ETF·섹터",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "섹터"
+  },
+  {
+    "code": "143860",
+    "name": "TIGER 헬스케어",
+    "tag": "ETF",
+    "sector": "ETF·섹터",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "섹터"
+  },
+  {
+    "code": "140710",
+    "name": "KODEX 운송",
+    "tag": "ETF",
+    "sector": "ETF·섹터",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "섹터"
+  },
+  {
+    "code": "305720",
+    "name": "KODEX 2차전지산업",
+    "tag": "ETF",
+    "sector": "ETF·테마",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "테마"
+  },
+  {
+    "code": "305540",
+    "name": "TIGER 2차전지테마",
+    "tag": "ETF",
+    "sector": "ETF·테마",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "테마"
+  },
+  {
+    "code": "462010",
+    "name": "TIGER 2차전지소재Fn",
+    "tag": "ETF",
+    "sector": "ETF·테마",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "테마"
+  },
+  {
+    "code": "300950",
+    "name": "KODEX 게임산업",
+    "tag": "ETF",
+    "sector": "ETF·테마",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "테마"
+  },
+  {
+    "code": "228790",
+    "name": "TIGER 화장품",
+    "tag": "ETF",
+    "sector": "ETF·테마",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "테마"
+  },
+  {
+    "code": "102780",
+    "name": "KODEX 삼성그룹",
+    "tag": "ETF",
+    "sector": "ETF·테마",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "테마"
+  },
+  {
+    "code": "329200",
+    "name": "TIGER 리츠부동산인프라",
+    "tag": "ETF",
+    "sector": "ETF·테마",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "테마"
+  },
+  {
+    "code": "161510",
+    "name": "PLUS 고배당주",
+    "tag": "ETF",
+    "sector": "ETF·배당",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "배당"
+  },
+  {
+    "code": "210780",
+    "name": "TIGER 코스피고배당",
+    "tag": "ETF",
+    "sector": "ETF·배당",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "배당"
+  },
+  {
+    "code": "279530",
+    "name": "KODEX 고배당주",
+    "tag": "ETF",
+    "sector": "ETF·배당",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "배당"
+  },
+  {
+    "code": "211900",
+    "name": "KODEX 코리아배당성장",
+    "tag": "ETF",
+    "sector": "ETF·배당",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "배당"
+  },
+  {
+    "code": "325020",
+    "name": "KODEX 배당가치",
+    "tag": "ETF",
+    "sector": "ETF·배당",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "배당"
+  },
+  {
+    "code": "360750",
+    "name": "TIGER 미국S&P500",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국대표지수",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국대표지수"
+  },
+  {
+    "code": "379800",
+    "name": "KODEX 미국S&P500",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국대표지수",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국대표지수"
+  },
+  {
+    "code": "360200",
+    "name": "ACE 미국S&P500",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국대표지수",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국대표지수"
+  },
+  {
+    "code": "433330",
+    "name": "SOL 미국S&P500",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국대표지수",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국대표지수"
+  },
+  {
+    "code": "379780",
+    "name": "RISE 미국S&P500",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국대표지수",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국대표지수"
+  },
+  {
+    "code": "133690",
+    "name": "TIGER 미국나스닥100",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국대표지수",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국대표지수"
+  },
+  {
+    "code": "379810",
+    "name": "KODEX 미국나스닥100",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국대표지수",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국대표지수"
+  },
+  {
+    "code": "367380",
+    "name": "ACE 미국나스닥100",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국대표지수",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국대표지수"
+  },
+  {
+    "code": "381170",
+    "name": "TIGER 미국테크TOP10 INDXX",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국테크",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국테크"
+  },
+  {
+    "code": "314250",
+    "name": "KODEX 미국빅테크10(H)",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국테크",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국테크"
+  },
+  {
+    "code": "381180",
+    "name": "TIGER 미국필라델피아반도체나스닥",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국섹터",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국섹터"
+  },
+  {
+    "code": "390390",
+    "name": "KODEX 미국반도체",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국섹터",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국섹터"
+  },
+  {
+    "code": "458730",
+    "name": "TIGER 미국배당다우존스",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국배당",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국배당"
+  },
+  {
+    "code": "489250",
+    "name": "KODEX 미국배당다우존스",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국배당",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국배당"
+  },
+  {
+    "code": "441680",
+    "name": "TIGER 미국나스닥100커버드콜(합성)",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국커버드콜",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국커버드콜"
+  },
+  {
+    "code": "476550",
+    "name": "TIGER 미국30년국채커버드콜액티브(H)",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국채권",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국채권"
+  },
+  {
+    "code": "453850",
+    "name": "ACE 미국30년국채액티브(H)",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국채권",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국채권"
+  },
+  {
+    "code": "305080",
+    "name": "TIGER 미국채10년선물",
+    "tag": "미국추종 ETF",
+    "sector": "ETF·미국채권",
+    "market": "ETF",
+    "indexes": [],
+    "industry": "미국채권"
   }
 ]

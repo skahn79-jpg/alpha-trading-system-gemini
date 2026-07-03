@@ -19,8 +19,34 @@ struct BtcCycle: Decodable {
     let powerLaw: BtcPowerLaw?
     let piCycle: BtcPiCycle?
     let ma200w: BtcMa200w?
+    let bubble: BtcBubble?
+    let margin: BtcMargin?
     let halving: BtcHalving?
     let bti: BtcBti?
+}
+
+/// 거품지수 — 20주선 대비 이격률 (Bubble Risk Indicator)
+struct BtcBubble: Decodable {
+    let dev: Double
+    let zone: String
+    let note: String?
+
+    var zoneLabel: String {
+        switch zone {
+        case "bubble": return "거품 구간"
+        case "hot": return "과열 주의"
+        case "normal": return "정상"
+        default: return "저평가"
+        }
+    }
+}
+
+/// Bitfinex 마진 롱/숏 (공개 데이터)
+struct BtcMargin: Decodable {
+    let longBtc: Double
+    let shortBtc: Double
+    let longShortRatio: Double
+    let note: String?
 }
 
 struct BtcProductionCost: Decodable {
