@@ -20,6 +20,9 @@ struct CryptoReportView: View {
                         .padding()
                 } else if let report {
                     marketMoodCard(report)
+                    if let cycle = report.btcCycle {
+                        btcCycleCard(cycle)
+                    }
                     ForEach(report.markets ?? []) { market in
                         marketCard(market)
                     }
@@ -138,6 +141,158 @@ struct CryptoReportView: View {
         if value <= 25 { return AppTheme.down }
         if value <= 45 { return .orange }
         if value <= 55 { return .yellow }
+        return AppTheme.up
+    }
+
+    // MARK: - BTC 사이클 진단 (생산비용·멱법칙·Pi Cycle·200주·반감기·BTI)
+
+    private func btcCycleCard(_ cycle: BtcCycle) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "waveform.path.ecg")
+                    .foregroundStyle(AppTheme.accent)
+                Text("BTC 사이클 진단")
+                    .font(.paperlogy(15, weight: .semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                if let bti = cycle.bti {
+                    Text(bti.verdict)
+                        .font(.paperlogy(11, weight: .bold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(btiColor(bti.riskPct).opacity(0.2))
+                        .foregroundStyle(btiColor(bti.riskPct))
+                        .clipShape(Capsule())
+                }
+            }
+
+            // BTI 통합 리스크 게이지
+            if let bti = cycle.bti {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("통합 사이클 리스크")
+                            .font(.paperlogy(11))
+                            .foregroundStyle(AppTheme.textSecondary)
+                        Spacer()
+                        Text("\(bti.riskPct)% · 고점근접 \(bti.count)/\(bti.total)")
+                            .font(.paperlogy(11, weight: .semibold))
+                            .foregroundStyle(btiColor(bti.riskPct))
+                    }
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.black.opacity(0.3))
+                            Capsule()
+                                .fill(btiColor(bti.riskPct))
+                                .frame(width: geo.size.width * CGFloat(bti.riskPct) / 100)
+                        }
+                    }
+                    .frame(height: 6)
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                if let pc = cycle.productionCost {
+                    cycleStat(
+                        "생산비용 지지",
+                        "$\(Int(pc.cost).formatted())",
+                        pc.aboveCost ? String(format: "원가 위 +%.1f%%", pc.premiumPct) : String(format: "원가 아래 %.1f%% (희귀)", pc.premiumPct),
+                        color: pc.aboveCost ? AppTheme.up : AppTheme.down
+                    )
+                }
+                if let pl = cycle.powerLaw {
+                    cycleStat(
+                        "멱법칙 밴드",
+                        "\(pl.positionPct)%",
+                        "지지 $\(Int(pl.support).formatted())",
+                        color: pl.positionPct <= 25 ? AppTheme.up : pl.positionPct >= 75 ? AppTheme.down : AppTheme.accent
+                    )
+                }
+                if let pi = cycle.piCycle {
+                    cycleStat(
+                        "Pi Cycle",
+                        String(format: "%.2f", pi.topRatio),
+                        pi.topNote ?? "-",
+                        color: pi.topSignal ? AppTheme.down : AppTheme.accent
+                    )
+                }
+                if let w = cycle.ma200w {
+                    cycleStat(
+                        "200주 이평",
+                        String(format: "%.2f배", w.multiple),
+                        w.zoneLabel,
+                        color: w.zone == "opportunity" ? AppTheme.up : w.zone == "hot" ? AppTheme.down : AppTheme.accent
+                    )
+                }
+            }
+
+            if let halving = cycle.halving {
+                HStack(alignment: .top, spacing: 8) {
+                    Text("반감기 \(halving.weeksSinceHalving)주차")
+                        .font(.paperlogy(11, weight: .bold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(AppTheme.accent.opacity(0.15))
+                        .foregroundStyle(AppTheme.accent)
+                        .clipShape(Capsule())
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(halving.label)
+                            .font(.paperlogy(12, weight: .semibold))
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Text(halving.guide)
+                            .font(.paperlogy(10))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    Spacer()
+                }
+            }
+
+            if let subs = cycle.bti?.subs {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(subs) { sub in
+                        HStack {
+                            Text(sub.label)
+                                .font(.paperlogy(10))
+                                .foregroundStyle(AppTheme.textSecondary)
+                            Spacer()
+                            Text(String(format: "%.0f%%", sub.prox * 100))
+                                .font(.paperlogy(10, weight: .semibold))
+                                .foregroundStyle(sub.prox >= 0.85 ? AppTheme.down : AppTheme.textPrimary)
+                        }
+                    }
+                }
+                .padding(8)
+                .background(Color.black.opacity(0.2))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
+        .padding(16)
+        .background(AppTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func cycleStat(_ title: String, _ value: String, _ subtitle: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.paperlogy(10))
+                .foregroundStyle(AppTheme.textSecondary)
+            Text(value)
+                .font(.paperlogy(15, weight: .bold))
+                .foregroundStyle(AppTheme.textPrimary)
+            Text(subtitle)
+                .font(.paperlogy(9))
+                .foregroundStyle(color)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(Color.black.opacity(0.2))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func btiColor(_ risk: Int) -> Color {
+        if risk >= 80 { return AppTheme.down }
+        if risk >= 60 { return .orange }
+        if risk >= 40 { return .yellow }
         return AppTheme.up
     }
 

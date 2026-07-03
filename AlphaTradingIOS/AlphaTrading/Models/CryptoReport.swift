@@ -8,7 +8,79 @@ struct CryptoReportResponse: Decodable {
     let sentiment: CryptoSentiment?
     let global: GlobalCryptoData?
     let regulation: [RegulationTopic]?
+    let btcCycle: BtcCycle?
     let disclaimer: String?
+}
+
+/// BTC 사이클 진단 (CoinAI 벤치마킹 — 생산비용·멱법칙·Pi Cycle·200주·반감기·BTI)
+struct BtcCycle: Decodable {
+    let price: Double?
+    let productionCost: BtcProductionCost?
+    let powerLaw: BtcPowerLaw?
+    let piCycle: BtcPiCycle?
+    let ma200w: BtcMa200w?
+    let halving: BtcHalving?
+    let bti: BtcBti?
+}
+
+struct BtcProductionCost: Decodable {
+    let cost: Double
+    let price: Double
+    let aboveCost: Bool
+    let premiumPct: Double
+    let note: String?
+}
+
+struct BtcPowerLaw: Decodable {
+    let positionPct: Int
+    let support: Double
+    let center: Double
+    let top: Double
+}
+
+struct BtcPiCycle: Decodable {
+    let topRatio: Double
+    let topSignal: Bool
+    let topNote: String?
+    let bottomZone: Bool
+}
+
+struct BtcMa200w: Decodable {
+    let ma: Double
+    let multiple: Double
+    let zone: String
+    let note: String?
+
+    var zoneLabel: String {
+        switch zone {
+        case "opportunity": return "기회 구간"
+        case "normal": return "정상"
+        case "warm": return "상단 주의"
+        default: return "과열"
+        }
+    }
+}
+
+struct BtcHalving: Decodable {
+    let weeksSinceHalving: Int
+    let phase: String
+    let label: String
+    let guide: String
+}
+
+struct BtcBti: Decodable {
+    let count: Int
+    let total: Int
+    let riskPct: Int
+    let verdict: String
+    let subs: [BtcBtiSub]?
+}
+
+struct BtcBtiSub: Decodable, Identifiable {
+    var id: String { key }
+    let key: String
+    let label: String
+    let prox: Double
 }
 
 struct CryptoMarket: Decodable, Identifiable {

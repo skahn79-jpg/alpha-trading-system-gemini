@@ -28,6 +28,7 @@ const { buildTradeReport } = require("./trade.js");
 const { buildMacroReport } = require("./macro.js");
 const { volumeProfile, patternOutlook, buildCommentary } = require("./chartlab.js");
 const cryptoReport = require("./crypto-report.js");
+const { buildBtcCycle } = require("./btc-cycle.js");
 
 const app = express();
 // CORS: Firebase Hosting URL + 로컬 개발 모두 허용
@@ -686,11 +687,12 @@ app.get("/api/crypto/report", async (req, res) => {
       }
     }
 
-    // 2) 업황 + 3) 규제 뉴스 (병렬)
-    const [fearGreed, globalData, regulation] = await Promise.all([
+    // 2) 업황 + 3) 규제 뉴스 + 4) BTC 사이클 진단 (병렬)
+    const [fearGreed, globalData, regulation, btcCycle] = await Promise.all([
       cryptoReport.fetchFearGreed().catch(() => null),
       cryptoReport.fetchGlobalCrypto(),
       cryptoReport.fetchRegulationNews().catch(() => []),
+      buildBtcCycle().catch((e) => { console.error("[btc-cycle]", e.message); return null; }),
     ]);
 
     const report = {
@@ -700,6 +702,7 @@ app.get("/api/crypto/report", async (req, res) => {
       sentiment: fearGreed,
       global: globalData,
       regulation,
+      btcCycle,
       disclaimer: "본 리포트는 투자 참고용 정보이며 투자 권유가 아닙니다.",
     };
     // 부분 실패(규제 뉴스·업황 누락) 시 짧은 캐시로 곧 재시도
