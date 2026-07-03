@@ -12,6 +12,20 @@ struct MacroReport: Decodable {
     let disclaimer: String?
 }
 
+/// /api/fx — 실시간 환율 (원/달러 · 원/엔 100엔 기준)
+struct FxResponse: Decodable {
+    let ok: Bool
+    let updatedAt: String?
+    let usdKrw: FxRate?
+    let jpy100Krw: FxRate?
+}
+
+struct FxRate: Decodable {
+    let price: Double
+    let changeRate: Double?
+    let changeStr: String?
+}
+
 struct MacroIndicator: Decodable, Identifiable {
     let id: String
     let name: String

@@ -205,11 +205,29 @@ struct TradeReportView: View {
                         .background(catTrendColor(category.trend).opacity(0.2))
                         .foregroundStyle(catTrendColor(category.trend))
                         .clipShape(Capsule())
-                    Text(category.name)
-                        .font(.paperlogy(13, weight: .semibold))
-                        .foregroundStyle(AppTheme.textPrimary)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(category.name)
+                            .font(.paperlogy(13, weight: .semibold))
+                            .foregroundStyle(AppTheme.textPrimary)
+                            .lineLimit(1)
+                        if let momentum = category.momentumNote {
+                            Text(momentum)
+                                .font(.paperlogy(9, weight: .bold))
+                                .foregroundStyle(momentum.contains("증가") ? AppTheme.up : AppTheme.down)
+                        }
+                    }
                     Spacer()
+                    if let monthly = category.monthly, monthly.count > 2 {
+                        Chart(monthly) { m in
+                            LineMark(x: .value("월", m.month), y: .value("수출", m.exports))
+                                .foregroundStyle((category.exportsYoY ?? 0) >= 0 ? AppTheme.up : AppTheme.down)
+                                .lineStyle(StrokeStyle(lineWidth: 1.2))
+                        }
+                        .chartXAxis(.hidden)
+                        .chartYAxis(.hidden)
+                        .chartYScale(domain: (monthly.map(\.exports).min() ?? 0)...(monthly.map(\.exports).max() ?? 1))
+                        .frame(width: 54, height: 22)
+                    }
                     if let yoy = category.exportsYoY {
                         Text(String(format: "수출 %+.1f%%", yoy))
                             .font(.paperlogy(12, weight: .bold))
@@ -223,7 +241,24 @@ struct TradeReportView: View {
 
             if expandedCategory == category.name {
                 if categoryMode == "monthly" {
-                    ForEach((category.monthly ?? []).reversed()) { m in
+                    if let monthly = category.monthly, monthly.count > 2 {
+                        Chart(monthly) { m in
+                            BarMark(x: .value("월", String(m.month.suffix(5))), y: .value("수출", m.exports))
+                                .foregroundStyle(((m.exportsMoM ?? 0) >= 0 ? AppTheme.up : AppTheme.down).opacity(0.75))
+                        }
+                        .chartXAxis {
+                            AxisMarks { value in
+                                AxisValueLabel {
+                                    if let raw = value.as(String.self) {
+                                        Text(raw).font(.paperlogy(8))
+                                    }
+                                }
+                            }
+                        }
+                        .frame(height: 90)
+                        .padding(.vertical, 4)
+                    }
+                    ForEach((category.monthly ?? []).suffix(6).reversed()) { m in
                         HStack {
                             Text(m.month)
                                 .font(.paperlogy(11))

@@ -784,6 +784,41 @@ app.get("/api/chartlab/:code", async (req, res) => {
   }
 });
 
+// 실시간 환율 — 원/달러 · 원/엔(100엔) (Yahoo, 30초 캐시)
+// GET /api/fx
+const fxCache = { at: 0, data: null };
+app.get("/api/fx", async (req, res) => {
+  try {
+    if (fxCache.data && Date.now() - fxCache.at < 30 * 1000) {
+      return res.json(fxCache.data);
+    }
+    const [usd, jpy] = await Promise.all([
+      fetchYahooQuote("KRW=X"),
+      fetchYahooQuote("JPYKRW=X"),
+    ]);
+    const result = {
+      ok: true,
+      updatedAt: new Date().toISOString(),
+      usdKrw: {
+        price: Math.round((usd.price || 0) * 100) / 100,
+        changeRate: usd.changeRate ?? null,
+        changeStr: usd.changeStr ?? null,
+      },
+      jpy100Krw: {
+        // 원/엔은 100엔 기준 표기가 관례
+        price: Math.round((jpy.price || 0) * 100 * 100) / 100,
+        changeRate: jpy.changeRate ?? null,
+        changeStr: jpy.changeStr ?? null,
+      },
+    };
+    fxCache.at = Date.now();
+    fxCache.data = result;
+    res.json(result);
+  } catch (err) {
+    res.status(502).json({ ok: false, error: "환율 조회 실패: " + err.message });
+  }
+});
+
 // 거시경제 지표 (FRED 공개 데이터 — CPI·금리·연준 유동성·VIX·달러)
 // GET /api/macro/indicators
 app.get("/api/macro/indicators", async (req, res) => {

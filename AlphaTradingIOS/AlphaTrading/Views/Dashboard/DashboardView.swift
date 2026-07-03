@@ -5,6 +5,9 @@ struct DashboardView: View {
     @State private var tradeReport: TradeReport?
     @State private var featured: FeaturedSignalsResponse?
     @State private var axiosNews: AxiosNewsResponse?
+    @State private var fx: FxResponse?
+    // 환율 실시간 갱신 (30초)
+    private let fxTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     var body: some View {
         NavigationStack {
@@ -29,6 +32,7 @@ struct DashboardView: View {
                         }
                     }
 
+                    fxSection
                     tradeSummarySection
                     featuredSection
                     axiosNewsSection
@@ -42,6 +46,9 @@ struct DashboardView: View {
             }
             .refreshable { await loadAll() }
             .task { await loadAll() }
+            .onReceive(fxTimer) { _ in
+                Task { fx = try? await APIClient.shared.get("/api/fx") as FxResponse }
+            }
         }
     }
 
@@ -51,10 +58,48 @@ struct DashboardView: View {
         async let tradeTask = try? APIClient.shared.get("/api/trade/report") as TradeReport
         async let featuredTask = try? APIClient.shared.get("/api/signals/featured") as FeaturedSignalsResponse
         async let newsTask = try? APIClient.shared.get("/api/news/axios") as AxiosNewsResponse
+        async let fxTask = try? APIClient.shared.get("/api/fx") as FxResponse
         _ = await indexTask
         tradeReport = await tradeTask
         featured = await featuredTask
         axiosNews = await newsTask
+        fx = await fxTask
+    }
+
+    // MARK: - 실시간 환율
+
+    @ViewBuilder
+    private var fxSection: some View {
+        if let fx {
+            HStack(spacing: 12) {
+                fxCard(title: "원/달러", rate: fx.usdKrw)
+                fxCard(title: "원/엔 (100엔)", rate: fx.jpy100Krw)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func fxCard(title: String, rate: FxRate?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.paperlogy(11))
+                .foregroundStyle(AppTheme.textSecondary)
+            Text(rate.map { String(format: "%.2f", $0.price) } ?? "-")
+                .font(.paperlogy(20, weight: .bold))
+                .foregroundStyle(AppTheme.textPrimary)
+                .contentTransition(.numericText())
+                .animation(.default, value: rate?.price ?? 0)
+            if let changeRate = rate?.changeRate {
+                // 환율 상승 = 원화 약세 → 빨강 (국내 관례)
+                Text(String(format: "%+.2f%%", changeRate))
+                    .font(.paperlogy(11, weight: .semibold))
+                    .foregroundStyle(changeRate >= 0 ? AppTheme.down : AppTheme.up)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(AppTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     // MARK: - 악시오스 뉴스

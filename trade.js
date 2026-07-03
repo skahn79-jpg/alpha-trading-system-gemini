@@ -144,6 +144,22 @@ async function fetchCategoryTrade() {
         .slice(-5);
 
       const latest = monthly[monthly.length - 1];
+
+      // 연속 증감 추세 판정 (전월比 기준 연속 개월 수)
+      let streak = 0;
+      let streakDir = 0;
+      for (let i = monthly.length - 1; i > 0; i -= 1) {
+        const mom = monthly[i].exportsMoM;
+        if (mom === null) break;
+        const dir = mom > 0 ? 1 : mom < 0 ? -1 : 0;
+        if (streak === 0) { streakDir = dir; streak = dir === 0 ? 0 : 1; if (dir === 0) break; }
+        else if (dir === streakDir) streak += 1;
+        else break;
+      }
+      const momentumNote = streak >= 2
+        ? `${streak}개월 연속 ${streakDir > 0 ? "증가" : "감소"}`
+        : null;
+
       categories.push({
         name,
         latestMonth: latest.month,
@@ -153,7 +169,8 @@ async function fetchCategoryTrade() {
         exportsYoY: latest.exportsYoY,
         importsYoY: latest.importsYoY,
         trend: latest.exportsYoY === null ? "unknown" : latest.exportsYoY > 2 ? "increase" : latest.exportsYoY < -2 ? "decrease" : "flat",
-        monthly: monthly.slice(-6),
+        momentumNote,
+        monthly: monthly.slice(-12),
         quarters,
       });
     }

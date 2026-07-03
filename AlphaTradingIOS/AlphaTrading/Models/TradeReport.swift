@@ -64,6 +64,7 @@ struct TradeCategory: Decodable, Identifiable {
     let exportsYoY: Double?
     let importsYoY: Double?
     let trend: String?
+    let momentumNote: String?
     let monthly: [CategoryMonth]?
     let quarters: [CategoryQuarter]?
 
