@@ -67,21 +67,63 @@ function mom(series, idx) {
  * 관세청 품목별 수출입 (TRADE_API_KEY 있을 때만) — 최근 14개월 시리즈를 받아
  * 품목별 월별 증감(MoM·YoY)과 분기별 집계(QoQ)까지 계산합니다.
  */
+let categoryLastError = null;
+
 async function fetchCategoryTrade() {
   const key = process.env.TRADE_API_KEY || process.env.DATA_GO_KR_KEY;
-  if (!key) return null;
+  categoryLastError = null;
+  if (!key) {
+    categoryLastError = "TRADE_API_KEY 미설정";
+    return null;
+  }
   try {
     const now = new Date();
     const end = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
     const startDate = new Date(now.getFullYear(), now.getMonth() - 14, 1);
     const start = `${startDate.getFullYear()}${String(startDate.getMonth() + 1).padStart(2, "0")}`;
-    const url = "https://apis.data.go.kr/1220000/nitemtrade/getNitemtradeList";
-    const { data } = await axios.get(url, {
-      timeout: 20000,
-      params: { serviceKey: key, strtYymm: start, endYymm: end, type: "json", numOfRows: 3000 },
-    });
+
+    // data.go.kr 키는 Decoding/Encoding 두 형태가 있음 — 디코딩 키(axios가 인코딩) 우선,
+    // 인증 오류 시 이미 인코딩된 키로 간주하고 URL에 직접 붙여 재시도
+    const call = async (useRawKey) => {
+      const base = "https://apis.data.go.kr/1220000/nitemtrade/getNitemtradeList";
+      const common = `strtYymm=${start}&endYymm=${end}&type=json&numOfRows=999`;
+      const url = useRawKey
+        ? `${base}?serviceKey=${key}&${common}`
+        : `${base}?serviceKey=${encodeURIComponent(key)}&${common}`;
+      const { data } = await axios.get(url, { timeout: 20000, responseType: "text" });
+      return data;
+    };
+
+    let raw = await call(false);
+    let text = typeof raw === "string" ? raw : JSON.stringify(raw);
+    if (text.includes("SERVICE_KEY") || text.includes("SERVICE KEY")) {
+      raw = await call(true);
+      text = typeof raw === "string" ? raw : JSON.stringify(raw);
+    }
+
+    if (text.trim().startsWith("<")) {
+      // XML 오류 응답 (인증/등록 문제)
+      const msg = /<returnAuthMsg>([^<]+)<\/returnAuthMsg>/.exec(text)?.[1]
+        || /<errMsg>([^<]+)<\/errMsg>/.exec(text)?.[1]
+        || text.slice(0, 120);
+      categoryLastError = `관세청 API 오류: ${msg}`;
+      console.error("[trade-category]", categoryLastError);
+      return null;
+    }
+
+    const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+    const header = data?.response?.header;
+    if (header && header.resultCode && header.resultCode !== "00") {
+      categoryLastError = `관세청 API 응답 코드 ${header.resultCode}: ${header.resultMsg || ""}`;
+      console.error("[trade-category]", categoryLastError);
+      return null;
+    }
     const items = data?.response?.body?.items?.item;
-    if (!Array.isArray(items)) return null;
+    if (!Array.isArray(items)) {
+      categoryLastError = "관세청 API 응답에 품목 데이터 없음: " + JSON.stringify(data).slice(0, 150);
+      console.error("[trade-category]", categoryLastError);
+      return null;
+    }
 
     // 품목명 → 월별 시리즈 병합
     const byName = new Map();
@@ -178,7 +220,8 @@ async function fetchCategoryTrade() {
     categories.sort((a, b) => b.exports - a.exports);
     return categories.slice(0, 20);
   } catch (e) {
-    console.error("[trade-category]", e.message);
+    categoryLastError = "관세청 API 호출 실패: " + e.message;
+    console.error("[trade-category]", categoryLastError);
     return null;
   }
 }
@@ -275,12 +318,16 @@ async function buildTradeReport() {
     categories: categories || [],
     categoriesNote: categories
       ? null
-      : "품목별 월별·분기별 증감은 무료 API 키 설정 시 제공됩니다: data.go.kr에서 '관세청_신성질별 수출입실적' 활용신청 → Render 환경변수 TRADE_API_KEY에 인증키 입력",
+      : (categoryLastError && categoryLastError !== "TRADE_API_KEY 미설정"
+        ? `품목별 데이터 조회 실패 — ${categoryLastError}`
+        : "품목별 월별·분기별 증감은 무료 API 키 설정 시 제공됩니다: data.go.kr에서 '관세청_신성질별 수출입실적' 활용신청 → Render 환경변수 TRADE_API_KEY에 인증키 입력"),
     sectorHints: SECTOR_HINTS,
     disclaimer: "본 리포트는 투자 참고용 정보이며 투자 권유가 아닙니다. 모든 투자 판단의 책임은 투자자 본인에게 있습니다.",
   };
 
-  cache = { at: Date.now(), data: report };
+  // 품목별 조회 실패 시 5분만 캐시 → 키 반영·API 활성화 후 곧 재시도
+  const cacheAt = categories ? Date.now() : Date.now() - CACHE_TTL_MS + 5 * 60 * 1000;
+  cache = { at: cacheAt, data: report };
   return report;
 }
 
