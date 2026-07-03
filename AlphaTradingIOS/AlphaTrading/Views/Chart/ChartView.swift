@@ -3,6 +3,7 @@ import Charts
 
 struct ChartView: View {
     let code: String
+    var kind: AssetKind = .kr
     @StateObject private var viewModel = ChartViewModel()
     // 주봉/월봉 = 시트의 사이클 판단 타임프레임 (커뮤니티 앱에서는 구독 기능)
     @State private var period = "D"
@@ -42,7 +43,7 @@ struct ChartView: View {
         }
         .background(AppTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .task(id: "\(code)-\(period)") { await viewModel.load(code: code, period: period) }
+        .task(id: "\(code)-\(period)-\(kind.rawValue)") { await viewModel.load(code: code, period: period, kind: kind) }
     }
 
     // MARK: - 가격 차트 (캔들 + MA + 볼린저밴드)

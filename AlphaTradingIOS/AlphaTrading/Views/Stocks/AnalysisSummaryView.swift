@@ -108,8 +108,8 @@ struct AnalysisSummaryView: View {
         return Int(v).formatted(.number.grouping(.automatic))
     }
 
-    private func volumeText(_ v: Int?) -> String {
+    private func volumeText(_ v: Double?) -> String {
         guard let v else { return "-" }
-        return v.formatted(.number.grouping(.automatic))
+        return Int(v).formatted(.number.grouping(.automatic))
     }
 }

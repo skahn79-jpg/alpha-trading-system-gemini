@@ -17,7 +17,7 @@ struct ChartLabView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                ChartView(code: stock.code)
+                ChartView(code: stock.code, kind: stock.kind)
 
                 sectionToggles
 
@@ -49,7 +49,10 @@ struct ChartLabView: View {
         isLoading = lab == nil
         errorMessage = nil
         do {
-            lab = try await APIClient.shared.get("/api/chartlab/\(stock.code)") as ChartLabResponse
+            lab = try await APIClient.shared.get(
+                "/api/chartlab/\(stock.code)",
+                query: stock.kind == .kr ? [] : [URLQueryItem(name: "type", value: stock.kind.rawValue)]
+            ) as ChartLabResponse
         } catch {
             errorMessage = "차트 랩 데이터를 불러오지 못했습니다: \(error.localizedDescription)"
         }

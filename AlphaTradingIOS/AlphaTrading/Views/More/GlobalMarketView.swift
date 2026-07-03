@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GlobalMarketView: View {
     @StateObject private var viewModel = GlobalMarketViewModel()
+    @ObservedObject private var favorites = FavoritesStore.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -30,10 +31,14 @@ struct GlobalMarketView: View {
                     .frame(maxHeight: .infinity)
             } else {
                 List(viewModel.catalog) { item in
-                    GlobalQuoteRow(
-                        item: item,
-                        quote: viewModel.quotes[item.symbol]
-                    )
+                    NavigationLink(value: globalStock(item)) {
+                        GlobalQuoteRow(
+                            item: item,
+                            quote: viewModel.quotes[item.symbol],
+                            isFavorite: favorites.isFavorite(item.symbol),
+                            onFavoriteToggle: { favorites.toggle(globalStock(item)) }
+                        )
+                    }
                     .listRowBackground(AppTheme.card)
                     .task {
                         if viewModel.quotes[item.symbol] == nil {
@@ -46,17 +51,28 @@ struct GlobalMarketView: View {
         }
         .background(AppTheme.background)
         .navigationTitle("US / CRYPTO")
+        .navigationDestination(for: Stock.self) { stock in
+            StockDetailView(stock: stock)
+        }
         .task { await viewModel.loadCatalog() }
         .onChange(of: viewModel.segment) { _ in
             Task { await viewModel.loadCatalog() }
         }
         .refreshable { await viewModel.loadCatalog() }
     }
+
+    /// 카탈로그 항목 → 관심종목/상세 화면용 Stock (자산 타입 포함)
+    private func globalStock(_ item: GlobalSearchItem) -> Stock {
+        let type = (item.type ?? (viewModel.segment == .us ? "us" : "crypto")).lowercased()
+        return Stock(code: item.symbol, name: item.name, tag: item.sector, sector: item.sector, assetType: type)
+    }
 }
 
 private struct GlobalQuoteRow: View {
     let item: GlobalSearchItem
     let quote: GlobalQuote?
+    var isFavorite: Bool = false
+    var onFavoriteToggle: (() -> Void)?
 
     var body: some View {
         HStack {
@@ -78,6 +94,13 @@ private struct GlobalQuoteRow: View {
                 }
             } else {
                 ProgressView().tint(AppTheme.accent)
+            }
+            if let onFavoriteToggle {
+                Button(action: onFavoriteToggle) {
+                    Image(systemName: isFavorite ? "star.fill" : "star")
+                        .foregroundStyle(isFavorite ? AppTheme.accent : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.vertical, 4)

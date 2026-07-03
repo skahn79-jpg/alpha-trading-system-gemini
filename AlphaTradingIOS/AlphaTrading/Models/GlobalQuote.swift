@@ -43,11 +43,11 @@ struct BatchQuoteItem: Decodable, Identifiable {
     var id: String { code }
     let code: String
     let name: String?
-    let price: Int?
+    let price: Double?
     let changeRate: Double?
     let changeStr: String?
     let up: Bool?
-    let volume: Int?
+    let volume: Double?
     let analysis: CandleAnalysis?
     let error: Bool?
 

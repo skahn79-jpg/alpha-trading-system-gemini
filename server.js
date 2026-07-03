@@ -724,12 +724,38 @@ app.get("/api/news/axios", async (req, res) => {
   }
 });
 
+// 미국주식/코인 기술 분석 — 국내 주식과 동일한 분석 엔진 (Yahoo 캔들)
+// GET /api/global/analyze/:symbol?type=us|crypto
+app.get("/api/global/analyze/:symbol", async (req, res) => {
+  try {
+    const symbol = String(req.params.symbol || "").toUpperCase();
+    const type = req.query.type || (["BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "BNB"].includes(symbol) ? "crypto" : "us");
+    const candles = await fetchYahooChart(symbol, type, "D", "2Y", 400);
+    if (!Array.isArray(candles) || candles.length < 30) {
+      return res.status(400).json({ ok: false, error: "분석에 필요한 일봉 데이터가 부족합니다.", count: candles?.length || 0 });
+    }
+    const newest = [...candles].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    const analysis = analyzeCandles(newest);
+    res.json({ ok: true, code: symbol, type, candleCount: newest.length, lastDate: newest[0]?.date, analysis });
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ ok: false, error: "글로벌 분석 실패: " + err.message });
+  }
+});
+
 // 차트 랩 — 매물대·과거 유사 패턴 전망·전 지표 분석·자동 해설
-// GET /api/chartlab/:code
+// GET /api/chartlab/:code            (국내 주식, KIS)
+// GET /api/chartlab/:code?type=us|crypto  (미국주식/코인, Yahoo)
 app.get("/api/chartlab/:code", async (req, res) => {
   try {
     const code = req.params.code;
-    const candles = await fetchDailyCandles(code, 400); // 유사 패턴 검색용 장기 데이터
+    const type = String(req.query.type || "kr").toLowerCase();
+    let candles;
+    if (type === "us" || type === "crypto") {
+      const raw = await fetchYahooChart(code.toUpperCase(), type, "D", "2Y", 400);
+      candles = [...(raw || [])].sort((a, b) => String(b.date).localeCompare(String(a.date))); // 최신순
+    } else {
+      candles = await fetchDailyCandles(code, 400); // 유사 패턴 검색용 장기 데이터
+    }
     if (!candles || candles.length < 60) {
       return res.status(400).json({ ok: false, error: "차트 랩에 필요한 일봉 데이터가 부족합니다.", count: candles?.length || 0 });
     }

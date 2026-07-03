@@ -56,8 +56,8 @@ struct TechnicalAnalysisView: View {
                 KPICard(title: "스토캐스틱 히트맵", value: heatmapValue, subtitle: analysis?.stochHeatmap?.zoneLabel)
                 KPICard(title: "고통지수", value: painValue, subtitle: painHint)
                 KPICard(title: "Bull&Bear 파동", value: bbpValue, subtitle: analysis?.bullBearPower?.zoneLabel)
-                KPICard(title: "52주 고가", value: formatInt(quote?.w52High.map(Double.init)), subtitle: nil)
-                KPICard(title: "52주 저가", value: formatInt(quote?.w52Low.map(Double.init)), subtitle: w52Pos(analysis?.week52?.position))
+                KPICard(title: "52주 고가", value: formatInt(quote?.w52High), subtitle: nil)
+                KPICard(title: "52주 저가", value: formatInt(quote?.w52Low), subtitle: w52Pos(analysis?.week52?.position))
             }
 
             if let patterns = analysis?.patterns, !patterns.isEmpty {

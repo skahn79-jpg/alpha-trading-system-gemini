@@ -1,11 +1,25 @@
 import Foundation
 
+enum AssetKind: String {
+    case kr, us, crypto
+}
+
 struct Stock: Identifiable, Codable, Hashable {
     var id: String { code }
     let code: String
     let name: String
     var tag: String?
     var sector: String?
+    /// nil = 국내 주식(기존 저장 데이터 호환), "us" = 미국 주식, "crypto" = 암호화폐
+    var assetType: String?
+
+    var kind: AssetKind {
+        switch assetType {
+        case "us": return .us
+        case "crypto": return .crypto
+        default: return .kr
+        }
+    }
 }
 
 struct MasterSearchResponse: Decodable {

@@ -12,22 +12,34 @@ final class AnalysisViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var aiError: String?
 
-    func load(code: String, sector: String?, market: String?) async {
+    func load(code: String, sector: String?, market: String?, kind: AssetKind = .kr) async {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
         do {
-            async let analyzeTask: StockAnalysisResponse = APIClient.shared.get("/api/analyze/\(code)")
-            async let quoteTask: FullQuote = APIClient.shared.get("/api/quote/\(code)", query: [
-                URLQueryItem(name: "lite", value: "0"),
-            ])
-            let (analyze, q) = try await (analyzeTask, quoteTask)
-            analysis = analyze.analysis ?? q.analysis
-            quote = q
-            // AI 예측은 부가 정보 — 실패해도 화면을 막지 않음
-            prediction = try? await APIClient.shared.get("/api/predict/\(code)") as AIPrediction
-            if let sector, !sector.isEmpty {
-                await loadSectorPeers(sector: sector, market: market)
+            if kind == .kr {
+                async let analyzeTask: StockAnalysisResponse = APIClient.shared.get("/api/analyze/\(code)")
+                async let quoteTask: FullQuote = APIClient.shared.get("/api/quote/\(code)", query: [
+                    URLQueryItem(name: "lite", value: "0"),
+                ])
+                let (analyze, q) = try await (analyzeTask, quoteTask)
+                analysis = analyze.analysis ?? q.analysis
+                quote = q
+                // AI 예측은 부가 정보 — 실패해도 화면을 막지 않음
+                prediction = try? await APIClient.shared.get("/api/predict/\(code)") as AIPrediction
+                if let sector, !sector.isEmpty {
+                    await loadSectorPeers(sector: sector, market: market)
+                }
+            } else {
+                // 미국주식/코인 — Yahoo 캔들 기반 동일 분석 엔진
+                let analyze: StockAnalysisResponse = try await APIClient.shared.get(
+                    "/api/global/analyze/\(code)",
+                    query: [URLQueryItem(name: "type", value: kind.rawValue)]
+                )
+                analysis = analyze.analysis
+                quote = nil
+                prediction = nil
+                sectorPeers = []
             }
         } catch {
             errorMessage = error.localizedDescription

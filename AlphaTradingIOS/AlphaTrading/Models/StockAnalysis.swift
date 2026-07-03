@@ -294,22 +294,26 @@ struct FullQuote: Decodable {
     let code: String
     // 서버 응답에 name이 없으므로 옵셔널 (필수로 두면 전체 시세 디코딩이 실패함)
     let name: String?
-    let price: Int?
-    let change: Int?
+    // 미국주식·코인 소수점 가격 대응
+    let price: Double?
+    let change: Double?
     let changeRate: Double?
     let changeStr: String?
-    let volume: Int?
+    let volume: Double?
     let per: Double?
     let pbr: Double?
     let eps: Double?
-    let w52High: Int?
-    let w52Low: Int?
+    let w52High: Double?
+    let w52Low: Double?
     let up: Bool?
     let analysis: CandleAnalysis?
 
     var displayPrice: String {
         guard let price else { return "-" }
-        return price.formatted(.number.grouping(.automatic))
+        if price == price.rounded() && price >= 100 {
+            return Int(price).formatted(.number.grouping(.automatic))
+        }
+        return price.formatted(.number.precision(.fractionLength(2)))
     }
 
     var displayChange: String {

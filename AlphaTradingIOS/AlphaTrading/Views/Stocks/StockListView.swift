@@ -63,12 +63,12 @@ struct StockDetailView: View {
             }
         }
         .refreshable {
-            await chartVM.load(code: stock.code)
-            await analysisVM.load(code: stock.code, sector: stock.sector, market: nil)
+            await chartVM.load(code: stock.code, kind: stock.kind)
+            await analysisVM.load(code: stock.code, sector: stock.sector, market: nil, kind: stock.kind)
         }
         .task {
-            await chartVM.load(code: stock.code)
-            await analysisVM.load(code: stock.code, sector: stock.sector, market: nil)
+            await chartVM.load(code: stock.code, kind: stock.kind)
+            await analysisVM.load(code: stock.code, sector: stock.sector, market: nil, kind: stock.kind)
         }
     }
 
@@ -106,7 +106,7 @@ struct StockDetailView: View {
             Text("차트")
                 .font(.paperlogy(16, weight: .semibold))
                 .foregroundStyle(AppTheme.textPrimary)
-            ChartView(code: stock.code)
+            ChartView(code: stock.code, kind: stock.kind)
 
             NavigationLink {
                 ChartLabView(stock: stock)
@@ -256,10 +256,23 @@ struct FavoritesView: View {
             .task(id: favorites.favorites.map(\.code).joined()) {
                 for stock in favorites.favorites {
                     do {
-                        let q: Quote = try await APIClient.shared.get("/api/quote/\(stock.code)", query: [
-                            URLQueryItem(name: "lite", value: "1"),
-                        ])
-                        quoteCache[stock.code] = q
+                        switch stock.kind {
+                        case .kr:
+                            let q: Quote = try await APIClient.shared.get("/api/quote/\(stock.code)", query: [
+                                URLQueryItem(name: "lite", value: "1"),
+                            ])
+                            quoteCache[stock.code] = q
+                        case .us, .crypto:
+                            let gq: GlobalQuote = try await APIClient.shared.get(
+                                stock.kind == .us ? "/api/us/quote/\(stock.code)" : "/api/crypto/quote/\(stock.code)"
+                            )
+                            quoteCache[stock.code] = Quote(
+                                code: stock.code, name: stock.name,
+                                price: gq.price, change: gq.change, changeRate: gq.changeRate,
+                                changeStr: gq.changeStr, open: nil, high: nil, low: nil,
+                                volume: nil, up: gq.isUp
+                            )
+                        }
                     } catch { continue }
                 }
             }
