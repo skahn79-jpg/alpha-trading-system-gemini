@@ -92,33 +92,45 @@ async function fetchCategoryTrade() {
     return null;
   }
   try {
-    const now = new Date();
-    const end = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
-    const startDate = new Date(now.getFullYear(), now.getMonth() - 14, 1);
-    const start = `${startDate.getFullYear()}${String(startDate.getMonth() + 1).padStart(2, "0")}`;
+    // 조회기간 1년 제한 → 12개월 창 2개(최근 12개월 + 그 이전 12개월)로 나눠
+    // 전년 동월비 계산용 24개월 확보
+    const ym = (offsetMonths) => {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - offsetMonths);
+      return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`;
+    };
+    const windows = [
+      { start: ym(11), end: ym(0) },
+      { start: ym(23), end: ym(12) },
+    ];
 
     // 관세청_신성질별 수출입실적: newtempertrade/getNewtempertradeList (XML 전용)
-    // imexTpcd: 1=수출, 2=수입 — 두 번 호출해 병합
-    const call = async (imexTpcd, useRawKey) => {
+    // imexTpcd: 1=수출, 2=수입
+    const call = async (imexTpcd, win, useRawKey) => {
       const base = "https://apis.data.go.kr/1220000/newtempertrade/getNewtempertradeList";
       const sk = useRawKey ? key : encodeURIComponent(key);
-      const url = `${base}?serviceKey=${sk}&strtYymm=${start}&endYymm=${end}&imexTpcd=${imexTpcd}&numOfRows=9999&pageNo=1`;
+      const url = `${base}?serviceKey=${sk}&strtYymm=${win.start}&endYymm=${win.end}&imexTpcd=${imexTpcd}&numOfRows=9999&pageNo=1`;
       const { data } = await axios.get(url, { timeout: 25000, responseType: "text" });
       return String(data);
     };
 
     const fetchSide = async (imexTpcd) => {
-      let xml = await call(imexTpcd, false);
-      if (xml.includes("SERVICE_KEY") || xml.includes("SERVICE KEY")) {
-        xml = await call(imexTpcd, true); // 인코딩된 키로 재시도
+      const all = [];
+      for (const win of windows) {
+        let xml = await call(imexTpcd, win, false);
+        if (xml.includes("SERVICE_KEY") || xml.includes("SERVICE KEY")) {
+          xml = await call(imexTpcd, win, true); // 인코딩된 키로 재시도
+        }
+        const authErr = /<returnAuthMsg>([^<]+)<\/returnAuthMsg>/.exec(xml)?.[1];
+        if (authErr) throw new Error("관세청 API 인증 오류: " + authErr);
+        const resultMsg = /<resultCode>(\d+)<\/resultCode>[\s\S]*?<resultMsg>([^<]*)<\/resultMsg>/.exec(xml);
+        if (resultMsg && resultMsg[1] !== "00" && resultMsg[1] !== "0") {
+          throw new Error(`관세청 API 응답 코드 ${resultMsg[1]}: ${resultMsg[2]}`);
+        }
+        all.push(...parseDataGoKrXml(xml));
       }
-      const authErr = /<returnAuthMsg>([^<]+)<\/returnAuthMsg>/.exec(xml)?.[1];
-      if (authErr) throw new Error("관세청 API 인증 오류: " + authErr);
-      const resultMsg = /<resultCode>(\d+)<\/resultCode>[\s\S]*?<resultMsg>([^<]*)<\/resultMsg>/.exec(xml);
-      if (resultMsg && resultMsg[1] !== "00" && resultMsg[1] !== "0") {
-        throw new Error(`관세청 API 응답 코드 ${resultMsg[1]}: ${resultMsg[2]}`);
-      }
-      return parseDataGoKrXml(xml);
+      return all;
     };
 
     const [expItems, impItems] = await Promise.all([fetchSide(1), fetchSide(2)]);
