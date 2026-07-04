@@ -107,30 +107,36 @@ async function fetchCategoryTrade() {
 
     // 관세청_신성질별 수출입실적: newtempertrade/getNewtempertradeList (XML 전용)
     // imexTpcd: 1=수출, 2=수입
-    const call = async (imexTpcd, win, useRawKey) => {
+    // 전체 응답이 수만 행이면 무료 인스턴스 메모리를 초과하므로
+    // 999행 페이지 단위로 받고 페이지 수에 상한을 둠
+    const call = async (imexTpcd, win, pageNo, useRawKey) => {
       const base = "https://apis.data.go.kr/1220000/newtempertrade/getNewtempertradeList";
       const sk = useRawKey ? key : encodeURIComponent(key);
-      const url = `${base}?serviceKey=${sk}&strtYymm=${win.start}&endYymm=${win.end}&imexTpcd=${imexTpcd}&numOfRows=9999&pageNo=1`;
+      const url = `${base}?serviceKey=${sk}&strtYymm=${win.start}&endYymm=${win.end}&imexTpcd=${imexTpcd}&numOfRows=999&pageNo=${pageNo}`;
       const { data } = await axios.get(url, { timeout: 25000, responseType: "text" });
       return String(data);
     };
 
+    const MAX_PAGES = 6; // 창당 최대 ~6,000행
+
     const fetchSide = async (imexTpcd) => {
       const all = [];
       for (const win of windows) {
-        let xml = await call(imexTpcd, win, false);
-        if (xml.includes("SERVICE_KEY") || xml.includes("SERVICE KEY")) {
-          xml = await call(imexTpcd, win, true); // 인코딩된 키로 재시도
+        for (let pageNo = 1; pageNo <= MAX_PAGES; pageNo += 1) {
+          let xml = await call(imexTpcd, win, pageNo, false);
+          if (xml.includes("SERVICE_KEY") || xml.includes("SERVICE KEY")) {
+            xml = await call(imexTpcd, win, pageNo, true); // 인코딩된 키로 재시도
+          }
+          const authErr = /<returnAuthMsg>([^<]+)<\/returnAuthMsg>/.exec(xml)?.[1];
+          if (authErr) throw new Error("관세청 API 인증 오류: " + authErr);
+          const resultMsg = /<resultCode>(\d+)<\/resultCode>[\s\S]*?<resultMsg>([^<]*)<\/resultMsg>/.exec(xml);
+          if (resultMsg && resultMsg[1] !== "00" && resultMsg[1] !== "0") {
+            throw new Error(`관세청 API 응답 코드 ${resultMsg[1]}: ${resultMsg[2]}`);
+          }
+          const parsed = parseDataGoKrXml(xml);
+          for (const it of parsed) all.push(it);
+          if (parsed.length < 999) break; // 마지막 페이지
         }
-        const authErr = /<returnAuthMsg>([^<]+)<\/returnAuthMsg>/.exec(xml)?.[1];
-        if (authErr) throw new Error("관세청 API 인증 오류: " + authErr);
-        const resultMsg = /<resultCode>(\d+)<\/resultCode>[\s\S]*?<resultMsg>([^<]*)<\/resultMsg>/.exec(xml);
-        if (resultMsg && resultMsg[1] !== "00" && resultMsg[1] !== "0") {
-          throw new Error(`관세청 API 응답 코드 ${resultMsg[1]}: ${resultMsg[2]}`);
-        }
-        // 대용량 응답에서 스프레드 push는 스택 초과 → 루프로 추가
-        const parsed = parseDataGoKrXml(xml);
-        for (const it of parsed) all.push(it);
       }
       return all;
     };
