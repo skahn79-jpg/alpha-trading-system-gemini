@@ -272,6 +272,25 @@ async function fetchCategoryTrade() {
   }
 }
 
+// 품목별 수집은 관세청 호출이 최대 24회라 리포트 요청을 블로킹하지 않도록 백그라운드 빌드
+const categoriesCache = { at: 0, data: null, building: false };
+const CATEGORIES_TTL_MS = 6 * 60 * 60 * 1000;
+
+function kickCategoryBuild() {
+  if (categoriesCache.building) return;
+  if (categoriesCache.data && Date.now() - categoriesCache.at < CATEGORIES_TTL_MS) return;
+  categoriesCache.building = true;
+  fetchCategoryTrade()
+    .then((cats) => {
+      if (cats && cats.length) {
+        categoriesCache.data = cats;
+        categoriesCache.at = Date.now();
+      }
+    })
+    .catch((e) => { categoryLastError = "관세청 수집 실패: " + e.message; })
+    .finally(() => { categoriesCache.building = false; });
+}
+
 async function buildTradeReport() {
   if (cache.data && Date.now() - cache.at < CACHE_TTL_MS) return cache.data;
 
@@ -338,7 +357,8 @@ async function buildTradeReport() {
     ? (latest.exportsYoY > 2 ? "increase" : latest.exportsYoY < -2 ? "decrease" : "flat")
     : "unknown";
 
-  const categories = await fetchCategoryTrade();
+  kickCategoryBuild();
+  const categories = categoriesCache.data;
 
   const summaryParts = [];
   if (latest) {
@@ -364,9 +384,11 @@ async function buildTradeReport() {
     categories: categories || [],
     categoriesNote: categories
       ? null
-      : (categoryLastError && categoryLastError !== "TRADE_API_KEY 미설정"
-        ? `품목별 데이터 조회 실패 — ${categoryLastError}`
-        : "품목별 월별·분기별 증감은 무료 API 키 설정 시 제공됩니다: data.go.kr에서 '관세청_신성질별 수출입실적' 활용신청 → Render 환경변수 TRADE_API_KEY에 인증키 입력"),
+      : (categoriesCache.building
+        ? "품목별 데이터 수집 중입니다 — 1~2분 후 아래로 당겨 새로고침하세요."
+        : (categoryLastError && categoryLastError !== "TRADE_API_KEY 미설정"
+          ? `품목별 데이터 조회 실패 — ${categoryLastError}`
+          : "품목별 월별·분기별 증감은 무료 API 키 설정 시 제공됩니다: data.go.kr에서 '관세청_신성질별 수출입실적' 활용신청 → Render 환경변수 TRADE_API_KEY에 인증키 입력")),
     sectorHints: SECTOR_HINTS,
     disclaimer: "본 리포트는 투자 참고용 정보이며 투자 권유가 아닙니다. 모든 투자 판단의 책임은 투자자 본인에게 있습니다.",
   };
