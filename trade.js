@@ -119,8 +119,41 @@ async function fetchCategoryTrade() {
 
     const MAX_PAGES = 6; // 창당 최대 ~6,000행
 
-    const fetchSide = async (imexTpcd) => {
-      const all = [];
+    // 항목 구조 자동 감지: 이름(…Nm/…Kor), 기간(6자리 년월), 금액(달러 필드)
+    let nameKey = null;
+    let periodKey = null;
+    let amountKey = null;
+    const detectKeys = (sample) => {
+      const keys = Object.keys(sample);
+      nameKey = keys.find((k) => /nm$|kor$/i.test(k) && isNaN(Number(sample[k])))
+        || keys.find((k) => isNaN(Number(sample[k])) && !/^(year|yymm|priod)/i.test(k));
+      periodKey = keys.find((k) => /^(year|yymm|priod|baseYymm)/i.test(k))
+        || keys.find((k) => /^\d{6}(\.\d{2})?$/.test(String(sample[k]).replace(/[^0-9.]/g, "")));
+      amountKey = keys.find((k) => /dlr|usd|dollar|amt/i.test(k) && !isNaN(Number(sample[k])));
+      if (!nameKey || !periodKey || !amountKey) {
+        throw new Error("관세청 응답 구조 미인식 — 필드: " + keys.join(","));
+      }
+    };
+
+    // (품목, 월)별 수출/수입 병합 — 페이지를 받는 즉시 집계하고 원본 행은 버려
+    // 무료 인스턴스(512MB)에서 수만 행을 들고 있지 않도록 함
+    const byName = new Map();
+    let totalRows = 0;
+    const ingest = (items, side) => {
+      for (const it of items) {
+        const name = String(it[nameKey] || "").trim();
+        const period = String(it[periodKey] || "").replace(/[^0-9]/g, "");
+        if (!name || period.length < 6 || name.includes("총계") || name.includes("합계")) continue;
+        const month = `${period.slice(0, 4)}-${period.slice(4, 6)}`;
+        if (!byName.has(name)) byName.set(name, new Map());
+        const cur = byName.get(name).get(month) || { exports: 0, imports: 0 };
+        cur[side] += Number(it[amountKey]) || 0;
+        byName.get(name).set(month, cur);
+      }
+    };
+
+    // 수출·수입을 순차로 수집해 피크 메모리/동시 부하를 낮춤
+    for (const { imexTpcd, side } of [{ imexTpcd: 1, side: "exports" }, { imexTpcd: 2, side: "imports" }]) {
       for (const win of windows) {
         for (let pageNo = 1; pageNo <= MAX_PAGES; pageNo += 1) {
           let xml = await call(imexTpcd, win, pageNo, false);
@@ -134,49 +167,18 @@ async function fetchCategoryTrade() {
             throw new Error(`관세청 API 응답 코드 ${resultMsg[1]}: ${resultMsg[2]}`);
           }
           const parsed = parseDataGoKrXml(xml);
-          for (const it of parsed) all.push(it);
+          if (parsed.length && !nameKey) detectKeys(parsed[0]);
+          if (parsed.length) ingest(parsed, side);
+          totalRows += parsed.length;
           if (parsed.length < 999) break; // 마지막 페이지
         }
       }
-      return all;
-    };
+    }
 
-    const [expItems, impItems] = await Promise.all([fetchSide(1), fetchSide(2)]);
-    if (!expItems.length && !impItems.length) {
+    if (!totalRows) {
       categoryLastError = "관세청 API 응답에 품목 데이터 없음 (기간 내 데이터 미제공 가능)";
       return null;
     }
-
-    // 항목 구조 자동 감지: 이름(…Nm/…Kor), 기간(6자리 년월), 금액(달러 필드)
-    const sample = expItems[0] || impItems[0];
-    const keys = Object.keys(sample);
-    const nameKey = keys.find((k) => /nm$|kor$/i.test(k) && isNaN(Number(sample[k])))
-      || keys.find((k) => isNaN(Number(sample[k])) && !/^(year|yymm|priod)/i.test(k));
-    const periodKey = keys.find((k) => /^(year|yymm|priod|baseYymm)/i.test(k))
-      || keys.find((k) => /^\d{6}(\.\d{2})?$/.test(String(sample[k]).replace(/[^0-9.]/g, "")));
-    const amountKey = keys.find((k) => /dlr|usd|dollar|amt/i.test(k) && !isNaN(Number(sample[k])));
-    if (!nameKey || !periodKey || !amountKey) {
-      categoryLastError = "관세청 응답 구조 미인식 — 필드: " + keys.join(",");
-      console.error("[trade-category]", categoryLastError);
-      return null;
-    }
-
-    // (품목, 월)별 수출/수입 병합
-    const byName = new Map();
-    const ingest = (items, side) => {
-      for (const it of items) {
-        const name = String(it[nameKey] || "").trim();
-        const period = String(it[periodKey] || "").replace(/[^0-9]/g, "");
-        if (!name || period.length < 6 || name.includes("총계") || name.includes("합계")) continue;
-        const month = `${period.slice(0, 4)}-${period.slice(4, 6)}`;
-        if (!byName.has(name)) byName.set(name, new Map());
-        const cur = byName.get(name).get(month) || { exports: 0, imports: 0 };
-        cur[side] += Number(it[amountKey]) || 0;
-        byName.get(name).set(month, cur);
-      }
-    };
-    ingest(expItems, "exports");
-    ingest(impItems, "imports");
 
     const pctChange = (cur, prev) => (prev ? Math.round(((cur - prev) / prev) * 1000) / 10 : null);
     const quarterOf = (month) => `${month.slice(0, 4)}-Q${Math.ceil(Number(month.slice(5, 7)) / 3)}`;
