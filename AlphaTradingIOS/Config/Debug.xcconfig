@@ -14,3 +14,4 @@ ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
 
 INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO
 INFOPLIST_KEY_UIRequiresFullScreen = YES
+CODE_SIGN_ENTITLEMENTS = AlphaTrading/Resources/AlphaTrading.entitlements

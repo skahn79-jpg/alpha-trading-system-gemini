@@ -28,6 +28,7 @@ const { buildTradeReport } = require("./trade.js");
 const { buildMacroReport } = require("./macro.js");
 const { volumeProfile, patternOutlook, buildCommentary } = require("./chartlab.js");
 const cryptoReport = require("./crypto-report.js");
+const apns = require("./apns.js");
 const { buildBtcCycle } = require("./btc-cycle.js");
 
 const app = express();
@@ -2706,6 +2707,30 @@ app.delete("/api/alerts/:id", (req, res) => {
   res.json({ ok: true, deleted: alerts.length - next.length, count: next.length });
 });
 
+// ── APNs 원격 푸시 ──
+// POST /api/push/register  { token }  — 앱이 실행될 때마다 디바이스 토큰 등록
+app.post("/api/push/register", (req, res) => {
+  try {
+    const result = apns.registerToken(req.body?.token);
+    res.json({ ok: true, ...result, configured: apns.isConfigured() });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/push/test — 등록된 모든 기기로 테스트 푸시
+app.post("/api/push/test", async (req, res) => {
+  const result = await apns.sendPushToAll({
+    title: "ALPHA TRADING",
+    body: req.body?.text || "✅ 푸시 알림 테스트입니다. 이 알림이 보이면 정상 동작합니다.",
+  });
+  res.json(result);
+});
+
+app.get("/api/push/status", (req, res) => {
+  res.json({ ok: true, configured: apns.isConfigured(), devices: apns.tokenCount() });
+});
+
 app.post("/api/alerts/telegram/test", async (req, res) => {
   try {
     const text = req.body?.text || "✅ ALPHA 텔레그램 알림 테스트입니다.";
@@ -2754,6 +2779,11 @@ app.get("/api/alerts/check", async (req, res) => {
         if (evalResult.hit) {
           const message = buildTelegramAlertText({ ...alert, name: alert.name || quote.name }, quote, evalResult.basis);
           const tg = await sendTelegramMessage(message);
+          // APNs 푸시도 함께 발송 (등록 기기 + 페어링된 Apple Watch 미러링)
+          const push = await apns.sendPushToAll({
+            title: `${alert.name || quote.name || alert.code} 알림`,
+            body: message.replace(/\n+/g, " ").slice(0, 160),
+          }).catch((e) => ({ ok: false, error: e.message }));
           const updated = {
             ...alert,
             triggered: true,
@@ -2762,7 +2792,7 @@ app.get("/api/alerts/check", async (req, res) => {
             lastBasis: evalResult.basis,
           };
           next.push(updated);
-          results.push({ id: alert.id, code: alert.code, hit: true, telegram: tg });
+          results.push({ id: alert.id, code: alert.code, hit: true, telegram: tg, push });
         } else {
           next.push({ ...alert, lastCheckedAt: new Date().toISOString(), lastPrice: quote.price, lastBasis: evalResult.basis });
           results.push({ id: alert.id, code: alert.code, hit: false, basis: evalResult.basis });
