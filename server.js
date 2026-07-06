@@ -2932,7 +2932,7 @@ app.get("/api/global/quote/:symbol", async (req, res) => {
   }
 });
 
-app.get("/api/global/search", (req, res) => {
+app.get("/api/global/search", async (req, res) => {
   const q = String(req.query.q || "").trim().toLowerCase();
   const catalog = [
     { symbol: "NVDA", name: "NVIDIA", type: "us", sector: "AI 반도체" },
@@ -2957,7 +2957,32 @@ app.get("/api/global/search", (req, res) => {
         String(x.sector || "").toLowerCase().includes(q)
       )
     : catalog;
-  res.json(rows.slice(0, 20));
+  if (rows.length || !q) return res.json(rows.slice(0, 20));
+
+  // 하드코딩 카탈로그에 없으면 Yahoo 심볼 검색으로 폴백 — 모든 미국주식·코인 검색 가능
+  try {
+    const { data } = await axios.get("https://query1.finance.yahoo.com/v1/finance/search", {
+      params: { q, quotesCount: 15, newsCount: 0 },
+      timeout: 10000,
+      headers: { "User-Agent": "Mozilla/5.0" },
+    });
+    const found = (data?.quotes || [])
+      .filter((x) => ["EQUITY", "ETF", "CRYPTOCURRENCY"].includes(x.quoteType))
+      .map((x) => {
+        const isCrypto = x.quoteType === "CRYPTOCURRENCY";
+        return {
+          symbol: isCrypto ? String(x.symbol || "").replace(/-USD$/, "") : x.symbol,
+          name: x.shortname || x.longname || x.symbol,
+          type: isCrypto ? "crypto" : "us",
+          sector: isCrypto ? "Crypto" : (x.exchDisp || null),
+        };
+      })
+      .filter((x) => x.symbol);
+    return res.json(found.slice(0, 15));
+  } catch (e) {
+    console.error("[global/search]", e.message);
+    return res.json([]);
+  }
 });
 
 

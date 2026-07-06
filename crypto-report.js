@@ -125,12 +125,31 @@ async function fetchRegulationNews() {
   return out;
 }
 
+// ── 영→한 제목 번역 (구글 번역 공개 엔드포인트, 키 불필요) ──
+async function translateToKorean(text) {
+  const url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ko&dt=t&q="
+    + encodeURIComponent(text);
+  const { data } = await axios.get(url, { timeout: 8000, headers: UA });
+  const segments = Array.isArray(data?.[0]) ? data[0] : [];
+  const out = segments.map((s) => s?.[0] || "").join("").trim();
+  if (!out) throw new Error("empty translation");
+  return out;
+}
+
 // ── 악시오스 뉴스 ──
 let axiosNewsCache = { at: 0, data: null };
 async function fetchAxiosNews(limit = 8) {
   if (axiosNewsCache.data && Date.now() - axiosNewsCache.at < 15 * 60 * 1000) return axiosNewsCache.data;
   const { data } = await axios.get("https://api.axios.com/feed/", { timeout: 15000, headers: UA, responseType: "text" });
   const items = parseRssItems(data, limit);
+  // 제목 한국어 번역 — 실패한 항목은 영어 원문 유지
+  await Promise.all(items.map(async (it) => {
+    try {
+      const ko = await translateToKorean(it.title);
+      it.titleEn = it.title;
+      it.title = ko;
+    } catch { /* 원문 유지 */ }
+  }));
   const result = { ok: items.length > 0, source: "Axios", items, updatedAt: new Date().toISOString() };
   if (result.ok) axiosNewsCache = { at: Date.now(), data: result };
   return result;
