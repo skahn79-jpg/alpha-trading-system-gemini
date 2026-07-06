@@ -878,7 +878,7 @@ app.get("/api/quotes", async (req, res) => {
       const rate = parseFloat(o.prdy_ctrt);
       const base = {
         code: codes[i],
-        name: o.hts_kor_isnm,
+        name: o.hts_kor_isnm || KRX_NAME_BY_CODE.get(codes[i].trim()) || null,
         price: parseInt(o.stck_prpr),
         changeRate: rate,
         changeStr: `${rate >= 0 ? "+" : ""}${rate.toFixed(2)}%`,
@@ -2094,6 +2094,9 @@ try {
 } catch (e) {
   console.warn("[master] enriched catalog load failed:", e.message);
 }
+
+// 종목코드 → 종목명 (KIS 현재가 API는 종목명을 주지 않으므로 마스터에서 보충)
+const KRX_NAME_BY_CODE = new Map(KRX_MASTER_ALL.map((x) => [x.code, x.name]));
 
 function normalizeMarketFilter(market = "ALL") {
   const m = String(market || "ALL").toUpperCase();
