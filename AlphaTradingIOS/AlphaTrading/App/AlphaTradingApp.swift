@@ -4,11 +4,12 @@ import UserNotifications
 
 /// APNs 원격 푸시 등록 — 디바이스 토큰을 서버에 전달해 서버발 알림 수신
 /// (iPhone 잠금 시 페어링된 Apple Watch로 자동 미러링됨)
-final class PushRegistrar: NSObject, UIApplicationDelegate {
+final class PushRegistrar: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
         Task { @MainActor in
             let center = UNUserNotificationCenter.current()
             let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
@@ -17,6 +18,15 @@ final class PushRegistrar: NSObject, UIApplicationDelegate {
             }
         }
         return true
+    }
+
+    // 앱이 화면에 열려 있는 동안 도착한 알림도 배너·소리로 표시
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .badge])
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
