@@ -229,6 +229,7 @@ struct FavoritesView: View {
     @ObservedObject var viewModel: StockListViewModel
     @ObservedObject private var favorites = FavoritesStore.shared
     @State private var quoteCache: [String: Quote] = [:]
+    @State private var editMode: EditMode = .inactive
 
     var body: some View {
         NavigationStack {
@@ -245,11 +246,22 @@ struct FavoritesView: View {
                     }
                     .listRowBackground(AppTheme.background)
                 }
+                .onMove { favorites.move(fromOffsets: $0, toOffset: $1) }
+                .onDelete { favorites.remove(atOffsets: $0) }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(AppTheme.background)
             .navigationTitle("관심")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(editMode == .active ? "완료" : "순서 편집") {
+                        withAnimation { editMode = editMode == .active ? .inactive : .active }
+                    }
+                    .font(.paperlogy(13))
+                }
+            }
+            .environment(\.editMode, $editMode)
             .navigationDestination(for: Stock.self) { stock in
                 StockDetailView(stock: stock)
             }

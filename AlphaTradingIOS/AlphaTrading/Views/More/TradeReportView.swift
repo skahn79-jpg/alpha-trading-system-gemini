@@ -489,11 +489,49 @@ struct TradeReportView: View {
     }
 
     private func monthsTable(_ report: TradeReport) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("월별 증감 (전년 동월 대비)")
+        let months = (report.months ?? []).suffix(12)
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("월별 증감")
                 .font(.paperlogy(15, weight: .semibold))
                 .foregroundStyle(AppTheme.textPrimary)
-            ForEach((report.months ?? []).suffix(6).reversed()) { m in
+
+            // 전월 대비 증감률 막대 — 한눈에 월별 흐름 확인
+            Text("수출 전월 대비 (%)")
+                .font(.paperlogy(11))
+                .foregroundStyle(AppTheme.textSecondary)
+            Chart(months.filter { $0.exportsMoM != nil }) { m in
+                BarMark(
+                    x: .value("월", String(m.month.suffix(5))),
+                    y: .value("전월比", m.exportsMoM ?? 0)
+                )
+                .foregroundStyle((m.exportsMoM ?? 0) >= 0 ? AppTheme.up : AppTheme.down)
+                .cornerRadius(3)
+            }
+            .chartYAxis {
+                AxisMarks(position: .trailing) { _ in
+                    AxisGridLine().foregroundStyle(AppTheme.textSecondary.opacity(0.15))
+                    AxisValueLabel().font(.paperlogy(9)).foregroundStyle(AppTheme.textSecondary)
+                }
+            }
+            .chartXAxis {
+                AxisMarks { _ in
+                    AxisValueLabel().font(.paperlogy(8)).foregroundStyle(AppTheme.textSecondary)
+                }
+            }
+            .frame(height: 120)
+
+            HStack {
+                Text("월").frame(width: 70, alignment: .leading)
+                Text("수출")
+                Spacer()
+                Text("전월比").frame(width: 64, alignment: .trailing)
+                Text("전년比").frame(width: 64, alignment: .trailing)
+            }
+            .font(.paperlogy(10))
+            .foregroundStyle(AppTheme.textSecondary)
+            .padding(.top, 4)
+
+            ForEach(months.reversed()) { m in
                 HStack {
                     Text(m.month)
                         .font(.paperlogy(13, weight: .medium))
@@ -503,11 +541,14 @@ struct TradeReportView: View {
                         .font(.paperlogy(12))
                         .foregroundStyle(AppTheme.textSecondary)
                     Spacer()
-                    if let yoy = m.exportsYoY {
-                        Text(String(format: "%+.1f%%", yoy))
-                            .font(.paperlogy(13, weight: .bold))
-                            .foregroundStyle(yoy >= 0 ? AppTheme.up : AppTheme.down)
-                    }
+                    Text(m.exportsMoM.map { String(format: "%+.1f%%", $0) } ?? "-")
+                        .font(.paperlogy(12, weight: .semibold))
+                        .foregroundStyle((m.exportsMoM ?? 0) >= 0 ? AppTheme.up : AppTheme.down)
+                        .frame(width: 64, alignment: .trailing)
+                    Text(m.exportsYoY.map { String(format: "%+.1f%%", $0) } ?? "-")
+                        .font(.paperlogy(12, weight: .bold))
+                        .foregroundStyle((m.exportsYoY ?? 0) >= 0 ? AppTheme.up : AppTheme.down)
+                        .frame(width: 64, alignment: .trailing)
                 }
                 .padding(.vertical, 2)
             }

@@ -42,6 +42,16 @@ final class FavoritesStore: ObservableObject {
         save()
     }
 
+    func move(fromOffsets source: IndexSet, toOffset destination: Int) {
+        favorites.move(fromOffsets: source, toOffset: destination)
+        save()
+    }
+
+    func remove(atOffsets offsets: IndexSet) {
+        favorites.remove(atOffsets: offsets)
+        save()
+    }
+
     private var defaultFavorites: [Stock] {
         [
             Stock(code: "005930", name: "삼성전자", tag: "반도체", sector: "반도체"),
