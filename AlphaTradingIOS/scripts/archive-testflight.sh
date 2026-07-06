@@ -45,6 +45,12 @@ xcodebuild -exportArchive \
 IPA="$EXPORT/AlphaTrading.ipa"
 echo ""
 echo "✅ Archive 완료"
+
+# ExportOptions destination=upload 는 export 단계에서 바로 업로드하고 IPA를 남기지 않음
+if [[ ! -f "$IPA" ]]; then
+  echo "✅ TestFlight 업로드 완료 (export 단계에서 업로드됨)"
+  exit 0
+fi
 echo "   IPA: $IPA"
 
 # App Store Connect 업로드 (환경변수 또는 .env.local)
