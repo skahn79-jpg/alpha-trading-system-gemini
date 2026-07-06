@@ -23,10 +23,24 @@ xcodebuild -project AlphaTrading.xcodeproj \
   clean archive
 
 echo "==> IPA Export"
+# App Store 프로파일 자동 발급용 인증 (ASC API 키가 있으면 사용)
+EXPORT_AUTH=()
+if [[ -f "$ROOT/.env.local" ]]; then
+  ENV_TMP0="$(mktemp)"
+  grep -E '^(ASC_API_KEY_ID|ASC_ISSUER_ID|ASC_API_ISSUER_ID|ASC_API_KEY_PATH)=' "$ROOT/.env.local" > "$ENV_TMP0" 2>/dev/null || true
+  # shellcheck disable=SC1090
+  set -a && source "$ENV_TMP0" && set +a
+  rm -f "$ENV_TMP0"
+fi
+ASC_ISSUER_ID="${ASC_ISSUER_ID:-${ASC_API_ISSUER_ID:-}}"
+if [[ -n "${ASC_API_KEY_ID:-}" && -n "${ASC_ISSUER_ID:-}" && -f "${ASC_API_KEY_PATH:-}" ]]; then
+  EXPORT_AUTH=(-authenticationKeyPath "$ASC_API_KEY_PATH" -authenticationKeyID "$ASC_API_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+fi
 xcodebuild -exportArchive \
   -archivePath "$ARCHIVE" \
   -exportOptionsPlist scripts/ExportOptions-upload.plist \
-  -exportPath "$EXPORT"
+  -exportPath "$EXPORT" \
+  -allowProvisioningUpdates ${EXPORT_AUTH[@]+"${EXPORT_AUTH[@]}"}
 
 IPA="$EXPORT/AlphaTrading.ipa"
 echo ""
