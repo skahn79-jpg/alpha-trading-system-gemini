@@ -900,6 +900,47 @@ app.get("/api/quotes", async (req, res) => {
   }
 });
 
+// 호가창 — 체결 단가별 매도/매수 잔량 (KIS 주식현재가 호가/예상체결)
+// GET /api/orderbook/:code
+app.get("/api/orderbook/:code", async (req, res) => {
+  try {
+    const code = String(req.params.code || "").trim();
+    if (!/^\d{6}$/.test(code)) return res.status(400).json({ ok: false, error: "잘못된 종목코드" });
+    const data = await kisGet(
+      "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn",
+      "FHKST01010200",
+      { FID_COND_MRKT_DIV_CODE: "J", FID_INPUT_ISCD: code }
+    );
+    const o = data.output1 || {};
+    const levels = [];
+    for (let i = 1; i <= 10; i += 1) {
+      levels.push({
+        level: i,
+        askPrice: Number(o[`askp${i}`]) || 0,
+        askVolume: Number(o[`askp_rsqn${i}`]) || 0,
+        bidPrice: Number(o[`bidp${i}`]) || 0,
+        bidVolume: Number(o[`bidp_rsqn${i}`]) || 0,
+      });
+    }
+    const totalAsk = Number(o.total_askp_rsqn) || 0;
+    const totalBid = Number(o.total_bidp_rsqn) || 0;
+    res.json({
+      ok: true,
+      code,
+      time: o.aspr_acpt_hour || null,
+      levels,
+      totalAskVolume: totalAsk,
+      totalBidVolume: totalBid,
+      // 매수/매도 잔량 비율 — 1보다 크면 매수 대기 물량 우위
+      bidAskRatio: totalAsk ? Math.round((totalBid / totalAsk) * 100) / 100 : null,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("[orderbook]", err.message);
+    res.status(502).json({ ok: false, error: err.message });
+  }
+});
+
 // 종목 검색
 // GET /api/search?q=삼성
 // 검색 순서:
