@@ -2882,14 +2882,37 @@ const MAJOR_CRYPTO = new Set([
 const cgIdCache = new Map(); // SYMBOL → { id, name, at }
 const cgPriceCache = new Map(); // id → { data, at }
 
+// CoinGecko 무료 한도(IP당) 보호 — 호출 간격 1.8초 유지, 429 시 90초 쿨다운
+let cgCooldownUntil = 0;
+let cgChain = Promise.resolve();
+function cgThrottled(fn) {
+  const run = cgChain.then(async () => {
+    if (Date.now() < cgCooldownUntil) {
+      const err = new Error("CoinGecko 한도 초과 — 잠시 후 다시 시도하세요");
+      err.isCooldown = true;
+      throw err;
+    }
+    try {
+      return await fn();
+    } catch (e) {
+      if (e?.response?.status === 429) cgCooldownUntil = Date.now() + 90 * 1000;
+      throw e;
+    } finally {
+      await new Promise((r) => setTimeout(r, 1800));
+    }
+  });
+  cgChain = run.then(() => {}, () => {});
+  return run;
+}
+
 async function resolveCoinGeckoId(symbol) {
   const key = String(symbol || "").toUpperCase();
   const hit = cgIdCache.get(key);
   if (hit && Date.now() - hit.at < 24 * 60 * 60 * 1000) return hit;
-  const { data } = await axios.get("https://api.coingecko.com/api/v3/search", {
+  const { data } = await cgThrottled(() => axios.get("https://api.coingecko.com/api/v3/search", {
     params: { query: key },
     timeout: 10000,
-  });
+  }));
   const exact = (data?.coins || [])
     .filter((c) => String(c.symbol || "").toUpperCase() === key)
     .sort((a, b) => (a.market_cap_rank || 1e9) - (b.market_cap_rank || 1e9))[0] || null;
@@ -2903,23 +2926,23 @@ async function fetchCoinGeckoQuote(symbol) {
   if (!id) throw new Error(`CoinGecko에 없는 코인: ${symbol}`);
   const hit = cgPriceCache.get(id);
   if (hit && Date.now() - hit.at < 120 * 1000) return hit.data;
-  // 무료 API 러이트리밋(429) 대비 1회 재시도 — Yahoo의 동명 죽은 코인으로
-  // 잘못 폴백하는 것보다 잠시 기다리는 편이 안전함
+  // 한도 초과 등 실패 시 오래된 캐시라도 제공 —
+  // Yahoo의 동명 죽은 코인으로 잘못 폴백하는 것보다 안전함
   let data;
   try {
-    ({ data } = await axios.get("https://api.coingecko.com/api/v3/simple/price", {
+    ({ data } = await cgThrottled(() => axios.get("https://api.coingecko.com/api/v3/simple/price", {
       params: { ids: id, vs_currencies: "usd", include_24hr_change: "true" },
       timeout: 10000,
-    }));
-  } catch {
-    await new Promise((r) => setTimeout(r, 1500));
-    ({ data } = await axios.get("https://api.coingecko.com/api/v3/simple/price", {
-      params: { ids: id, vs_currencies: "usd", include_24hr_change: "true" },
-      timeout: 10000,
-    }));
+    })));
+  } catch (e) {
+    if (hit) return { ...hit.data, stale: true };
+    throw e;
   }
   const p = data?.[id];
-  if (!p || !Number.isFinite(p.usd)) throw new Error(`CoinGecko 시세 없음: ${id}`);
+  if (!p || !Number.isFinite(p.usd)) {
+    if (hit) return { ...hit.data, stale: true };
+    throw new Error(`CoinGecko 시세 없음: ${id}`);
+  }
   const rate = Number(p.usd_24h_change || 0);
   const prev = p.usd / (1 + rate / 100);
   const quote = {
@@ -2943,11 +2966,17 @@ async function fetchCoinGeckoCandles(symbol, count = 260) {
   const { id } = await resolveCoinGeckoId(symbol);
   if (!id) throw new Error(`CoinGecko에 없는 코인: ${symbol}`);
   const hit = cgCandlesCache.get(id);
-  if (hit && Date.now() - hit.at < 15 * 60 * 1000) return hit.data.slice(-count);
-  const { data } = await axios.get(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}/market_chart`, {
-    params: { vs_currency: "usd", days: 365, interval: "daily" },
-    timeout: 15000,
-  });
+  if (hit && Date.now() - hit.at < 60 * 60 * 1000) return hit.data.slice(-count);
+  let data;
+  try {
+    ({ data } = await cgThrottled(() => axios.get(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}/market_chart`, {
+      params: { vs_currency: "usd", days: 365, interval: "daily" },
+      timeout: 15000,
+    })));
+  } catch (e) {
+    if (hit) return hit.data.slice(-count); // 오래된 캐시라도 제공
+    throw e;
+  }
   const prices = data?.prices || [];
   const vols = new Map((data?.total_volumes || []).map(([t, v]) => [t, v]));
   const candles = prices.map(([ts, close], i) => {
@@ -3008,13 +3037,7 @@ async function fetchCryptoCandles(symbol, period = "D", range = "1Y", count = 26
     resolved = await resolveCoinGeckoId(sym);
   } catch { /* 해석 실패 시 Yahoo 시도 */ }
   if (!resolved?.id) return fetchYahooChart(sym, "crypto", period, range, count);
-  let daily;
-  try {
-    daily = await fetchCoinGeckoCandles(sym, 400);
-  } catch {
-    await new Promise((r) => setTimeout(r, 3000));
-    daily = await fetchCoinGeckoCandles(sym, 400);
-  }
+  const daily = await fetchCoinGeckoCandles(sym, 400);
   return resampleCandles(daily, period).slice(-count);
 }
 
@@ -3152,10 +3175,10 @@ app.get("/api/global/search", async (req, res) => {
         timeout: 10000,
         headers: { "User-Agent": "Mozilla/5.0" },
       }),
-      axios.get("https://api.coingecko.com/api/v3/search", {
+      cgThrottled(() => axios.get("https://api.coingecko.com/api/v3/search", {
         params: { query: q },
         timeout: 10000,
-      }),
+      })),
     ]);
 
     const cgCoins = cgRes.status === "fulfilled" ? (cgRes.value.data?.coins || []) : [];
