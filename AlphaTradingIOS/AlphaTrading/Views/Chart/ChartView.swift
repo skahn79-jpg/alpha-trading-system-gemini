@@ -97,6 +97,9 @@ struct ChartView: View {
             }
         }
         .chartYScale(domain: yDomain)
+        // 카테고리 x축 순서를 명시적으로 고정 — 볼린저 음영이 캔들보다 먼저 그려지면
+        // 등장 순서 기준으로 뒤쪽 날짜가 앞에 등록되어 주봉/월봉 차트가 뒤엉킴
+        .chartXScale(domain: displayCandles.map(\.date))
         .chartXAxis {
             AxisMarks(values: xAxisDates) { value in
                 AxisGridLine()
