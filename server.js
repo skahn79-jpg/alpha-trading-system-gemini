@@ -2908,9 +2908,12 @@ async function fetchCoinGeckoQuote(symbol) {
 }
 
 // 일별 종가 시리즈로 근사 캔들 생성 (open=전일 종가) — 종가 기반 지표 분석용
+const cgCandlesCache = new Map(); // id → { data, at }
 async function fetchCoinGeckoCandles(symbol, count = 260) {
   const { id } = await resolveCoinGeckoId(symbol);
   if (!id) throw new Error(`CoinGecko에 없는 코인: ${symbol}`);
+  const hit = cgCandlesCache.get(id);
+  if (hit && Date.now() - hit.at < 15 * 60 * 1000) return hit.data.slice(-count);
   const { data } = await axios.get(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}/market_chart`, {
     params: { vs_currency: "usd", days: 365, interval: "daily" },
     timeout: 15000,
@@ -2928,7 +2931,40 @@ async function fetchCoinGeckoCandles(symbol, count = 260) {
       volume: vols.get(ts) || 0,
     };
   });
+  cgCandlesCache.set(id, { data: candles, at: Date.now() });
   return candles.slice(-count);
+}
+
+// 일봉 → 주봉/월봉 리샘플 (CoinGecko는 일봉만 제공)
+function resampleCandles(candles, period) {
+  const p = String(period || "D").toUpperCase();
+  if (p !== "W" && p !== "M") return candles;
+  const keyOf = (dateStr) => {
+    const d = new Date(dateStr + "T00:00:00Z");
+    if (p === "M") return dateStr.slice(0, 7);
+    // ISO 주차 키 (연도-주)
+    const day = (d.getUTCDay() + 6) % 7;
+    const th = new Date(d);
+    th.setUTCDate(d.getUTCDate() - day + 3);
+    const firstTh = new Date(Date.UTC(th.getUTCFullYear(), 0, 4));
+    const week = 1 + Math.round(((th - firstTh) / 86400000 - 3 + ((firstTh.getUTCDay() + 6) % 7)) / 7);
+    return `${th.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+  };
+  const groups = new Map();
+  for (const c of candles) {
+    const k = keyOf(c.date);
+    const g = groups.get(k);
+    if (!g) {
+      groups.set(k, { ...c });
+    } else {
+      g.high = Math.max(g.high, c.high);
+      g.low = Math.min(g.low, c.low);
+      g.close = c.close;
+      g.volume += c.volume;
+      g.date = c.date; // 구간 마지막 날짜로 표기
+    }
+  }
+  return [...groups.values()];
 }
 
 // 크립토 캔들 통합: 주요 코인 Yahoo, 그 외 CoinGecko
@@ -2942,12 +2978,14 @@ async function fetchCryptoCandles(symbol, period = "D", range = "1Y", count = 26
     resolved = await resolveCoinGeckoId(sym);
   } catch { /* 해석 실패 시 Yahoo 시도 */ }
   if (!resolved?.id) return fetchYahooChart(sym, "crypto", period, range, count);
+  let daily;
   try {
-    return await fetchCoinGeckoCandles(sym, count);
+    daily = await fetchCoinGeckoCandles(sym, 400);
   } catch {
-    await new Promise((r) => setTimeout(r, 1500));
-    return fetchCoinGeckoCandles(sym, count);
+    await new Promise((r) => setTimeout(r, 3000));
+    daily = await fetchCoinGeckoCandles(sym, 400);
   }
+  return resampleCandles(daily, period).slice(-count);
 }
 
 function yahooRangeInterval(period = "D", range = "1Y", count = 260) {
