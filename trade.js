@@ -287,7 +287,10 @@ function kickCategoryBuild() {
         categoriesCache.at = Date.now();
       }
     })
-    .catch((e) => { categoryLastError = "관세청 수집 실패: " + e.message; })
+    .catch((e) => {
+      categoryLastError = "관세청 수집 실패: " + e.message;
+      console.error("[trade-category]", categoryLastError);
+    })
     .finally(() => { categoriesCache.building = false; });
 }
 
@@ -384,11 +387,12 @@ async function buildTradeReport() {
     categories: categories || [],
     categoriesNote: categories
       ? null
-      : (categoriesCache.building
-        ? "품목별 데이터 수집 중입니다 — 1~2분 후 아래로 당겨 새로고침하세요."
-        : (categoryLastError && categoryLastError !== "TRADE_API_KEY 미설정"
-          ? `품목별 데이터 조회 실패 — ${categoryLastError}`
+      : (categoryLastError && categoryLastError !== "TRADE_API_KEY 미설정"
+        ? `품목별 데이터 조회 실패 — ${categoryLastError}${categoriesCache.building ? " (재시도 중)" : ""}`
+        : (categoriesCache.building
+          ? "품목별 데이터 수집 중입니다 — 1~2분 후 아래로 당겨 새로고침하세요."
           : "품목별 월별·분기별 증감은 무료 API 키 설정 시 제공됩니다: data.go.kr에서 '관세청_신성질별 수출입실적' 활용신청 → Render 환경변수 TRADE_API_KEY에 인증키 입력")),
+    categoriesDebug: { lastError: categoryLastError, building: categoriesCache.building },
     sectorHints: SECTOR_HINTS,
     disclaimer: "본 리포트는 투자 참고용 정보이며 투자 권유가 아닙니다. 모든 투자 판단의 책임은 투자자 본인에게 있습니다.",
   };
