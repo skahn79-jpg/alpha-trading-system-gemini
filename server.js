@@ -733,7 +733,9 @@ app.get("/api/global/analyze/:symbol", async (req, res) => {
   try {
     const symbol = String(req.params.symbol || "").toUpperCase();
     const type = req.query.type || (["BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "BNB"].includes(symbol) ? "crypto" : "us");
-    const candles = await fetchYahooChart(symbol, type, "D", "2Y", 400);
+    const candles = type === "crypto"
+      ? await fetchCryptoCandles(symbol, "D", "2Y", 400)
+      : await fetchYahooChart(symbol, type, "D", "2Y", 400);
     if (!Array.isArray(candles) || candles.length < 30) {
       return res.status(400).json({ ok: false, error: "분석에 필요한 일봉 데이터가 부족합니다.", count: candles?.length || 0 });
     }
@@ -754,7 +756,9 @@ app.get("/api/chartlab/:code", async (req, res) => {
     const type = String(req.query.type || "kr").toLowerCase();
     let candles;
     if (type === "us" || type === "crypto") {
-      const raw = await fetchYahooChart(code.toUpperCase(), type, "D", "2Y", 400);
+      const raw = type === "crypto"
+        ? await fetchCryptoCandles(code.toUpperCase(), "D", "2Y", 400)
+        : await fetchYahooChart(code.toUpperCase(), type, "D", "2Y", 400);
       candles = [...(raw || [])].sort((a, b) => String(b.date).localeCompare(String(a.date))); // 최신순
     } else {
       candles = await fetchDailyCandles(code, 400); // 유사 패턴 검색용 장기 데이터
@@ -2836,6 +2840,97 @@ function yahooSymbol(symbol, type = "us") {
   return raw;
 }
 
+// ── CoinGecko 코인 해석·시세·차트 ──
+// Yahoo는 마이너 코인이 없거나 동명의 죽은 코인을 반환할 수 있음
+// (예: ADI → Yahoo는 죽은 'Aditus', 실제로는 시총 84위 ADI 토큰)
+// 주요 코인은 Yahoo(속도·무제한), 그 외에는 CoinGecko를 우선 사용
+const MAJOR_CRYPTO = new Set([
+  "BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "BNB", "USDT", "USDC", "TRX",
+  "AVAX", "LINK", "DOT", "MATIC", "LTC", "BCH", "SHIB", "XLM", "ETC", "APT",
+  "ARB", "OP", "SUI", "PEPE", "TON", "NEAR", "ICP", "UNI", "HBAR", "FIL",
+]);
+const cgIdCache = new Map(); // SYMBOL → { id, name, at }
+const cgPriceCache = new Map(); // id → { data, at }
+
+async function resolveCoinGeckoId(symbol) {
+  const key = String(symbol || "").toUpperCase();
+  const hit = cgIdCache.get(key);
+  if (hit && Date.now() - hit.at < 24 * 60 * 60 * 1000) return hit;
+  const { data } = await axios.get("https://api.coingecko.com/api/v3/search", {
+    params: { query: key },
+    timeout: 10000,
+  });
+  const exact = (data?.coins || [])
+    .filter((c) => String(c.symbol || "").toUpperCase() === key)
+    .sort((a, b) => (a.market_cap_rank || 1e9) - (b.market_cap_rank || 1e9))[0] || null;
+  const entry = { id: exact?.id || null, name: exact?.name || null, at: Date.now() };
+  cgIdCache.set(key, entry);
+  return entry;
+}
+
+async function fetchCoinGeckoQuote(symbol) {
+  const { id, name } = await resolveCoinGeckoId(symbol);
+  if (!id) throw new Error(`CoinGecko에 없는 코인: ${symbol}`);
+  const hit = cgPriceCache.get(id);
+  if (hit && Date.now() - hit.at < 60 * 1000) return hit.data;
+  const { data } = await axios.get("https://api.coingecko.com/api/v3/simple/price", {
+    params: { ids: id, vs_currencies: "usd", include_24hr_change: "true" },
+    timeout: 10000,
+  });
+  const p = data?.[id];
+  if (!p || !Number.isFinite(p.usd)) throw new Error(`CoinGecko 시세 없음: ${id}`);
+  const rate = Number(p.usd_24h_change || 0);
+  const prev = p.usd / (1 + rate / 100);
+  const quote = {
+    name,
+    price: p.usd,
+    change: p.usd - prev,
+    changeRate: rate,
+    changeStr: `${rate >= 0 ? "+" : ""}${rate.toFixed(2)}%`,
+    currency: "USD",
+    marketState: "",
+    time: new Date().toISOString(),
+    source: "CoinGecko",
+  };
+  cgPriceCache.set(id, { data: quote, at: Date.now() });
+  return quote;
+}
+
+// 일별 종가 시리즈로 근사 캔들 생성 (open=전일 종가) — 종가 기반 지표 분석용
+async function fetchCoinGeckoCandles(symbol, count = 260) {
+  const { id } = await resolveCoinGeckoId(symbol);
+  if (!id) throw new Error(`CoinGecko에 없는 코인: ${symbol}`);
+  const { data } = await axios.get(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}/market_chart`, {
+    params: { vs_currency: "usd", days: 365, interval: "daily" },
+    timeout: 15000,
+  });
+  const prices = data?.prices || [];
+  const vols = new Map((data?.total_volumes || []).map(([t, v]) => [t, v]));
+  const candles = prices.map(([ts, close], i) => {
+    const prev = i > 0 ? prices[i - 1][1] : close;
+    return {
+      date: new Date(ts).toISOString().slice(0, 10),
+      open: prev,
+      high: Math.max(prev, close),
+      low: Math.min(prev, close),
+      close,
+      volume: vols.get(ts) || 0,
+    };
+  });
+  return candles.slice(-count);
+}
+
+// 크립토 캔들 통합: 주요 코인 Yahoo, 그 외 CoinGecko 우선 → Yahoo 폴백
+async function fetchCryptoCandles(symbol, period = "D", range = "1Y", count = 260) {
+  const sym = String(symbol || "").toUpperCase();
+  if (MAJOR_CRYPTO.has(sym)) return fetchYahooChart(sym, "crypto", period, range, count);
+  try {
+    return await fetchCoinGeckoCandles(sym, count);
+  } catch {
+    return fetchYahooChart(sym, "crypto", period, range, count);
+  }
+}
+
 function yahooRangeInterval(period = "D", range = "1Y", count = 260) {
   const p = String(period || "D").toUpperCase();
   const r = String(range || "1Y").toUpperCase();
@@ -2901,7 +2996,9 @@ app.get("/api/global/chart/:symbol", async (req, res) => {
     const period = req.query.period || "D";
     const range = req.query.range || "1Y";
     const count = Number(req.query.count || 260);
-    const candles = await fetchYahooChart(symbol, type, period, range, count);
+    const candles = type === "crypto"
+      ? await fetchCryptoCandles(symbol, period, range, count)
+      : await fetchYahooChart(symbol, type, period, range, count);
     res.json({
       ok: true,
       symbol,
@@ -2959,26 +3056,50 @@ app.get("/api/global/search", async (req, res) => {
     : catalog;
   if (rows.length || !q) return res.json(rows.slice(0, 20));
 
-  // 하드코딩 카탈로그에 없으면 Yahoo 심볼 검색으로 폴백 — 모든 미국주식·코인 검색 가능
+  // 하드코딩 카탈로그에 없으면 실시간 검색 폴백 —
+  // 코인은 CoinGecko(마이너 코인 포함), 주식/ETF는 Yahoo
   try {
-    const { data } = await axios.get("https://query1.finance.yahoo.com/v1/finance/search", {
-      params: { q, quotesCount: 15, newsCount: 0 },
-      timeout: 10000,
-      headers: { "User-Agent": "Mozilla/5.0" },
+    const [yhRes, cgRes] = await Promise.allSettled([
+      axios.get("https://query1.finance.yahoo.com/v1/finance/search", {
+        params: { q, quotesCount: 15, newsCount: 0 },
+        timeout: 10000,
+        headers: { "User-Agent": "Mozilla/5.0" },
+      }),
+      axios.get("https://api.coingecko.com/api/v3/search", {
+        params: { query: q },
+        timeout: 10000,
+      }),
+    ]);
+
+    const coins = cgRes.status === "fulfilled"
+      ? (cgRes.value.data?.coins || []).slice(0, 8).map((c) => ({
+          symbol: String(c.symbol || "").toUpperCase(),
+          name: c.name,
+          type: "crypto",
+          sector: c.market_cap_rank ? `시총 #${c.market_cap_rank}` : "Crypto",
+        }))
+      : [];
+
+    const stocks = yhRes.status === "fulfilled"
+      ? (yhRes.value.data?.quotes || [])
+          .filter((x) => ["EQUITY", "ETF"].includes(x.quoteType))
+          .map((x) => ({
+            symbol: x.symbol,
+            name: x.shortname || x.longname || x.symbol,
+            type: "us",
+            sector: x.exchDisp || null,
+          }))
+      : [];
+
+    const seen = new Set();
+    const found = [...coins, ...stocks].filter((x) => {
+      if (!x.symbol) return false;
+      const key = `${x.type}:${x.symbol}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
-    const found = (data?.quotes || [])
-      .filter((x) => ["EQUITY", "ETF", "CRYPTOCURRENCY"].includes(x.quoteType))
-      .map((x) => {
-        const isCrypto = x.quoteType === "CRYPTOCURRENCY";
-        return {
-          symbol: isCrypto ? String(x.symbol || "").replace(/-USD$/, "") : x.symbol,
-          name: x.shortname || x.longname || x.symbol,
-          type: isCrypto ? "crypto" : "us",
-          sector: isCrypto ? "Crypto" : (x.exchDisp || null),
-        };
-      })
-      .filter((x) => x.symbol);
-    return res.json(found.slice(0, 15));
+    return res.json(found.slice(0, 20));
   } catch (e) {
     console.error("[global/search]", e.message);
     return res.json([]);
@@ -3006,8 +3127,17 @@ app.get("/api/crypto/quote/:symbol", async (req, res) => {
     if (!/^[A-Z]{2,10}$/.test(raw)) {
       return res.status(400).json({ error: "Invalid crypto symbol" });
     }
-    const yahooSymbol = raw.endsWith("-USD") ? raw : `${raw}-USD`;
-    const quote = await fetchYahooQuote(yahooSymbol);
+    let quote;
+    if (MAJOR_CRYPTO.has(raw)) {
+      quote = await fetchYahooQuote(`${raw}-USD`);
+    } else {
+      // 마이너 코인은 CoinGecko 우선 (Yahoo는 동명의 죽은 코인을 반환할 수 있음)
+      try {
+        quote = await fetchCoinGeckoQuote(raw);
+      } catch {
+        quote = await fetchYahooQuote(`${raw}-USD`);
+      }
+    }
     res.json({ ...quote, symbol: raw });
   } catch (err) {
     console.error("[crypto/quote]", err.message);
