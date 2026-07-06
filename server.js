@@ -2872,11 +2872,22 @@ async function fetchCoinGeckoQuote(symbol) {
   const { id, name } = await resolveCoinGeckoId(symbol);
   if (!id) throw new Error(`CoinGecko에 없는 코인: ${symbol}`);
   const hit = cgPriceCache.get(id);
-  if (hit && Date.now() - hit.at < 60 * 1000) return hit.data;
-  const { data } = await axios.get("https://api.coingecko.com/api/v3/simple/price", {
-    params: { ids: id, vs_currencies: "usd", include_24hr_change: "true" },
-    timeout: 10000,
-  });
+  if (hit && Date.now() - hit.at < 120 * 1000) return hit.data;
+  // 무료 API 러이트리밋(429) 대비 1회 재시도 — Yahoo의 동명 죽은 코인으로
+  // 잘못 폴백하는 것보다 잠시 기다리는 편이 안전함
+  let data;
+  try {
+    ({ data } = await axios.get("https://api.coingecko.com/api/v3/simple/price", {
+      params: { ids: id, vs_currencies: "usd", include_24hr_change: "true" },
+      timeout: 10000,
+    }));
+  } catch {
+    await new Promise((r) => setTimeout(r, 1500));
+    ({ data } = await axios.get("https://api.coingecko.com/api/v3/simple/price", {
+      params: { ids: id, vs_currencies: "usd", include_24hr_change: "true" },
+      timeout: 10000,
+    }));
+  }
   const p = data?.[id];
   if (!p || !Number.isFinite(p.usd)) throw new Error(`CoinGecko 시세 없음: ${id}`);
   const rate = Number(p.usd_24h_change || 0);
@@ -2920,14 +2931,22 @@ async function fetchCoinGeckoCandles(symbol, count = 260) {
   return candles.slice(-count);
 }
 
-// 크립토 캔들 통합: 주요 코인 Yahoo, 그 외 CoinGecko 우선 → Yahoo 폴백
+// 크립토 캔들 통합: 주요 코인 Yahoo, 그 외 CoinGecko
+// CoinGecko에 존재하는 코인은 Yahoo로 폴백하지 않음 —
+// Yahoo가 동명의 다른(죽은) 코인을 반환해 잘못된 차트가 나올 수 있음
 async function fetchCryptoCandles(symbol, period = "D", range = "1Y", count = 260) {
   const sym = String(symbol || "").toUpperCase();
   if (MAJOR_CRYPTO.has(sym)) return fetchYahooChart(sym, "crypto", period, range, count);
+  let resolved = null;
+  try {
+    resolved = await resolveCoinGeckoId(sym);
+  } catch { /* 해석 실패 시 Yahoo 시도 */ }
+  if (!resolved?.id) return fetchYahooChart(sym, "crypto", period, range, count);
   try {
     return await fetchCoinGeckoCandles(sym, count);
   } catch {
-    return fetchYahooChart(sym, "crypto", period, range, count);
+    await new Promise((r) => setTimeout(r, 1500));
+    return fetchCoinGeckoCandles(sym, count);
   }
 }
 
@@ -3071,14 +3090,24 @@ app.get("/api/global/search", async (req, res) => {
       }),
     ]);
 
-    const coins = cgRes.status === "fulfilled"
-      ? (cgRes.value.data?.coins || []).slice(0, 8).map((c) => ({
-          symbol: String(c.symbol || "").toUpperCase(),
-          name: c.name,
-          type: "crypto",
-          sector: c.market_cap_rank ? `시총 #${c.market_cap_rank}` : "Crypto",
-        }))
-      : [];
+    const cgCoins = cgRes.status === "fulfilled" ? (cgRes.value.data?.coins || []) : [];
+    // 심볼→CoinGecko id 캐시를 미리 채워 시세 조회 시 추가 검색 호출을 아낌
+    for (const c of cgCoins) {
+      const sym = String(c.symbol || "").toUpperCase();
+      if (!sym || !c.id) continue;
+      const cur = cgIdCache.get(sym);
+      const curRank = cur?.rank ?? 1e9;
+      const rank = c.market_cap_rank || 1e9;
+      if (!cur?.id || rank < curRank) {
+        cgIdCache.set(sym, { id: c.id, name: c.name, rank, at: Date.now() });
+      }
+    }
+    const coins = cgCoins.slice(0, 8).map((c) => ({
+      symbol: String(c.symbol || "").toUpperCase(),
+      name: c.name,
+      type: "crypto",
+      sector: c.market_cap_rank ? `시총 #${c.market_cap_rank}` : "Crypto",
+    }));
 
     const stocks = yhRes.status === "fulfilled"
       ? (yhRes.value.data?.quotes || [])
@@ -3131,12 +3160,15 @@ app.get("/api/crypto/quote/:symbol", async (req, res) => {
     if (MAJOR_CRYPTO.has(raw)) {
       quote = await fetchYahooQuote(`${raw}-USD`);
     } else {
-      // 마이너 코인은 CoinGecko 우선 (Yahoo는 동명의 죽은 코인을 반환할 수 있음)
+      // 마이너 코인은 CoinGecko (Yahoo는 동명의 죽은 코인을 반환할 수 있어
+      // CoinGecko에 존재하는 심볼은 Yahoo로 폴백하지 않음)
+      let resolved = null;
       try {
-        quote = await fetchCoinGeckoQuote(raw);
-      } catch {
-        quote = await fetchYahooQuote(`${raw}-USD`);
-      }
+        resolved = await resolveCoinGeckoId(raw);
+      } catch { /* 해석 자체가 실패하면 Yahoo 시도 */ }
+      quote = resolved?.id
+        ? await fetchCoinGeckoQuote(raw)
+        : await fetchYahooQuote(`${raw}-USD`);
     }
     res.json({ ...quote, symbol: raw });
   } catch (err) {
