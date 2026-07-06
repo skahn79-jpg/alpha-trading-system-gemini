@@ -2502,6 +2502,16 @@ app.post("/api/ai/analyze", async (req, res) => {
     const model = process.env.GEMINI_MODEL || "gemini-2.0-flash";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
+    const generationConfig = {
+      maxOutputTokens: maxTokens,
+      temperature: 0.35,
+    };
+    // 2.5 계열은 기본적으로 내부 사고(thinking)에 토큰을 소모해
+    // maxOutputTokens를 다 써버리고 답변이 잘림 → 사고 기능 비활성화
+    if (/2\.5/.test(model)) {
+      generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    }
+
     const body = {
       contents: [
         {
@@ -2513,10 +2523,7 @@ app.post("/api/ai/analyze", async (req, res) => {
           ],
         },
       ],
-      generationConfig: {
-        maxOutputTokens: maxTokens,
-        temperature: 0.35,
-      },
+      generationConfig,
     };
 
     const { data } = await axios.post(url, body, {
