@@ -3065,4 +3065,10 @@ app.listen(PORT, () => {
     console.log("⚠️  DART_API_KEY 미설정 — /api/nps 엔드포인트 비활성");
     console.log("   .env에 DART_API_KEY=... 추가하세요.\n");
   }
+
+  // 수출입 리포트(관세청 품목 수집 ~20분 포함)를 미리 준비해
+  // 첫 사용자가 수집을 기다리지 않게 함
+  setTimeout(() => {
+    buildTradeReport().catch((e) => console.error("[trade-warmup]", e.message));
+  }, 10 * 1000);
 });
