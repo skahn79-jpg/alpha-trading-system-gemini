@@ -100,10 +100,11 @@ async function fetchCategoryTrade() {
       d.setMonth(d.getMonth() - offsetMonths);
       return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`;
     };
-    const windows = [
-      { start: ym(11), end: ym(0) },
-      { start: ym(23), end: ym(12) },
-    ];
+    // 월 단위 24개 창 — 범위를 넓게 잡으면 응답이 수만 행이 되어
+    // 페이지 파라미터가 무시될 경우 무료 인스턴스 메모리를 초과하므로
+    // 한 달씩 잘라 응답 크기를 원천적으로 제한
+    const windows = [];
+    for (let i = 23; i >= 0; i -= 1) windows.push({ start: ym(i), end: ym(i) });
 
     // 관세청_신성질별 수출입실적: newtempertrade/getNewtempertradeList (XML 전용)
     // imexTpcd: 1=수출, 2=수입
@@ -113,7 +114,13 @@ async function fetchCategoryTrade() {
       const base = "https://apis.data.go.kr/1220000/newtempertrade/getNewtempertradeList";
       const sk = useRawKey ? key : encodeURIComponent(key);
       const url = `${base}?serviceKey=${sk}&strtYymm=${win.start}&endYymm=${win.end}&imexTpcd=${imexTpcd}&numOfRows=999&pageNo=${pageNo}`;
-      const { data } = await axios.get(url, { timeout: 25000, responseType: "text" });
+      const { data } = await axios.get(url, {
+        timeout: 25000,
+        responseType: "text",
+        // 페이지 파라미터가 무시된 초대형 응답이 오면 OOM 대신 오류로 드러나게 함
+        maxContentLength: 10 * 1024 * 1024,
+        maxBodyLength: 10 * 1024 * 1024,
+      });
       return String(data);
     };
 
@@ -170,7 +177,7 @@ async function fetchCategoryTrade() {
           if (parsed.length && !nameKey) detectKeys(parsed[0]);
           if (parsed.length) ingest(parsed, side);
           totalRows += parsed.length;
-          if (parsed.length < 999) break; // 마지막 페이지
+          if (parsed.length < 999) break; // 마지막 페이지 (페이지 미지원 서비스도 여기서 종료)
         }
       }
     }
@@ -394,7 +401,12 @@ async function buildTradeReport() {
         : (categoriesCache.building
           ? "품목별 데이터 수집 중입니다 — 1~2분 후 아래로 당겨 새로고침하세요."
           : "품목별 월별·분기별 증감은 무료 API 키 설정 시 제공됩니다: data.go.kr에서 '관세청_신성질별 수출입실적' 활용신청 → Render 환경변수 TRADE_API_KEY에 인증키 입력")),
-    categoriesDebug: { lastError: categoryLastError, building: categoriesCache.building },
+    categoriesDebug: {
+      lastError: categoryLastError,
+      building: categoriesCache.building,
+      uptimeSec: Math.round(process.uptime()),
+      rssMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+    },
     sectorHints: SECTOR_HINTS,
     disclaimer: "본 리포트는 투자 참고용 정보이며 투자 권유가 아닙니다. 모든 투자 판단의 책임은 투자자 본인에게 있습니다.",
   };
