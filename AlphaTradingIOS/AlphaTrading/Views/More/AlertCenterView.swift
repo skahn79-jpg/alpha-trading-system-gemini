@@ -8,6 +8,8 @@ struct AlertCenterView: View {
     @State private var newType: AlertType = .priceAbove
     @State private var newTarget = "80000"
     @State private var newMessage = ""
+    @State private var searchQuery = ""
+    @State private var searchResults: [MasterStock] = []
 
     var body: some View {
         List {
@@ -65,9 +67,34 @@ struct AlertCenterView: View {
         .sheet(isPresented: $showAdd) {
             NavigationStack {
                 Form {
-                    TextField("종목코드", text: $newCode)
-                        .keyboardType(.numberPad)
-                    TextField("종목명", text: $newName)
+                    Section("종목 검색") {
+                        TextField("종목명 또는 코드 검색 (예: 삼성전자)", text: $searchQuery)
+                        ForEach(searchResults.prefix(6)) { stock in
+                            Button {
+                                newCode = stock.code
+                                newName = stock.name
+                                searchQuery = ""
+                                searchResults = []
+                            } label: {
+                                HStack {
+                                    Text(stock.name)
+                                        .font(.paperlogy(14, weight: .medium))
+                                        .foregroundStyle(AppTheme.textPrimary)
+                                    Spacer()
+                                    Text(stock.code)
+                                        .font(.paperlogy(12))
+                                        .foregroundStyle(AppTheme.textSecondary)
+                                }
+                            }
+                        }
+                    }
+                    Section("선택된 종목") {
+                        HStack {
+                            Text(newName).font(.paperlogy(15, weight: .semibold))
+                            Spacer()
+                            Text(newCode).font(.paperlogy(13)).foregroundStyle(AppTheme.textSecondary)
+                        }
+                    }
                     Picker("조건", selection: $newType) {
                         ForEach(AlertType.allCases) { t in
                             Text(t.label).tag(t)
@@ -100,7 +127,18 @@ struct AlertCenterView: View {
                     }
                 }
             }
-            .presentationDetents([.medium])
+            .presentationDetents([.large])
+            .task(id: searchQuery) {
+                let q = searchQuery.trimmingCharacters(in: .whitespaces)
+                guard q.count >= 1 else { searchResults = []; return }
+                try? await Task.sleep(nanoseconds: 300_000_000) // 타이핑 멈춤 대기
+                guard !Task.isCancelled else { return }
+                let response: MasterSearchResponse? = try? await APIClient.shared.get(
+                    "/api/master/search",
+                    query: [URLQueryItem(name: "q", value: q), URLQueryItem(name: "limit", value: "10")]
+                )
+                if !Task.isCancelled { searchResults = response?.results ?? [] }
+            }
         }
         .task {
             await viewModel.requestNotificationPermission()

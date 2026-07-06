@@ -108,6 +108,10 @@ struct StockDetailView: View {
                 .foregroundStyle(AppTheme.textPrimary)
             ChartView(code: stock.code, kind: stock.kind)
 
+            if stock.kind == .kr {
+                OrderBookView(code: stock.code)
+            }
+
             NavigationLink {
                 ChartLabView(stock: stock)
             } label: {
@@ -124,6 +128,108 @@ struct StockDetailView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
         }
+    }
+}
+
+// MARK: - 호가창 (체결 단가별 매도/매수 잔량)
+
+struct OrderBookLevel: Decodable, Identifiable {
+    var id: Int { level }
+    let level: Int
+    let askPrice: Double
+    let askVolume: Double
+    let bidPrice: Double
+    let bidVolume: Double
+}
+
+struct OrderBookResponse: Decodable {
+    let ok: Bool
+    let levels: [OrderBookLevel]?
+    let totalAskVolume: Double?
+    let totalBidVolume: Double?
+    let bidAskRatio: Double?
+}
+
+struct OrderBookView: View {
+    let code: String
+    @State private var book: OrderBookResponse?
+
+    private var maxVolume: Double {
+        let levels = (book?.levels ?? []).prefix(5)
+        return max(levels.map(\.askVolume).max() ?? 1, levels.map(\.bidVolume).max() ?? 1, 1)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("호가 잔량")
+                .font(.paperlogy(15, weight: .semibold))
+                .foregroundStyle(AppTheme.textPrimary)
+            Text("체결 단가별 매도·매수 대기 물량 (10초마다 갱신)")
+                .font(.paperlogy(10))
+                .foregroundStyle(AppTheme.textSecondary)
+
+            if let levels = book?.levels?.prefix(5), !levels.isEmpty {
+                // 매도 호가 (높은 가격부터)
+                ForEach(levels.reversed()) { l in
+                    row(price: l.askPrice, volume: l.askVolume, isAsk: true)
+                }
+                Divider().background(AppTheme.textSecondary.opacity(0.3))
+                // 매수 호가
+                ForEach(Array(levels)) { l in
+                    row(price: l.bidPrice, volume: l.bidVolume, isAsk: false)
+                }
+
+                HStack {
+                    Text("총 매도 \(Int(book?.totalAskVolume ?? 0).formatted())")
+                        .foregroundStyle(AppTheme.down)
+                    Spacer()
+                    if let ratio = book?.bidAskRatio {
+                        Text("매수/매도 \(String(format: "%.2f", ratio))")
+                            .foregroundStyle(ratio >= 1 ? AppTheme.up : AppTheme.down)
+                    }
+                    Spacer()
+                    Text("총 매수 \(Int(book?.totalBidVolume ?? 0).formatted())")
+                        .foregroundStyle(AppTheme.up)
+                }
+                .font(.paperlogy(11, weight: .medium))
+                .padding(.top, 4)
+            } else {
+                Text("호가 데이터를 불러오는 중이거나 장이 열리지 않았습니다.")
+                    .font(.paperlogy(12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+        }
+        .padding(16)
+        .background(AppTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .task(id: code) {
+            while !Task.isCancelled {
+                book = try? await APIClient.shared.get("/api/orderbook/\(code)") as OrderBookResponse
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+            }
+        }
+    }
+
+    private func row(price: Double, volume: Double, isAsk: Bool) -> some View {
+        HStack(spacing: 8) {
+            Text(Int(price).formatted())
+                .font(.paperlogy(13, weight: .medium))
+                .foregroundStyle(isAsk ? AppTheme.down : AppTheme.up)
+                .frame(width: 80, alignment: .leading)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill((isAsk ? AppTheme.down : AppTheme.up).opacity(0.22))
+                        .frame(width: max(2, geo.size.width * volume / maxVolume))
+                }
+            }
+            .frame(height: 14)
+            Text(Int(volume).formatted())
+                .font(.paperlogy(11))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(width: 76, alignment: .trailing)
+        }
+        .frame(height: 16)
     }
 }
 
