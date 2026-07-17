@@ -363,7 +363,11 @@ struct StockListView: View {
 
     private var displayItems: [MasterStock] {
         if viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return favorites.favorites.map { MasterStock(code: $0.code, name: $0.name, market: nil, tag: $0.tag, sector: $0.sector) }
+            // 종목 탭은 국내(KRX) 전용 — 미국주식·코인 관심종목은 국내 시세 API로
+            // 조회할 수 없어 0원으로 표시되므로 여기서는 제외 (관심 탭·US/CRYPTO에서 표시)
+            return favorites.favorites
+                .filter { $0.kind == .kr }
+                .map { MasterStock(code: $0.code, name: $0.name, market: nil, tag: $0.tag, sector: $0.sector) }
         }
         return viewModel.results
     }
