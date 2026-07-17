@@ -29,6 +29,7 @@ const { buildMacroReport } = require("./macro.js");
 const { volumeProfile, patternOutlook, buildCommentary } = require("./chartlab.js");
 const cryptoReport = require("./crypto-report.js");
 const apns = require("./apns.js");
+const { buildLiqMap } = require("./liqmap.js");
 const { buildBtcCycle } = require("./btc-cycle.js");
 
 const app = express();
@@ -2913,6 +2914,20 @@ app.delete("/api/alerts/:id", (req, res) => {
   const next = alerts.filter((a) => String(a.id) !== String(req.params.id));
   writeServerAlerts(next);
   res.json({ ok: true, deleted: alerts.length - next.length, count: next.length });
+});
+
+// ── 예상 청산 분포 (청산맵 추정) ──
+// GET /api/crypto/liqmap/:symbol — 현재가 위/아래 청산 밀집 구간 추정
+app.get("/api/crypto/liqmap/:symbol", async (req, res) => {
+  try {
+    const symbol = String(req.params.symbol || "BTC").toUpperCase();
+    if (!/^[A-Z]{2,10}$/.test(symbol)) return res.status(400).json({ ok: false, error: "잘못된 심볼" });
+    const data = await buildLiqMap(symbol);
+    res.json(data);
+  } catch (err) {
+    console.error("[liqmap]", err.message);
+    res.status(502).json({ ok: false, error: err.message });
+  }
 });
 
 // ── APNs 원격 푸시 ──
