@@ -951,6 +951,49 @@ function analyzeCandles(rawCandles = []) {
 
   const fib = fibonacci(candles);
 
+  // ── 골든/데드크로스 50/200일선 (KospiAI 이식) ──
+  let goldenCross = null;
+  if (closes.length >= 205) {
+    const ma50Now = sma(closes, 50);
+    const ma200Now = sma(closes, 200);
+    const ma50Prev = sma(closes.slice(5), 50);
+    const ma200Prev = sma(closes.slice(5), 200);
+    if ([ma50Now, ma200Now, ma50Prev, ma200Prev].every((v) => Number.isFinite(v))) {
+      const nowAbove = ma50Now > ma200Now;
+      const prevAbove = ma50Prev > ma200Prev;
+      const recentCross = nowAbove !== prevAbove ? (nowAbove ? 'golden' : 'dead') : null;
+      goldenCross = {
+        ma50: Math.round(ma50Now * 100) / 100,
+        ma200: Math.round(ma200Now * 100) / 100,
+        state: nowAbove ? 'above' : 'below',
+        recentCross,
+      };
+      if (recentCross === 'golden') { score += 10; signals.push('골든크로스(50/200일선) 발생'); }
+      else if (recentCross === 'dead') { score -= 10; signals.push('데드크로스(50/200일선) 발생'); }
+      else if (nowAbove) { score += 3; signals.push('50일선>200일선 장기 상승 구조'); }
+    }
+  }
+
+  // ── 인간지표: 고점 대비 손실률 구간 (KospiAI 이식) ──
+  // 최근 1년 최고가 대비 현재가 낙폭으로 심리 구간을 판정
+  let drawdown = null;
+  {
+    const ddSlice = candles.slice(0, Math.min(252, candles.length));
+    const peak = ddSlice.length ? Math.max(...ddSlice.map((c) => num(c.high))) : null;
+    if (peak && peak > 0) {
+      const ddPct = Math.round(((close - peak) / peak) * 1000) / 10;
+      let zone; let label;
+      if (ddPct >= -5) { zone = 'peak'; label = '고점권 — 신규 진입 신중'; }
+      else if (ddPct >= -15) { zone = 'pullback'; label = '조정 구간'; }
+      else if (ddPct >= -30) { zone = 'accumulate'; label = '저점 접근 — 분할 매수 관찰'; }
+      else if (ddPct >= -45) { zone = 'bottom'; label = '저점 구간 — 강한 매수 후보'; }
+      else { zone = 'capitulation'; label = '투매 구간 — 추세 확인 필수'; }
+      drawdown = { peak, pct: ddPct, zone, label };
+      if (zone === 'bottom') { score += 5; signals.push(`고점 대비 ${Math.abs(ddPct)}% 하락 — 저점 구간`); }
+      if (zone === 'capitulation') { signals.push(`고점 대비 ${Math.abs(ddPct)}% 하락 — 투매 구간`); }
+    }
+  }
+
   score = Math.max(0, Math.min(100, Math.round(score)));
   const grade = score >= 80 ? 'A' : score >= 65 ? 'B' : score >= 50 ? 'C' : 'D';
   const action = score >= 80 ? '관심 진입 후보' : score >= 65 ? '분할 관찰 후보' : score >= 50 ? '중립/대기' : '리스크 관리 우선';
@@ -995,6 +1038,8 @@ function analyzeCandles(rawCandles = []) {
     painMeter: pain,
     bullBearPower: bbp,
     week52: { high: w52High, low: w52Low, position: w52Position },
+    goldenCross,
+    drawdown,
     volume: { latest: num(latest.volume), avg20: avgVol20, ratio: volRatio },
     confluence: signals.length,
     signals,

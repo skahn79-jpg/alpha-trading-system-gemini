@@ -559,6 +559,165 @@ app.get("/api/signals/featured", (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
+// 시그널 히스토리 — 과거 일봉에서 발생한 매매 신호 이벤트 (KospiAI 이식)
+// GET /api/signals/history/:code
+// ═══════════════════════════════════════════════════════════════
+app.get("/api/signals/history/:code", async (req, res) => {
+  try {
+    const code = String(req.params.code || "").trim();
+    if (!/^\d{6}$/.test(code)) return res.status(400).json({ ok: false, error: "잘못된 종목코드" });
+    const raw = await fetchDailyCandles(code, 320);
+    // 과거→현재 순으로 정렬
+    const candles = [...raw].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    if (candles.length < 60) {
+      return res.json({ ok: true, code, events: [], note: "데이터 부족" });
+    }
+    const closes = candles.map((c) => Number(c.close));
+
+    const smaAt = (idx, period) => {
+      if (idx + 1 < period) return null;
+      let s = 0;
+      for (let i = idx - period + 1; i <= idx; i += 1) s += closes[i];
+      return s / period;
+    };
+    // RSI 시리즈 (와일더 방식)
+    const rsiSeries = new Array(closes.length).fill(null);
+    if (closes.length > 15) {
+      let gain = 0; let loss = 0;
+      for (let i = 1; i <= 14; i += 1) {
+        const d = closes[i] - closes[i - 1];
+        if (d > 0) gain += d; else loss -= d;
+      }
+      let avgG = gain / 14; let avgL = loss / 14;
+      rsiSeries[14] = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
+      for (let i = 15; i < closes.length; i += 1) {
+        const d = closes[i] - closes[i - 1];
+        avgG = (avgG * 13 + Math.max(d, 0)) / 14;
+        avgL = (avgL * 13 + Math.max(-d, 0)) / 14;
+        rsiSeries[i] = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
+      }
+    }
+
+    const fmtDate = (d) => {
+      const s = String(d).replace(/[^0-9]/g, "");
+      return s.length === 8 ? `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}` : String(d);
+    };
+    const events = [];
+    for (let i = 1; i < candles.length; i += 1) {
+      const price = closes[i];
+      const date = fmtDate(candles[i].date);
+      // 골든/데드크로스 50/200
+      const a50 = smaAt(i, 50); const a200 = smaAt(i, 200);
+      const p50 = smaAt(i - 1, 50); const p200 = smaAt(i - 1, 200);
+      if (a50 && a200 && p50 && p200) {
+        if (p50 <= p200 && a50 > a200) events.push({ date, type: "bull", label: "골든크로스 (50/200일선)", price });
+        if (p50 >= p200 && a50 < a200) events.push({ date, type: "bear", label: "데드크로스 (50/200일선)", price });
+      }
+      // 20일선 상향/하향 돌파
+      const a20 = smaAt(i, 20); const p20 = smaAt(i - 1, 20);
+      if (a20 && p20) {
+        if (closes[i - 1] <= p20 && price > a20) events.push({ date, type: "bull", label: "20일선 상향 돌파", price });
+        if (closes[i - 1] >= p20 && price < a20) events.push({ date, type: "bear", label: "20일선 하향 이탈", price });
+      }
+      // RSI 과매도 탈출 / 과매수 이탈
+      const r = rsiSeries[i]; const rp = rsiSeries[i - 1];
+      if (r !== null && rp !== null) {
+        if (rp < 30 && r >= 30) events.push({ date, type: "bull", label: `RSI 과매도 탈출 (${Math.round(r)})`, price });
+        if (rp > 70 && r <= 70) events.push({ date, type: "bear", label: `RSI 과매수 이탈 (${Math.round(r)})`, price });
+      }
+    }
+    res.json({ ok: true, code, count: events.length, events: events.slice(-20).reverse() });
+  } catch (err) {
+    console.error("[signals/history]", err.message);
+    res.status(502).json({ ok: false, error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 섹터 히트맵 — 업종별 대표 종목 등락률 집계 (KospiAI 이식)
+// GET /api/sector/heatmap
+// ═══════════════════════════════════════════════════════════════
+const sectorHeatCache = { at: 0, data: null, building: false };
+const SECTOR_HEAT_TTL_MS = 10 * 60 * 1000;
+
+async function buildSectorHeatmap() {
+  if (sectorHeatCache.building) return;
+  sectorHeatCache.building = true;
+  try {
+    // 업종별 대표 2종목 (마스터 순서 = 대체로 시총 순)
+    const bySector = new Map();
+    for (const x of KRX_MASTER_ALL) {
+      const sector = x.sector;
+      if (!sector || sector === "ETF·분류") continue;
+      if (!bySector.has(sector)) bySector.set(sector, []);
+      const arr = bySector.get(sector);
+      if (arr.length < 2) arr.push(x);
+    }
+    const sectors = [];
+    for (const [sector, stocks] of bySector) {
+      const rows = await Promise.allSettled(stocks.map(async (s) => {
+        const q = await kisGet(
+          "/uapi/domestic-stock/v1/quotations/inquire-price",
+          "FHKST01010100",
+          { FID_COND_MRKT_DIV_CODE: "J", FID_INPUT_ISCD: s.code }
+        );
+        return { code: s.code, name: s.name, rate: parseFloat(q.output?.prdy_ctrt) };
+      }));
+      const ok = rows.filter((r) => r.status === "fulfilled" && Number.isFinite(r.value.rate)).map((r) => r.value);
+      if (!ok.length) continue;
+      const avg = ok.reduce((s, r) => s + r.rate, 0) / ok.length;
+      sectors.push({
+        sector,
+        changeRate: Math.round(avg * 100) / 100,
+        leaders: ok.map((r) => ({ code: r.code, name: r.name, changeRate: r.rate })),
+      });
+      await new Promise((r) => setTimeout(r, 250)); // KIS 호출 속도 완화
+    }
+    sectors.sort((a, b) => b.changeRate - a.changeRate);
+    sectorHeatCache.data = { ok: true, updatedAt: new Date().toISOString(), sectors };
+    sectorHeatCache.at = Date.now();
+  } catch (e) {
+    console.error("[sector/heatmap]", e.message);
+  } finally {
+    sectorHeatCache.building = false;
+  }
+}
+
+app.get("/api/sector/heatmap", (req, res) => {
+  const stale = Date.now() - sectorHeatCache.at > SECTOR_HEAT_TTL_MS;
+  if (stale && !sectorHeatCache.building) buildSectorHeatmap();
+  if (sectorHeatCache.data) return res.json({ ...sectorHeatCache.data, refreshing: stale });
+  res.json({ ok: true, building: true, sectors: [], message: "업종 등락 집계 중 — 잠시 후 다시 요청하세요." });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 트럼프 정책/미디어 관찰 뉴스 — 관세·TMTG(트루스소셜) 등 시장 영향 이슈
+// GET /api/news/trump
+// ═══════════════════════════════════════════════════════════════
+let trumpNewsCache = { at: 0, data: null };
+app.get("/api/news/trump", async (req, res) => {
+  try {
+    if (trumpNewsCache.data && Date.now() - trumpNewsCache.at < 15 * 60 * 1000) {
+      return res.json(trumpNewsCache.data);
+    }
+    const topics = [
+      { topic: "트럼프 정책·관세", query: "트럼프 관세 증시" },
+      { topic: "트럼프 미디어(TMTG)", query: "트럼프 미디어 테크놀로지 트루스소셜" },
+    ];
+    const out = [];
+    for (const t of topics) {
+      const items = await cryptoReport.fetchGoogleNews(t.query, 5).catch(() => []);
+      if (items.length) out.push({ topic: t.topic, items });
+    }
+    const result = { ok: out.length > 0, topics: out, updatedAt: new Date().toISOString() };
+    if (result.ok) trumpNewsCache = { at: Date.now(), data: result };
+    res.json(result);
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
 // AI 수출입 연계 저평가 종목 — 수출 주력 품목 업종에서 저평가 후보 추출
 // ═══════════════════════════════════════════════════════════════
 const tradePicksCache = { at: 0, data: null, building: false };
