@@ -43,6 +43,69 @@ struct CandleAnalysis: Decodable {
     let stochHeatmap: StochHeatmapData?
     let painMeter: PainMeterData?
     let bullBearPower: BBPData?
+    let goldenCross: GoldenCrossData?
+    let drawdown: DrawdownData?
+}
+
+/// 50/200일선 골든/데드크로스 (KospiAI 이식)
+struct GoldenCrossData: Decodable {
+    let ma50: Double
+    let ma200: Double
+    let state: String // above | below
+    let recentCross: String? // golden | dead
+    var label: String {
+        if recentCross == "golden" { return "골든크로스 발생" }
+        if recentCross == "dead" { return "데드크로스 발생" }
+        return state == "above" ? "장기 상승 구조" : "장기 하락 구조"
+    }
+}
+
+/// 인간지표 — 고점 대비 손실률 구간 (KospiAI 이식)
+struct DrawdownData: Decodable {
+    let peak: Double
+    let pct: Double
+    let zone: String
+    let label: String
+}
+
+/// /api/signals/history — 과거 신호 이벤트
+struct SignalHistoryResponse: Decodable {
+    let ok: Bool
+    let events: [SignalEvent]?
+}
+
+struct SignalEvent: Decodable, Identifiable {
+    var id: String { "\(date)-\(label)" }
+    let date: String
+    let type: String // bull | bear
+    let label: String
+    let price: Double?
+}
+
+/// /api/sector/heatmap — 업종별 등락 히트맵
+struct SectorHeatmapResponse: Decodable {
+    let ok: Bool
+    let sectors: [SectorHeat]?
+    let building: Bool?
+}
+
+struct SectorHeat: Decodable, Identifiable {
+    var id: String { sector }
+    let sector: String
+    let changeRate: Double
+    let leaders: [SectorHeatLeader]?
+}
+
+struct SectorHeatLeader: Decodable {
+    let code: String
+    let name: String
+    let changeRate: Double?
+}
+
+/// /api/news/trump — 트럼프 정책/미디어 뉴스 (RegulationTopic은 CryptoReport.swift에 이미 존재)
+struct TrumpNewsResponse: Decodable {
+    let ok: Bool
+    let topics: [RegulationTopic]?
 }
 
 struct DivergenceData: Decodable {

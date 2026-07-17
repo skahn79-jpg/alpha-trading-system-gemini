@@ -644,9 +644,10 @@ async function buildSectorHeatmap() {
   if (sectorHeatCache.building) return;
   sectorHeatCache.building = true;
   try {
-    // 업종별 대표 2종목 (마스터 순서 = 대체로 시총 순)
+    // 업종별 대표 2종목 — 큐레이션 마스터(대분류 업종)만 사용
+    // KIND 병합본은 세분류(200개+)라 히트맵이 지나치게 쪼개짐
     const bySector = new Map();
-    for (const x of KRX_MASTER_ALL) {
+    for (const x of KRX_MASTER_DB) {
       const sector = x.sector;
       if (!sector || sector === "ETF·분류") continue;
       if (!bySector.has(sector)) bySector.set(sector, []);

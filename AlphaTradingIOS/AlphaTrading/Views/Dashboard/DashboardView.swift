@@ -5,6 +5,7 @@ struct DashboardView: View {
     @State private var tradeReport: TradeReport?
     @State private var featured: FeaturedSignalsResponse?
     @State private var axiosNews: AxiosNewsResponse?
+    @State private var trumpNews: TrumpNewsResponse?
     @State private var fx: FxResponse?
     // 환율 실시간 갱신 (30초)
     private let fxTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
@@ -36,6 +37,7 @@ struct DashboardView: View {
                     tradeSummarySection
                     featuredSection
                     axiosNewsSection
+                    trumpNewsSection
                 }
                 .padding(16)
             }
@@ -58,11 +60,13 @@ struct DashboardView: View {
         async let tradeTask = try? APIClient.shared.get("/api/trade/report") as TradeReport
         async let featuredTask = try? APIClient.shared.get("/api/signals/featured") as FeaturedSignalsResponse
         async let newsTask = try? APIClient.shared.get("/api/news/axios") as AxiosNewsResponse
+        async let trumpTask = try? APIClient.shared.get("/api/news/trump") as TrumpNewsResponse
         async let fxTask = try? APIClient.shared.get("/api/fx") as FxResponse
         _ = await indexTask
         tradeReport = await tradeTask
         featured = await featuredTask
         axiosNews = await newsTask
+        trumpNews = await trumpTask
         fx = await fxTask
     }
 
@@ -138,6 +142,67 @@ struct DashboardView: View {
                                     .foregroundStyle(AppTheme.textSecondary)
                             }
                             .padding(.vertical, 3)
+                        }
+                    }
+                }
+            }
+            .padding(16)
+            .background(AppTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    // MARK: - 트럼프 정책·미디어 관찰
+
+    @ViewBuilder
+    private var trumpNewsSection: some View {
+        if let news = trumpNews, let topics = news.topics, !topics.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Image(systemName: "megaphone.fill")
+                        .foregroundStyle(AppTheme.accent)
+                    Text("트럼프 정책·미디어 관찰")
+                        .font(.paperlogy(16, weight: .semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Spacer()
+                }
+                ForEach(topics) { topic in
+                    if !topic.items.isEmpty {
+                        Text(topic.topic)
+                            .font(.paperlogy(13, weight: .semibold))
+                            .foregroundStyle(AppTheme.accent)
+                            .padding(.top, 2)
+                        ForEach(topic.items.prefix(4)) { item in
+                            if let url = URL(string: item.link) {
+                                Link(destination: url) {
+                                    HStack(alignment: .top, spacing: 8) {
+                                        Text("·")
+                                            .foregroundStyle(AppTheme.accent)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(item.title)
+                                                .font(.paperlogy(13))
+                                                .foregroundStyle(AppTheme.textPrimary)
+                                                .multilineTextAlignment(.leading)
+                                                .lineLimit(2)
+                                            HStack(spacing: 6) {
+                                                if let source = item.source {
+                                                    Text(source)
+                                                        .font(.paperlogy(10))
+                                                        .foregroundStyle(AppTheme.textSecondary)
+                                                }
+                                                Text(item.timeAgoText)
+                                                    .font(.paperlogy(10))
+                                                    .foregroundStyle(AppTheme.textSecondary)
+                                            }
+                                        }
+                                        Spacer()
+                                        Image(systemName: "arrow.up.right")
+                                            .font(.caption2)
+                                            .foregroundStyle(AppTheme.textSecondary)
+                                    }
+                                    .padding(.vertical, 3)
+                                }
+                            }
                         }
                     }
                 }

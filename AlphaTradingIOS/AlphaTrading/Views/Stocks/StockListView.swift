@@ -38,6 +38,9 @@ struct StockDetailView: View {
                             quote: analysisVM.quote,
                             prediction: analysisVM.prediction
                         )
+                        if stock.kind == .kr {
+                            SignalHistoryView(code: stock.code)
+                        }
                     }
                 case .summary:
                     if analysisVM.isLoading {
@@ -230,6 +233,59 @@ struct OrderBookView: View {
                 .frame(width: 76, alignment: .trailing)
         }
         .frame(height: 16)
+    }
+}
+
+// MARK: - 시그널 히스토리 (과거 매매 신호 이벤트)
+struct SignalHistoryView: View {
+    let code: String
+    @State private var events: [SignalEvent] = []
+    @State private var loaded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("시그널 히스토리")
+                .font(.paperlogy(15, weight: .semibold))
+                .foregroundStyle(AppTheme.textPrimary)
+            Text("과거 일봉에서 발생한 주요 신호 (골든/데드크로스 · 20일선 돌파 · RSI)")
+                .font(.paperlogy(10))
+                .foregroundStyle(AppTheme.textSecondary)
+            if events.isEmpty {
+                Text(loaded ? "최근 신호 이벤트가 없습니다." : "신호 이력을 불러오는 중...")
+                    .font(.paperlogy(12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            } else {
+                ForEach(events.prefix(10)) { e in
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(e.type == "bull" ? AppTheme.up : AppTheme.down)
+                            .frame(width: 6, height: 6)
+                        Text(e.date)
+                            .font(.paperlogy(11))
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .frame(width: 78, alignment: .leading)
+                        Text(e.label)
+                            .font(.paperlogy(12, weight: .medium))
+                            .foregroundStyle(e.type == "bull" ? AppTheme.up : AppTheme.down)
+                        Spacer()
+                        if let p = e.price {
+                            Text(Int(p).formatted())
+                                .font(.paperlogy(11))
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                    }
+                    .padding(.vertical, 1)
+                }
+            }
+        }
+        .padding(16)
+        .background(AppTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .task(id: code) {
+            let r: SignalHistoryResponse? = try? await APIClient.shared.get("/api/signals/history/\(code)")
+            events = r?.events ?? []
+            loaded = true
+        }
     }
 }
 

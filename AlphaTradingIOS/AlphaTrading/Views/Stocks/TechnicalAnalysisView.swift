@@ -60,6 +60,26 @@ struct TechnicalAnalysisView: View {
                 KPICard(title: "52주 저가", value: formatInt(quote?.w52Low), subtitle: w52Pos(analysis?.week52?.position))
             }
 
+            if let gc = analysis?.goldenCross {
+                ColoredKPICard(
+                    title: "골든크로스 50/200",
+                    value: gc.label,
+                    subtitle: String(format: "50일선 %@ · 200일선 %@",
+                                     Int(gc.ma50).formatted(.number.grouping(.automatic)),
+                                     Int(gc.ma200).formatted(.number.grouping(.automatic))),
+                    color: goldenCrossColor(gc)
+                )
+            }
+
+            if let dd = analysis?.drawdown {
+                ColoredKPICard(
+                    title: "인간지표 (고점 대비)",
+                    value: String(format: "%.1f%%", dd.pct),
+                    subtitle: dd.label,
+                    color: (dd.zone == "bottom" || dd.zone == "capitulation") ? AppTheme.up : AppTheme.textPrimary
+                )
+            }
+
             if let patterns = analysis?.patterns, !patterns.isEmpty {
                 Text("캔들 패턴")
                     .font(.paperlogy(15, weight: .semibold))
@@ -328,6 +348,40 @@ struct TechnicalAnalysisView: View {
     private var bbpValue: String {
         guard let v = analysis?.bullBearPower?.value else { return "-" }
         return String(format: "%.1f", v)
+    }
+
+    private func goldenCrossColor(_ gc: GoldenCrossData) -> Color {
+        if gc.recentCross == "golden" { return AppTheme.up }
+        if gc.recentCross == "dead" { return AppTheme.down }
+        return gc.state == "above" ? AppTheme.up : AppTheme.down
+    }
+}
+
+/// 강조 색상을 지정할 수 있는 KPI 카드 (골든크로스 · 인간지표 등)
+struct ColoredKPICard: View {
+    let title: String
+    let value: String
+    let subtitle: String?
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.paperlogy(11, weight: .medium))
+                .foregroundStyle(AppTheme.textSecondary)
+            Text(value)
+                .font(.paperlogy(16, weight: .bold))
+                .foregroundStyle(color)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.paperlogy(10))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(color.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 

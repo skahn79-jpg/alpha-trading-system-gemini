@@ -4,6 +4,8 @@ struct SectorBrowseView: View {
     @StateObject private var viewModel = SectorViewModel()
     @ObservedObject private var favorites = FavoritesStore.shared
     @State private var quoteCache: [String: Quote] = [:]
+    @State private var heatmap: SectorHeatmapResponse?
+    @State private var heatmapExpanded = true
 
     var body: some View {
         VStack(spacing: 12) {
@@ -20,12 +22,16 @@ struct SectorBrowseView: View {
             }
 
             if viewModel.selectedSector == nil {
+                heatmapSection
                 sectorList
             } else {
                 sectorStockList
             }
         }
         .background(AppTheme.background)
+        .task {
+            heatmap = try? await APIClient.shared.get("/api/sector/heatmap") as SectorHeatmapResponse
+        }
         .navigationTitle(viewModel.selectedSector?.name ?? "업종 검색")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -47,6 +53,68 @@ struct SectorBrowseView: View {
                 await viewModel.loadSectors()
             }
         }
+    }
+
+    @ViewBuilder
+    private var heatmapSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation { heatmapExpanded.toggle() }
+            } label: {
+                HStack {
+                    Image(systemName: "square.grid.3x3.fill")
+                        .foregroundStyle(AppTheme.accent)
+                    Text("섹터 히트맵")
+                        .font(.paperlogy(15, weight: .semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Spacer()
+                    Image(systemName: heatmapExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+            }
+
+            if heatmapExpanded {
+                if heatmap?.building == true {
+                    Text("집계 중 — 잠시 후 다시 확인해주세요.")
+                        .font(.paperlogy(12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                } else if let sectors = heatmap?.sectors, !sectors.isEmpty {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                        ForEach(sectors) { s in
+                            VStack(spacing: 3) {
+                                Text(s.sector)
+                                    .font(.paperlogy(11, weight: .semibold))
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
+                                Text(String(format: "%+.2f%%", s.changeRate))
+                                    .font(.paperlogy(12, weight: .bold))
+                                    .foregroundStyle(s.changeRate >= 0 ? AppTheme.up : AppTheme.down)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(heatColor(s.changeRate))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+                } else {
+                    Text("히트맵 데이터를 불러오는 중...")
+                        .font(.paperlogy(12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+            }
+        }
+        .padding(16)
+        .background(AppTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 16)
+    }
+
+    private func heatColor(_ rate: Double) -> Color {
+        let magnitude = min(abs(rate), 3) / 3 // 0~1
+        let opacity = 0.15 + magnitude * 0.35 // 0.15~0.5
+        return (rate >= 0 ? AppTheme.up : AppTheme.down).opacity(opacity)
     }
 
     private var sectorList: some View {
