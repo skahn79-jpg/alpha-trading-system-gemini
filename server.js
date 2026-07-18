@@ -3575,4 +3575,34 @@ app.listen(PORT, () => {
   setTimeout(() => {
     buildTradeReport().catch((e) => console.error("[trade-warmup]", e.message));
   }, 10 * 1000);
+
+  // ── AI 예측 모델 지속 자동 학습 ──
+  // 1) 부팅 시 과거 백테스트 재학습 (무료 호스팅 재시작으로 소실된 학습 복구)
+  // 2) 6시간마다: 최신 데이터 재학습 + 만기 예측 채점 + 새 예측 자동 생성
+  async function selfTrainPredictor() {
+    try {
+      const codes = KRX_MASTER_ALL.slice(0, 30).map((x) => x.code);
+      const trained = await aiPredictor.trainFromHistory(
+        codes,
+        (c, n) => fetchDailyCandles(c, n),
+        analyzeCandles,
+      );
+      console.log("[predict-train] history:", JSON.stringify(trained));
+      const matured = await aiPredictor.processMatured((c, n) => fetchDailyCandles(c, n), { maxPerRun: 20 });
+      if (matured.processed) console.log("[predict-train] matured:", matured.processed);
+      // 다음 채점 주기를 위한 새 예측 자동 축적 (사용자 요청 없이도 학습 재료 생성)
+      for (const code of codes.slice(0, 10)) {
+        try {
+          const candles = await fetchDailyCandles(code, 260);
+          const newest = [...candles].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+          const analysis = analyzeCandles(newest);
+          aiPredictor.predict(code, analysis, Number(newest[0]?.close));
+        } catch { /* 개별 실패 무시 */ }
+      }
+    } catch (e) {
+      console.error("[predict-train]", e.message);
+    }
+  }
+  setTimeout(selfTrainPredictor, 60 * 1000);
+  setInterval(selfTrainPredictor, 6 * 60 * 60 * 1000);
 });

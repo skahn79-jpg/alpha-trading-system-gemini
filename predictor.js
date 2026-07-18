@@ -307,6 +307,64 @@ async function processMatured(fetchCandles, { maxPerRun = 10 } = {}) {
   return { processed };
 }
 
+/**
+ * 과거 캔들 백테스트 학습 — 무료 호스팅은 재시작마다 디스크가 초기화되어
+ * 온라인 학습 기록이 소실되므로, 부팅 시 과거 데이터를 걸어가며
+ * "그날의 지표 → HORIZON_DAYS일 후 실제 등락" 샘플로 즉시 재학습한다.
+ * 이후 6시간 주기 재실행으로 최신 데이터가 계속 반영된다(지속 학습).
+ * fetchCandles(code, n) → 캔들 배열, analyzeFn(newestFirst) → analysis
+ */
+async function trainFromHistory(codes, fetchCandles, analyzeFn, opts = {}) {
+  const { step = 5, minHistory = 80, maxSamplesPerCode = 30 } = opts;
+  const model = loadModel();
+  // 장기 가동 중 같은 과거 데이터로 중복 재학습 방지 (재시작 시엔 기록이 없어 자동 재학습)
+  if (model.lastHistoryTrain && Date.now() - new Date(model.lastHistoryTrain.at).getTime() < 24 * 3600000) {
+    return { skipped: true, reason: "24시간 내 학습 완료", last: model.lastHistoryTrain };
+  }
+  let samples = 0;
+  let wins = 0;
+  for (const code of codes) {
+    try {
+      const raw = await fetchCandles(code, 300);
+      if (!Array.isArray(raw) || raw.length < minHistory + HORIZON_DAYS) continue;
+      const newestFirst = [...raw].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+      let count = 0;
+      for (let off = HORIZON_DAYS; off + minHistory < newestFirst.length && count < maxSamplesPerCode; off += step) {
+        const slice = newestFirst.slice(off); // 그 시점 기준 "최신" 캔들들
+        const close = Number(slice[0]?.close);
+        const future = Number(newestFirst[off - HORIZON_DAYS]?.close); // 약 HORIZON일 후 종가
+        if (!Number.isFinite(close) || !Number.isFinite(future) || close <= 0) continue;
+        const analysis = analyzeFn(slice);
+        if (!analysis || !Array.isArray(analysis.signals)) continue;
+        const features = buildFeatures(analysis, close);
+        const label = future > close ? 1 : 0;
+        const prob = predictProb(features, model.weights);
+        if ((prob >= 0.5) === (label === 1)) wins += 1;
+        const err = label - prob;
+        for (const [key, x] of Object.entries(features)) {
+          model.weights[key] = Number(((model.weights[key] ?? 0) + LEARNING_RATE * err * x).toFixed(4));
+        }
+        samples += 1;
+        count += 1;
+      }
+    } catch { /* 종목 단위 실패는 건너뜀 */ }
+  }
+  if (samples > 0) {
+    model.trained += samples;
+    model.wins += wins;
+    model.losses += samples - wins;
+    model.updatedAt = new Date().toISOString();
+    model.lastHistoryTrain = {
+      at: new Date().toISOString(),
+      samples,
+      hitRate: Math.round((wins / samples) * 1000) / 10,
+      codes: codes.length,
+    };
+    saveModel(model);
+  }
+  return { samples, hitRate: samples ? Math.round((wins / samples) * 1000) / 10 : null };
+}
+
 function getModelStats() {
   const model = loadModel();
   const preds = loadPredictions();
@@ -327,8 +385,9 @@ function getModelStats() {
     accuracy: resolved ? Math.round((model.wins / resolved) * 1000) / 10 : null,
     pendingPredictions: pending,
     recentResolved: recent,
+    lastHistoryTrain: model.lastHistoryTrain || null,
     updatedAt: model.updatedAt,
   };
 }
 
-module.exports = { predict, processMatured, getModelStats, buildFeatures };
+module.exports = { predict, processMatured, getModelStats, buildFeatures, trainFromHistory };
