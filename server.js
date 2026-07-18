@@ -30,6 +30,7 @@ const { volumeProfile, patternOutlook, buildCommentary } = require("./chartlab.j
 const cryptoReport = require("./crypto-report.js");
 const apns = require("./apns.js");
 const { buildLiqMap } = require("./liqmap.js");
+const evolver = require("./evolve.js");
 const { buildBtcCycle } = require("./btc-cycle.js");
 
 const app = express();
@@ -2916,6 +2917,27 @@ app.delete("/api/alerts/:id", (req, res) => {
   res.json({ ok: true, deleted: alerts.length - next.length, count: next.length });
 });
 
+// ── 자체 발굴 기법 (유전 알고리즘 진화) ──
+// GET /api/evolve/strategies — 현재 세대의 우수 발굴 기법 목록
+app.get("/api/evolve/strategies", (req, res) => {
+  res.json(evolver.getStrategies());
+});
+
+// GET /api/evolve/apply/:code — 이 종목에서 지금 발동 중인 발굴 기법
+app.get("/api/evolve/apply/:code", async (req, res) => {
+  try {
+    const code = String(req.params.code || "").trim();
+    if (!/^\d{6}$/.test(code)) return res.status(400).json({ ok: false, error: "잘못된 종목코드" });
+    const candles = await fetchDailyCandles(code, 260);
+    const newest = [...candles].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    const analysis = analyzeCandles(newest);
+    const close = Number(newest[0]?.close);
+    res.json({ code, ...evolver.applyToAnalysis(analysis, close) });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.message });
+  }
+});
+
 // ── 예상 청산 분포 (청산맵 추정) ──
 // GET /api/crypto/liqmap/:symbol — 현재가 위/아래 청산 밀집 구간 추정
 app.get("/api/crypto/liqmap/:symbol", async (req, res) => {
@@ -3605,4 +3627,18 @@ app.listen(PORT, () => {
   }
   setTimeout(selfTrainPredictor, 60 * 1000);
   setInterval(selfTrainPredictor, 6 * 60 * 60 * 1000);
+
+  // ── 자체 기법 발굴 진화 사이클 ──
+  // 부팅 3분 후 첫 진화, 이후 6시간마다 세대를 이어가며 발전
+  async function runEvolution() {
+    try {
+      const codes = KRX_MASTER_ALL.slice(0, 20).map((x) => x.code);
+      const r = await evolver.evolveCycle(codes, (c, n) => fetchDailyCandles(c, n), analyzeCandles);
+      console.log("[evolve]", JSON.stringify(r));
+    } catch (e) {
+      console.error("[evolve]", e.message);
+    }
+  }
+  setTimeout(runEvolution, 3 * 60 * 1000);
+  setInterval(runEvolution, 6 * 60 * 60 * 1000);
 });
