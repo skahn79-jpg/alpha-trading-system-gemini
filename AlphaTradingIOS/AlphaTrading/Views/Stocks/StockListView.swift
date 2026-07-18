@@ -40,6 +40,7 @@ struct StockDetailView: View {
                         )
                         if stock.kind == .kr {
                             SignalHistoryView(code: stock.code)
+                            EvolveStrategyCard(code: stock.code)
                         }
                     }
                 case .summary:
@@ -285,6 +286,164 @@ struct SignalHistoryView: View {
             let r: SignalHistoryResponse? = try? await APIClient.shared.get("/api/signals/history/\(code)")
             events = r?.events ?? []
             loaded = true
+        }
+    }
+}
+
+// MARK: - AI 자체 발굴 기법 (서버 유전 알고리즘이 진화시킨 매매 기법)
+
+struct EvolveStrategyItem: Decodable {
+    let name: String?
+    let desc: String?
+    let hitRate: Double?
+    let signals: Int?
+    let fitness: Double?
+}
+
+struct EvolveApplyResponse: Decodable {
+    let ok: Bool?
+    let code: String?
+    let fired: [EvolveStrategyItem]?
+    let total: Int?
+    let generation: Int?
+}
+
+struct EvolveStrategiesResponse: Decodable {
+    let ok: Bool?
+    let generation: Int?
+    let sampleCount: Int?
+    let horizon: String?
+    let strategies: [EvolveStrategyItem]?
+    let updatedAt: String?
+    let method: String?
+}
+
+struct EvolveStrategyCard: View {
+    let code: String
+    @State private var apply: EvolveApplyResponse?
+    @State private var catalog: EvolveStrategiesResponse?
+    @State private var loaded = false
+    @State private var showAll = false
+
+    private var generation: Int? { apply?.generation ?? catalog?.generation }
+    private var fired: [EvolveStrategyItem] { apply?.fired ?? [] }
+    private var strategies: [EvolveStrategyItem] { catalog?.strategies ?? [] }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("🧬 AI 자체 발굴 기법")
+                    .font(.paperlogy(15, weight: .semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                if let gen = generation {
+                    Text("\(gen)세대 진화")
+                        .font(.paperlogy(10, weight: .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(AppTheme.accent.opacity(0.15))
+                        .clipShape(Capsule())
+                }
+            }
+
+            if !loaded {
+                Text("발굴 기법을 불러오는 중...")
+                    .font(.paperlogy(12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            } else if apply == nil && catalog == nil {
+                Text("진화 준비 중 — 서버가 첫 세대를 학습하고 있습니다")
+                    .font(.paperlogy(12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            } else {
+                if fired.isEmpty {
+                    Text("현재 이 종목에서 발동 중인 발굴 기법 없음")
+                        .font(.paperlogy(12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                } else {
+                    ForEach(Array(fired.enumerated()), id: \.offset) { _, s in
+                        firedRow(s)
+                    }
+                }
+
+                if !strategies.isEmpty {
+                    DisclosureGroup(isExpanded: $showAll) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(strategies.enumerated()), id: \.offset) { _, s in
+                                listRow(s)
+                            }
+                        }
+                        .padding(.top, 6)
+                    } label: {
+                        Text("발굴된 기법 전체 보기")
+                            .font(.paperlogy(12, weight: .medium))
+                            .foregroundStyle(AppTheme.accent)
+                    }
+                    .tint(AppTheme.accent)
+                }
+
+                if let count = catalog?.sampleCount {
+                    Text("서버가 6시간마다 지표 조합을 생성·검증·교배하며 스스로 진화합니다 · 검증 표본 \(count)건 · 교육용 참고")
+                        .font(.paperlogy(10))
+                        .foregroundStyle(AppTheme.textSecondary)
+                } else {
+                    Text("서버가 6시간마다 지표 조합을 생성·검증·교배하며 스스로 진화합니다 · 교육용 참고")
+                        .font(.paperlogy(10))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+            }
+        }
+        .padding(16)
+        .background(AppTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .task(id: code) {
+            loaded = false
+            let applyTask = Task { () -> EvolveApplyResponse? in
+                try? await APIClient.shared.get("/api/evolve/apply/\(code)")
+            }
+            let catalogTask = Task { () -> EvolveStrategiesResponse? in
+                try? await APIClient.shared.get("/api/evolve/strategies")
+            }
+            apply = await applyTask.value
+            catalog = await catalogTask.value
+            loaded = true
+        }
+    }
+
+    private func firedRow(_ s: EvolveStrategyItem) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(s.name ?? "발굴 기법")
+                .font(.paperlogy(13, weight: .bold))
+                .foregroundStyle(AppTheme.textPrimary)
+            if let desc = s.desc, !desc.isEmpty {
+                Text(desc)
+                    .font(.paperlogy(11))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("과거 적중률 \(String(format: "%.1f", s.hitRate ?? 0))% · 신호 \(s.signals ?? 0)건 · 7일 기준")
+                .font(.paperlogy(11, weight: .medium))
+                .foregroundStyle(AppTheme.up)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.up.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func listRow(_ s: EvolveStrategyItem) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(s.name ?? "발굴 기법")
+                .font(.paperlogy(12, weight: .medium))
+                .foregroundStyle(AppTheme.textPrimary)
+                .lineLimit(1)
+            Spacer()
+            Text("적중률 \(String(format: "%.1f", s.hitRate ?? 0))%")
+                .font(.paperlogy(11))
+                .foregroundStyle((s.hitRate ?? 0) >= 50 ? AppTheme.up : AppTheme.textSecondary)
+            Text("신호 \(s.signals ?? 0)건")
+                .font(.paperlogy(11))
+                .foregroundStyle(AppTheme.textSecondary)
         }
     }
 }

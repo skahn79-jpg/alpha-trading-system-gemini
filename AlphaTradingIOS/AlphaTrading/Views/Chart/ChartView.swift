@@ -14,6 +14,10 @@ struct ChartView: View {
     // 학습 모드: 켜진 오버레이 집합 (비어 있으면 기존 차트와 동일)
     @State private var learnModes: Set<LearnMode> = []
 
+    // AI 예측 (kr 전용) — 예측 칩을 켤 때 1회 로드
+    @State private var prediction: PredictResponse?
+    @State private var predictionLoadFailed = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Picker("기간", selection: $period) {
@@ -110,7 +114,7 @@ struct ChartView: View {
         .chartYScale(domain: yDomain)
         // 카테고리 x축 순서를 명시적으로 고정 — 볼린저 음영이 캔들보다 먼저 그려지면
         // 등장 순서 기준으로 뒤쪽 날짜가 앞에 등록되어 주봉/월봉 차트가 뒤엉킴
-        .chartXScale(domain: displayCandles.map(\.date))
+        .chartXScale(domain: xDomain)
         .chartXAxis {
             AxisMarks(values: xAxisDates) { value in
                 AxisGridLine()
@@ -218,10 +222,29 @@ struct ChartView: View {
         return out.filter { visible.contains($0.date) }
     }
 
-    /// 캔들 저가~고가 + 볼린저밴드 범위를 모두 포함하는 y축 스케일
+    /// 카테고리 X축 도메인 — 예측 모드가 켜지면 합성 미래 카테고리("→1"...)를 뒤에 붙임
+    private var xDomain: [String] {
+        var dates = displayCandles.map(\.date)
+        if learnModes.contains(.predict), !forecastPoints.isEmpty {
+            dates += futureDates
+        }
+        return dates
+    }
+
+    /// 캔들 저가~고가 + 볼린저밴드 + (켜진 경우) 일목구름·예측 콘 범위를 모두 포함하는 y축 스케일
     private var yDomain: ClosedRange<Double> {
-        let lows = displayCandles.map { Double($0.low) } + bollingerSeries.map(\.lower)
-        let highs = displayCandles.map { Double($0.high) } + bollingerSeries.map(\.upper)
+        var lows = displayCandles.map { Double($0.low) } + bollingerSeries.map(\.lower)
+        var highs = displayCandles.map { Double($0.high) } + bollingerSeries.map(\.upper)
+        if learnModes.contains(.ichimoku) {
+            let cloud = ichimokuSeries
+            lows += cloud.map { min($0.spanA, $0.spanB) }
+            highs += cloud.map { max($0.spanA, $0.spanB) }
+        }
+        if learnModes.contains(.predict) {
+            let cone = forecastPoints
+            lows += cone.map(\.lower)
+            highs += cone.map(\.upper)
+        }
         guard let minLow = lows.min(), let maxHigh = highs.max(), minLow < maxHigh else {
             return 0...1
         }
@@ -251,6 +274,14 @@ struct ChartView: View {
         case wave = "N자 파동"
         case sr = "지지·저항"
         case trend = "추세선"
+        case fib = "피보나치"
+        case ichimoku = "일목구름"
+        case predict = "예측"
+    }
+
+    /// 예측 칩은 국내주식(kr)만 노출 — 서버 예측 API가 국내 종목 코드 기준
+    private var availableLearnModes: [LearnMode] {
+        LearnMode.allCases.filter { $0 != .predict || kind == .kr }
     }
 
     /// 지그재그 스윙 피벗 (종가 기준)
@@ -286,11 +317,17 @@ struct ChartView: View {
     // MARK: 학습 토글 칩
 
     private var learnChipRow: some View {
-        HStack(spacing: 8) {
-            ForEach(LearnMode.allCases, id: \.self) { mode in
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+            ForEach(availableLearnModes, id: \.self) { mode in
                 let isOn = learnModes.contains(mode)
                 Button {
-                    if isOn { learnModes.remove(mode) } else { learnModes.insert(mode) }
+                    if isOn {
+                        learnModes.remove(mode)
+                    } else {
+                        learnModes.insert(mode)
+                        if mode == .predict { loadPredictionIfNeeded() }
+                    }
                 } label: {
                     Text(mode.rawValue)
                         .font(.paperlogy(11, weight: .medium))
@@ -302,9 +339,9 @@ struct ChartView: View {
                 }
                 .buttonStyle(.plain)
             }
-            Spacer()
+            }
+            .padding(.horizontal, 12)
         }
-        .padding(.horizontal, 12)
     }
 
     // MARK: 차트 오버레이
@@ -314,6 +351,9 @@ struct ChartView: View {
         if learnModes.contains(.wave) { waveOverlay }
         if learnModes.contains(.sr) { srOverlay }
         if learnModes.contains(.trend) { trendOverlay }
+        if learnModes.contains(.fib) { fibOverlay }
+        if learnModes.contains(.ichimoku) { ichimokuOverlay }
+        if learnModes.contains(.predict) { predictOverlay }
     }
 
     @ChartContentBuilder
@@ -366,6 +406,246 @@ struct ChartView: View {
                 LineMark(x: .value("Date", p.date), y: .value("Trend", p.value), series: .value("Learn", "Trend"))
                     .foregroundStyle(line.rising ? AppTheme.up : AppTheme.down)
                     .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [6, 3]))
+            }
+        }
+    }
+
+    @ChartContentBuilder
+    private var fibOverlay: some ChartContent {
+        ForEach(fibLevels) { level in
+            RuleMark(y: .value("Fib", level.price))
+                .foregroundStyle(Color.orange.opacity(0.7))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                .annotation(position: .top, alignment: .trailing, spacing: 1) {
+                    Text("\(level.ratioText) · \(Self.priceLabel(level.price))")
+                        .font(.paperlogy(8))
+                        .foregroundStyle(Color.orange)
+                }
+        }
+    }
+
+    @ChartContentBuilder
+    private var ichimokuOverlay: some ChartContent {
+        // 구름: 스팬A≥B 양운(up), 반대 음운(down) — 색이 바뀌는 지점마다 별도 세그먼트로 분리
+        ForEach(cloudSegments) { segment in
+            ForEach(segment.points, id: \.date) { p in
+                AreaMark(
+                    x: .value("Date", p.date),
+                    yStart: .value("CloudLow", min(p.spanA, p.spanB)),
+                    yEnd: .value("CloudHigh", max(p.spanA, p.spanB)),
+                    series: .value("Learn", "Cloud\(segment.id)")
+                )
+                .foregroundStyle((segment.bullish ? AppTheme.up : AppTheme.down).opacity(0.15))
+            }
+        }
+        ForEach(ichimokuSeries, id: \.date) { p in
+            LineMark(x: .value("Date", p.date), y: .value("Tenkan", p.tenkan), series: .value("Learn", "Tenkan"))
+                .foregroundStyle(Color.cyan)
+                .lineStyle(StrokeStyle(lineWidth: 1))
+        }
+        ForEach(ichimokuSeries, id: \.date) { p in
+            LineMark(x: .value("Date", p.date), y: .value("Kijun", p.kijun), series: .value("Learn", "Kijun"))
+                .foregroundStyle(Color.orange)
+                .lineStyle(StrokeStyle(lineWidth: 1.2))
+        }
+    }
+
+    @ChartContentBuilder
+    private var predictOverlay: some ChartContent {
+        // 불확실성 콘: 중심 ± ATR% × √일차
+        ForEach(forecastPoints) { p in
+            AreaMark(
+                x: .value("Date", p.date),
+                yStart: .value("ConeLow", p.lower),
+                yEnd: .value("ConeHigh", p.upper),
+                series: .value("Learn", "Cone")
+            )
+            .foregroundStyle(Color.gray.opacity(0.12))
+        }
+        // 중심 경로: 마지막 종가에서 확률 편향 드리프트 누적
+        ForEach(forecastPoints) { p in
+            LineMark(x: .value("Date", p.date), y: .value("Forecast", p.center), series: .value("Learn", "Forecast"))
+                .foregroundStyle(AppTheme.accent)
+                .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+        }
+        if forecastPoints.count > 1, let end = forecastPoints.last, let probUp = prediction?.probUp {
+            PointMark(x: .value("Date", end.date), y: .value("ForecastEnd", end.center))
+                .foregroundStyle(AppTheme.accent)
+                .symbolSize(22)
+                .annotation(position: .top, spacing: 2) {
+                    Text(probUp >= 50
+                         ? "AI 상승 \(Int(probUp.rounded()))%"
+                         : "AI 하락 \(Int((prediction?.probDown ?? (100 - probUp)).rounded()))%")
+                        .font(.paperlogy(9, weight: .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+        }
+    }
+
+    // MARK: 피보나치 계산
+
+    struct FibLevel: Identifiable {
+        let ratio: Double
+        let price: Double
+        var id: Double { ratio }
+        var ratioText: String { String(ratio) }
+    }
+
+    /// 표시 구간 최고가~최저가 기준 되돌림 레벨 (ratio 오름차순 = 가격 내림차순)
+    private var fibLevels: [FibLevel] {
+        let candles = displayCandles
+        guard let hi = candles.map(\.high).max(), let lo = candles.map(\.low).min(), hi > lo else { return [] }
+        return [0.236, 0.382, 0.5, 0.618, 0.786].map { FibLevel(ratio: $0, price: hi - (hi - lo) * $0) }
+    }
+
+    // MARK: 일목구름 계산
+
+    struct IchimokuPoint {
+        let date: String
+        let tenkan: Double
+        let kijun: Double
+        let spanA: Double
+        let spanB: Double
+    }
+
+    struct CloudSegment: Identifiable {
+        let id: Int
+        let bullish: Bool
+        let points: [IchimokuPoint]
+    }
+
+    /// 전체 캔들로 전환선(9)/기준선(26)/선행스팬A/B 계산 후 표시 구간만 반환
+    /// (학습용 단순화 — 스팬의 26봉 선행 이동은 생략)
+    private var ichimokuSeries: [IchimokuPoint] {
+        let candles = viewModel.candles
+        guard candles.count >= 52 else { return [] }
+        var out: [IchimokuPoint] = []
+        for i in 51..<candles.count {
+            func mid(_ n: Int) -> Double {
+                let window = candles[(i - n + 1)...i]
+                let high = window.map(\.high).max() ?? 0
+                let low = window.map(\.low).min() ?? 0
+                return (high + low) / 2
+            }
+            let tenkan = mid(9)
+            let kijun = mid(26)
+            out.append(IchimokuPoint(
+                date: candles[i].date,
+                tenkan: tenkan,
+                kijun: kijun,
+                spanA: (tenkan + kijun) / 2,
+                spanB: mid(52)
+            ))
+        }
+        let visible = displayDateSet
+        return out.filter { visible.contains($0.date) }
+    }
+
+    /// 양운/음운이 바뀌는 지점에서 구름을 세그먼트로 분리 (한 AreaMark 시리즈로 이으면 교차 구간이 뒤엉킴)
+    private var cloudSegments: [CloudSegment] {
+        var segments: [CloudSegment] = []
+        var current: [IchimokuPoint] = []
+        var bullish = true
+        for p in ichimokuSeries {
+            let b = p.spanA >= p.spanB
+            if current.isEmpty {
+                bullish = b
+                current = [p]
+            } else if b == bullish {
+                current.append(p)
+            } else {
+                segments.append(CloudSegment(id: segments.count, bullish: bullish, points: current))
+                current = [p]
+                bullish = b
+            }
+        }
+        if !current.isEmpty {
+            segments.append(CloudSegment(id: segments.count, bullish: bullish, points: current))
+        }
+        return segments
+    }
+
+    // MARK: AI 예측 계산
+
+    struct PredictResponse: Decodable {
+        struct Factor: Decodable {
+            let key: String?
+            let label: String?
+            let impact: Double?
+        }
+        struct ModelInfo: Decodable {
+            let trained: Int?
+            let accuracy: Double?
+            let resolved: Int?
+        }
+        let code: String?
+        let probUp: Double?      // 퍼센트 단위 (예: 70.5)
+        let probDown: Double?
+        let direction: String?
+        let confidence: String?
+        let horizonDays: Int?
+        let topFactors: [Factor]?
+        let model: ModelInfo?
+    }
+
+    struct ForecastPoint: Identifiable {
+        let date: String
+        let center: Double
+        let lower: Double
+        let upper: Double
+        var id: String { date }
+    }
+
+    /// 표시 구간 최근 14봉 TR 평균 / 마지막 종가 (ATR%)
+    private var atrPct: Double {
+        let candles = displayCandles
+        guard candles.count >= 2, let last = candles.last, last.close > 0 else { return 0 }
+        let window = Array(candles.suffix(15))
+        var trs: [Double] = []
+        for i in 1..<window.count {
+            let prevClose = window[i - 1].close
+            let c = window[i]
+            trs.append(max(c.high - c.low, abs(c.high - prevClose), abs(c.low - prevClose)))
+        }
+        guard !trs.isEmpty else { return 0 }
+        return (trs.reduce(0, +) / Double(trs.count)) / last.close
+    }
+
+    private var predictionDays: Int {
+        min(max(prediction?.horizonDays ?? 7, 1), 7)
+    }
+
+    private var futureDates: [String] {
+        (1...predictionDays).map { "→\($0)" }
+    }
+
+    /// 미래 투영 — 첫 점은 마지막 실제 캔들(연속성), 이후 일별 확률 드리프트 누적 + √t 불확실성 콘
+    private var forecastPoints: [ForecastPoint] {
+        guard kind == .kr,
+              learnModes.contains(.predict),
+              let probUp = prediction?.probUp,
+              let last = displayCandles.last, last.close > 0 else { return [] }
+        let atr = atrPct
+        guard atr > 0 else { return [] }
+        let dailyDrift = (probUp / 100 - 0.5) * 2 * atr
+        var out = [ForecastPoint(date: last.date, center: last.close, lower: last.close, upper: last.close)]
+        for d in 1...predictionDays {
+            let center = last.close * (1 + dailyDrift * Double(d))
+            let band = last.close * atr * Double(d).squareRoot()
+            out.append(ForecastPoint(date: "→\(d)", center: center, lower: center - band, upper: center + band))
+        }
+        return out
+    }
+
+    private func loadPredictionIfNeeded() {
+        guard kind == .kr, prediction == nil else { return }
+        predictionLoadFailed = false
+        Task {
+            do {
+                let p: PredictResponse = try await APIClient.shared.get("/api/predict/\(code)")
+                await MainActor.run { prediction = p }
+            } catch {
+                await MainActor.run { predictionLoadFailed = true }
             }
         }
     }
@@ -535,6 +815,16 @@ struct ChartView: View {
             if learnModes.contains(.trend) {
                 learnRow(title: "추세선", text: trendExplanation)
             }
+            if learnModes.contains(.fib) {
+                learnRow(title: "피보나치 되돌림", text: fibExplanation)
+            }
+            if learnModes.contains(.ichimoku) {
+                learnRow(title: "일목구름", text: ichimokuExplanation)
+            }
+            if learnModes.contains(.predict) {
+                learnRow(title: "AI 예측", text: predictExplanation)
+                learnRow(title: "AI 학습 현황", text: predictModelStatus)
+            }
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.04)))
@@ -598,6 +888,84 @@ struct ChartView: View {
             return "최근 피벗 저점 2개를 이은 상승 추세선(구간 기울기 약 \(String(format: "%+.1f", changePct))%)입니다. 가격이 이 선 위에서 유지되면 상승 추세, 종가로 이탈하면 추세 훼손 신호로 학습합니다."
         }
         return "최근 피벗 고점 2개를 이은 하락 추세선(구간 기울기 약 \(String(format: "%+.1f", changePct))%)입니다. 가격이 이 선 아래에 머물면 하락 추세, 돌파하면 추세 전환 가능성으로 학습합니다."
+    }
+
+    private var fibExplanation: String {
+        let levels = fibLevels
+        guard levels.count == 5, let last = displayCandles.last,
+              let hi = displayCandles.map(\.high).max(),
+              let lo = displayCandles.map(\.low).min() else {
+            return "되돌림 레벨을 계산할 데이터가 부족합니다. 고점에서 저점까지의 하락(또는 반대) 폭을 0.236~0.786 비율로 나눈 선이 피보나치 되돌림입니다."
+        }
+        let close = last.close
+        let closeLabel = Self.priceLabel(close)
+        let position: String
+        if close >= levels[0].price {
+            position = "현재가 \(closeLabel)는 0.236 레벨(\(Self.priceLabel(levels[0].price))) 위 — 되돌림이 얕아 기존 추세가 강하게 유지되는 구간으로 학습합니다."
+        } else if close < levels[4].price {
+            position = "현재가 \(closeLabel)는 0.786 레벨(\(Self.priceLabel(levels[4].price))) 아래 — 되돌림이 깊어 추세 반전 가능성까지 열어두고 학습하는 구간입니다."
+        } else {
+            var upper = levels[0]
+            var lower = levels[1]
+            for i in 0..<4 where close < levels[i].price && close >= levels[i + 1].price {
+                upper = levels[i]
+                lower = levels[i + 1]
+            }
+            position = "현재가 \(closeLabel)는 \(lower.ratioText) 레벨(\(Self.priceLabel(lower.price)))과 \(upper.ratioText) 레벨(\(Self.priceLabel(upper.price))) 사이에 있습니다."
+        }
+        return "표시 구간 최고가 \(Self.priceLabel(hi)) ~ 최저가 \(Self.priceLabel(lo)) 기준 피보나치 되돌림입니다. \(position) 0.382·0.5·0.618 부근은 눌림목 매수 후보로 자주 학습하는 자리입니다."
+    }
+
+    private var ichimokuExplanation: String {
+        guard let cloud = ichimokuSeries.last, let last = displayCandles.last else {
+            return "일목구름을 계산하려면 최소 52봉이 필요합니다. (주봉·월봉은 제공 데이터가 짧아 표시되지 않을 수 있습니다)"
+        }
+        let top = max(cloud.spanA, cloud.spanB)
+        let bottom = min(cloud.spanA, cloud.spanB)
+        let close = last.close
+        let cloudType = cloud.spanA >= cloud.spanB ? "양운(스팬A ≥ 스팬B)" : "음운(스팬A < 스팬B)"
+        let position: String
+        if close > top {
+            position = "구름 위(상단 \(Self.priceLabel(top)))에 있어 상승 우위 — 구름 상단이 지지로 작동하는지 관찰하며 학습합니다."
+        } else if close < bottom {
+            position = "구름 아래(하단 \(Self.priceLabel(bottom)))에 있어 하락 우위 — 구름 하단이 저항으로 작동하는지 관찰하며 학습합니다."
+        } else {
+            position = "구름 내부(\(Self.priceLabel(bottom))~\(Self.priceLabel(top)))에 있어 방향성 탐색 구간 — 구름 돌파 방향을 기다리며 학습합니다."
+        }
+        return "전환선(9)·기준선(26)과 선행스팬 A·B가 만든 구름입니다. 현재 \(cloudType)이며, 현재가 \(Self.priceLabel(close))는 \(position) ※ 학습용 단순화로 스팬의 26봉 선행 이동은 생략했습니다."
+    }
+
+    private var predictExplanation: String {
+        if predictionLoadFailed {
+            return "예측 데이터를 불러오지 못했습니다. 예측 칩을 껐다 켜면 다시 시도합니다."
+        }
+        guard let p = prediction, let probUp = p.probUp else {
+            return "AI 예측을 불러오는 중입니다..."
+        }
+        let probDown = p.probDown ?? (100 - probUp)
+        let days = predictionDays
+        let confidenceText: String
+        switch p.confidence?.lowercased() {
+        case "high": confidenceText = "높음"
+        case "medium", "mid": confidenceText = "중간"
+        case "low": confidenceText = "낮음"
+        default: confidenceText = p.confidence ?? "-"
+        }
+        let directionText = probUp >= 50
+            ? "상승 확률 \(String(format: "%.1f", probUp))%"
+            : "하락 확률 \(String(format: "%.1f", probDown))%"
+        var text = "AI 모델이 \(days)일 뒤 \(directionText)로 봅니다 (신뢰도 \(confidenceText)). 점선은 확률 편향을 일별 누적한 중심 경로, 회색 영역은 변동성(ATR) 기반 불확실성 콘 — 멀어질수록 예측 범위가 넓어집니다."
+        if let factor = p.topFactors?.first, let label = factor.label {
+            text += " 판단에 가장 큰 영향을 준 요인은 '\(label)'입니다."
+        }
+        return text
+    }
+
+    private var predictModelStatus: String {
+        guard let model = prediction?.model, let trained = model.trained, trained > 0, let accuracy = model.accuracy else {
+            return "학습 준비 중"
+        }
+        return "모델 누적 학습 \(trained)회 · 백테스트 적중률 \(String(format: "%.1f", accuracy))% — 6시간마다 자동 재학습하며 발전합니다."
     }
 
     /// 55000 → "55,000", 3.1478 → "3.15"
