@@ -31,6 +31,7 @@ const cryptoReport = require("./crypto-report.js");
 const apns = require("./apns.js");
 const { buildLiqMap } = require("./liqmap.js");
 const evolver = require("./evolve.js");
+const dartFund = require("./dart-fund.js");
 const { buildBtcCycle } = require("./btc-cycle.js");
 
 const app = express();
@@ -691,6 +692,125 @@ app.get("/api/sector/heatmap", (req, res) => {
   if (stale && !sectorHeatCache.building) buildSectorHeatmap();
   if (sectorHeatCache.data) return res.json({ ...sectorHeatCache.data, refreshing: stale });
   res.json({ ok: true, building: true, sectors: [], message: "업종 등락 집계 중 — 잠시 후 다시 요청하세요." });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 유망 업종 트렌드 — 기간별(1주/1개월/3개월) 수익률 + 수출 실적 연계 TOP5
+// GET /api/sector/trends
+// ═══════════════════════════════════════════════════════════════
+const sectorTrendCache = { at: 0, data: null, building: false };
+const SECTOR_TREND_TTL_MS = 60 * 60 * 1000;
+
+async function buildSectorTrends() {
+  if (sectorTrendCache.building) return;
+  sectorTrendCache.building = true;
+  try {
+    const bySector = new Map();
+    for (const x of KRX_MASTER_DB) {
+      if (!x.sector || x.sector === "ETF·분류") continue;
+      if (!bySector.has(x.sector)) bySector.set(x.sector, []);
+      const arr = bySector.get(x.sector);
+      if (arr.length < 2) arr.push(x);
+    }
+
+    // 수출 실적 연계: 리포트 캐시의 품목별 YoY를 업종에 매핑
+    let exportBoost = new Map();
+    try {
+      const report = await buildTradeReport();
+      for (const hint of report.sectorHints || []) {
+        const cat = (report.categories || []).find((c) => String(c.name).includes(hint.category.slice(0, 3)));
+        if (cat && cat.exportsYoY !== null && cat.exportsYoY > 5) {
+          exportBoost.set(hint.sector, { category: cat.name, yoy: cat.exportsYoY });
+        }
+      }
+    } catch { /* 수출 데이터 없으면 생략 */ }
+
+    const rows = [];
+    for (const [sector, stocks] of bySector) {
+      const rets = { w1: [], m1: [], m3: [] };
+      for (const s of stocks) {
+        try {
+          const candles = await fetchDailyCandles(s.code, 70);
+          const newest = [...candles].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+          const close = Number(newest[0]?.close);
+          const at = (n) => Number(newest[Math.min(n, newest.length - 1)]?.close);
+          if (!close) continue;
+          if (at(5)) rets.w1.push((close / at(5) - 1) * 100);
+          if (at(21)) rets.m1.push((close / at(21) - 1) * 100);
+          if (at(63)) rets.m3.push((close / at(63) - 1) * 100);
+        } catch { /* 개별 실패 무시 */ }
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      const avg = (a) => (a.length ? Math.round((a.reduce((x, y) => x + y, 0) / a.length) * 10) / 10 : null);
+      const row = {
+        sector,
+        ret1w: avg(rets.w1),
+        ret1m: avg(rets.m1),
+        ret3m: avg(rets.m3),
+        leaders: stocks.map((s) => ({ code: s.code, name: s.name })),
+      };
+      const boost = exportBoost.get(sector);
+      if (boost) row.exportNote = `수출 ${boost.category} +${boost.yoy}%`;
+      rows.push(row);
+    }
+
+    // 순위 점수: 1개월 50% + 1주 30% + 3개월 20% + 수출 보너스
+    const score = (r) => (r.ret1m ?? 0) * 0.5 + (r.ret1w ?? 0) * 0.3 + (r.ret3m ?? 0) * 0.2 + (r.exportNote ? 1.5 : 0);
+    rows.sort((a, b) => score(b) - score(a));
+    const top = rows.slice(0, 5).map((r, i) => ({
+      rank: i + 1,
+      ...r,
+      reason: [
+        r.ret1m !== null ? `1개월 ${r.ret1m > 0 ? "+" : ""}${r.ret1m}%` : null,
+        r.ret1w !== null ? `1주 ${r.ret1w > 0 ? "+" : ""}${r.ret1w}%` : null,
+        r.exportNote || null,
+      ].filter(Boolean).join(" · "),
+    }));
+
+    sectorTrendCache.data = {
+      ok: true,
+      updatedAt: new Date().toISOString(),
+      top,
+      all: rows,
+      note: "업종 대표 종목 기준 기간별 평균 수익률 — 수출 호조 업종은 보너스 반영 (참고용)",
+    };
+    sectorTrendCache.at = Date.now();
+  } catch (e) {
+    console.error("[sector/trends]", e.message);
+  } finally {
+    sectorTrendCache.building = false;
+  }
+}
+
+app.get("/api/sector/trends", (req, res) => {
+  const stale = Date.now() - sectorTrendCache.at > SECTOR_TREND_TTL_MS;
+  if (stale && !sectorTrendCache.building) buildSectorTrends();
+  if (sectorTrendCache.data) return res.json({ ...sectorTrendCache.data, refreshing: stale });
+  res.json({ ok: true, building: true, top: [], all: [], message: "업종 트렌드 집계 중 — 1~2분 후 다시 요청하세요." });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 실적(매출·영업이익) — 3개년/분기 실적 + 실적 점수 + 관심종목 실적 알림
+// ═══════════════════════════════════════════════════════════════
+app.get("/api/fundamentals/:code", async (req, res) => {
+  try {
+    const code = String(req.params.code || "").trim();
+    if (!/^\d{6}$/.test(code)) return res.status(400).json({ ok: false, error: "잘못된 종목코드" });
+    const data = await dartFund.getFundamentals(code);
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.message });
+  }
+});
+
+// 앱이 관심종목을 등록하면 서버가 실적 공시를 감시해 푸시로 알림
+app.post("/api/watchlist", (req, res) => {
+  const codes = Array.isArray(req.body?.codes) ? req.body.codes : [];
+  res.json({ ok: true, ...dartFund.registerWatchlist(codes) });
+});
+
+app.get("/api/watchlist", (req, res) => {
+  res.json({ ok: true, codes: dartFund.getWatchlist() });
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -3641,4 +3761,16 @@ app.listen(PORT, () => {
   }
   setTimeout(runEvolution, 3 * 60 * 1000);
   setInterval(runEvolution, 6 * 60 * 60 * 1000);
+
+  // ── 관심종목 실적 공시 감시 (분기·반기·사업보고서 → 푸시) ──
+  async function scanEarningsLoop() {
+    try {
+      const r = await dartFund.scanEarnings((title, body) => apns.sendPushToAll({ title, body }));
+      if (r.found) console.log("[earnings]", JSON.stringify(r));
+    } catch (e) {
+      console.error("[earnings]", e.message);
+    }
+  }
+  setTimeout(scanEarningsLoop, 5 * 60 * 1000);
+  setInterval(scanEarningsLoop, 12 * 60 * 60 * 1000);
 });

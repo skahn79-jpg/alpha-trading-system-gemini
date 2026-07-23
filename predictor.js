@@ -238,12 +238,36 @@ function predict(code, analysis, close) {
   }
 
   const resolved = model.wins + model.losses;
+
+  // 점수(현재 기술 상태)와 예측(7일 후 통계)이 반대로 보일 때의 해설 + 결합 판정
+  // 모델은 백테스트에서 평균 회귀(과열→되돌림, 과매도→반등)를 학습하므로
+  // 고점수+하락예측 / 저점수+상승예측은 모순이 아니라 통계적 판단임
+  const score = Number(analysis?.score);
+  const pu = Math.round(probUp * 1000) / 10;
+  let context = null;
+  let combined = null;
+  if (Number.isFinite(score)) {
+    if (score <= 45 && probUp >= 0.62) {
+      context = "기술 점수는 낮은 약세·과매도 국면이지만, 과거 통계상 이런 구간에서 7일 내 반등 확률이 높았습니다.";
+      combined = { badge: "반등 매수 후보", tone: "up", note: `약세 국면 + AI 상승 ${pu}%` };
+    } else if (score >= 75 && probUp <= 0.42) {
+      context = "기술 점수는 높은 강세·과열 국면이지만, 과거 통계상 단기 되돌림(차익실현) 확률이 높았습니다.";
+      combined = { badge: "과열 조정 주의", tone: "down", note: `강세 국면 + AI 하락 ${Math.round((1 - probUp) * 1000) / 10}%` };
+    } else if (score >= 65 && probUp >= 0.58) {
+      combined = { badge: "추세 지속 매수", tone: "up", note: `강세 국면 + AI 상승 ${pu}%` };
+    } else if (score <= 45 && probUp <= 0.42) {
+      combined = { badge: "약세 지속 주의", tone: "down", note: `약세 국면 + AI 하락 ${Math.round((1 - probUp) * 1000) / 10}%` };
+    }
+  }
+
   return {
-    probUp: Math.round(probUp * 1000) / 10,
+    probUp: pu,
     probDown: Math.round((1 - probUp) * 1000) / 10,
     direction: probUp >= 0.5 ? "UP" : "DOWN",
     confidence: Math.abs(probUp - 0.5) >= 0.2 ? "high" : Math.abs(probUp - 0.5) >= 0.1 ? "medium" : "low",
     horizonDays: HORIZON_DAYS,
+    context,
+    combined,
     topFactors: contributions,
     model: {
       trained: model.trained,
