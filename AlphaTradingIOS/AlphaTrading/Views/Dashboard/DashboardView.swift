@@ -7,6 +7,7 @@ struct DashboardView: View {
     @State private var axiosNews: AxiosNewsResponse?
     @State private var trumpNews: TrumpNewsResponse?
     @State private var fx: FxResponse?
+    @State private var sectorTrends: SectorTrendsResponse?
     // 환율 실시간 갱신 (30초)
     private let fxTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
@@ -36,6 +37,7 @@ struct DashboardView: View {
                     fxSection
                     tradeSummarySection
                     featuredSection
+                    sectorTrendsSection
                     axiosNewsSection
                     trumpNewsSection
                 }
@@ -62,12 +64,14 @@ struct DashboardView: View {
         async let newsTask = try? APIClient.shared.get("/api/news/axios") as AxiosNewsResponse
         async let trumpTask = try? APIClient.shared.get("/api/news/trump") as TrumpNewsResponse
         async let fxTask = try? APIClient.shared.get("/api/fx") as FxResponse
+        async let sectorTask = try? APIClient.shared.get("/api/sector/trends") as SectorTrendsResponse
         _ = await indexTask
         tradeReport = await tradeTask
         featured = await featuredTask
         axiosNews = await newsTask
         trumpNews = await trumpTask
         fx = await fxTask
+        sectorTrends = await sectorTask
     }
 
     // MARK: - 실시간 환율
@@ -339,4 +343,82 @@ struct DashboardView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
     }
+
+    // MARK: - 유망 업종 TOP5
+
+    @ViewBuilder
+    private var sectorTrendsSection: some View {
+        if let trends = sectorTrends {
+            let top = trends.top ?? []
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("🔥 유망 업종 TOP5")
+                        .font(.paperlogy(16, weight: .semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Spacer()
+                }
+                if (trends.building ?? false) || top.isEmpty {
+                    Text("집계 중")
+                        .font(.paperlogy(12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                } else {
+                    ForEach(top.prefix(5), id: \.rank) { item in
+                        HStack(alignment: .top, spacing: 10) {
+                            Text("\(item.rank)")
+                                .font(.paperlogy(13, weight: .bold))
+                                .foregroundStyle(AppTheme.accent)
+                                .frame(width: 20, alignment: .center)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.sector)
+                                    .font(.paperlogy(14, weight: .semibold))
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                if let reason = item.reason, !reason.isEmpty {
+                                    Text(reason)
+                                        .font(.paperlogy(10))
+                                        .foregroundStyle(AppTheme.textSecondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                            Spacer()
+                            if let ret1m = item.ret1m {
+                                // 국내 관례: 상승 빨강(up), 하락 파랑(down)
+                                Text(String(format: "%+.1f%%", ret1m))
+                                    .font(.paperlogy(13, weight: .bold))
+                                    .foregroundStyle(ret1m >= 0 ? AppTheme.up : AppTheme.down)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+            .padding(16)
+            .background(AppTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+    }
+}
+
+// MARK: - 유망 업종 응답 모델
+
+struct SectorTrendsResponse: Decodable {
+    let ok: Bool?
+    let top: [SectorTrend]?
+    let note: String?
+    let building: Bool?
+}
+
+struct SectorTrend: Decodable {
+    let rank: Int
+    let sector: String
+    let ret1w: Double?
+    let ret1m: Double?
+    let ret3m: Double?
+    let reason: String?
+    let exportNote: String?
+    let leaders: [SectorLeader]?
+}
+
+struct SectorLeader: Decodable {
+    let code: String
+    let name: String
 }

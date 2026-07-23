@@ -158,25 +158,28 @@ async function getFundamentals(code) {
     }
   }
 
-  // 최근 4분기: (연도, 보고서코드, 라벨) 후보를 최신부터 시도
+  // 최근 분기들: 분기·반기 보고서만 사용 — 연간(11011)은 누적치라 분기로 오인됨
   const qDefs = [
-    ["11013", "1Q"], ["11012", "2Q"], ["11014", "3Q"], ["11011", "4Q"],
+    ["11013", "1Q"], ["11012", "2Q"], ["11014", "3Q"],
   ];
   const candidates = [];
-  for (const y of [nowY, nowY - 1]) {
+  for (const y of [nowY - 1, nowY]) {
     for (const [code_, label] of qDefs) candidates.push({ y, code: code_, label: `${String(y).slice(2)}년${label}` });
   }
+  const latestAnnualRev = years.length ? years[years.length - 1].revenue : null;
   const quarters = [];
-  for (const c of candidates.reverse()) { // 과거→최신 순 시도
+  for (const c of candidates) { // 과거→최신 순
     const rows = await fetchFnltt(entry.corp, c.y, c.code);
     if (!rows.length) continue;
     const rev = pickAccount(rows, REV_NAMES);
     const op = pickAccount(rows, OP_NAMES);
     // 분기·반기 보고서의 thstrm_amount는 해당 3개월 실적 (누적은 thstrm_add_amount)
-    const r = toNum(rev?.thstrm_amount);
-    const o = toNum(op?.thstrm_amount);
+    const r = toEok(toNum(rev?.thstrm_amount));
+    const o = toEok(toNum(op?.thstrm_amount));
     if (r === null && o === null) continue;
-    quarters.push({ label: c.label, revenue: toEok(r), op: toEok(o) });
+    // 누적치가 섞인 응답 방어: 분기 매출이 연매출의 60%를 넘으면 배제
+    if (latestAnnualRev && r !== null && r > latestAnnualRev * 0.6) continue;
+    quarters.push({ label: c.label, revenue: r, op: o });
   }
   const recentQ = quarters.slice(-4);
 
