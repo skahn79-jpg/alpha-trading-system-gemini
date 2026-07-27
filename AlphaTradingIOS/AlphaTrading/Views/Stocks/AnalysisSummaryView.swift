@@ -168,7 +168,9 @@ struct FundamentalsCard: View {
             if let data, hasContent {
                 content(data)
             } else {
-                EmptyView()
+                // EmptyView에는 .task가 붙지 않아 요청 자체가 실행되지 않음 —
+                // 높이 0의 실제 뷰를 두어 로딩 태스크가 항상 시작되게 함
+                Color.clear.frame(height: 0)
             }
         }
         .task {
