@@ -9281,7 +9281,7 @@ function LeftPanel({ stocks, quotes, selectedCode, setSelectedCode, reload, load
   };
 
   const submitAdd = async () => {
-    const resolved = newStock.code.length === 6
+    let resolved = newStock.code.length === 6
       ? { code: newStock.code, name: newStock.name || newStock.code, tag: newStock.tag || "사용자추가", sector: newStock.tag || "사용자추가" }
       : resolveStockInput(newStock.query || newStock.name, stocks);
 
