@@ -9,6 +9,9 @@ struct AIPrediction: Decodable {
     let confidence: String
     let horizonDays: Int?
     let topFactors: [PredictionFactor]?
+    let technicalScore: Double?
+    let technicalGrade: String?
+    let conflictNote: String?
     let model: PredictionModelInfo?
 
     var confidenceLabel: String {

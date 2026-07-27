@@ -9421,8 +9421,17 @@ function Dashboard({ market, selected, stocks }) {
   );
 }
 
-function buildAnalysisPrompt(selected, stocks, followup, lastResult) {
+function buildAnalysisPrompt(selected, stocks, followup, lastResult, chartContext) {
   const name = selected?.assetClass === "global" ? (selected?.name || selected?.symbol || selected?.code) : getStockName(selected?.code, selected?.name, stocks);
+  const { activeTechnique, gogoSignal, psych } = chartContext || {};
+  const chartScoreBlock = activeTechnique
+    ? `
+[현재 화면에 표시 중인 차트 분석 점수 — 반드시 참고]
+선택 기법: ${activeTechnique.name} · 점수 ${activeTechnique.score}점 · 등급 ${activeTechnique.grade} · 권장 액션 ${activeTechnique.action || "-"}
+고고저 판정: ${gogoSignal?.status === "OK" ? `${gogoSignal.grade} (점수 ${gogoSignal.score}점, 돌파율 ${gogoSignal.breakoutRate}%, 저점구조 ${gogoSignal.lowStructure})` : gogoSignal?.message || "-"}
+시장 심리: ${psych?.phase || "-"} (공포·탐욕 ${psych?.fearGreedScore ?? "-"}점, RSI ${psych?.rsiValue ?? "-"})
+`
+    : "";
   const base = `
 [종목 데이터]
 종목명: ${name}
@@ -9433,7 +9442,7 @@ function buildAnalysisPrompt(selected, stocks, followup, lastResult) {
 저가: ${fmtPrice(selected?.low)}
 거래량: ${fmtPrice(selected?.volume)}
 PER/PBR: ${selected?.per ?? "-"} / ${selected?.pbr ?? "-"}
-
+${chartScoreBlock}
 [학습 가중치]
 ${WEIGHTS.map((w) => `- ${w.name}: ×${w.weight}, 최근 적중률 ${w.hit}%`).join("\n")}
 `;
@@ -9451,6 +9460,7 @@ ${WEIGHTS.map((w) => `- ${w.name}: ×${w.weight}, 최근 적중률 ${w.hit}%`).j
 - 종가가 고고저 추세선을 돌파하면 1차 신호, 다음 봉 저가가 추세선 위에서 유지되면 2차 확인 신호입니다.
 - 20선/60선 위치, 거래량 평균 대비 증가, RSI 과열 여부를 함께 확인합니다.
 - 추격 매수보다 종가 돌파, 저가 유지, 거래량 동반 여부를 조건으로 제시합니다.
+${chartContext ? "- 위 [현재 화면에 표시 중인 차트 분석 점수]와 반대되는 결론(예: 점수가 높은데 매도/하락 의견)을 낼 경우, 반드시 어떤 지표 때문에 점수와 다른 판단을 하는지 근거를 명시하세요. 근거 없이 점수와 모순된 결론만 제시하지 마세요." : ""}
 
 전체 답변은 2,500자 이내로 작성하되, 반드시 ①~⑥ 항목을 모두 완결된 문장으로 끝까지 작성하세요. 중간에 문장이 끊기면 안 됩니다.
 
@@ -9563,7 +9573,7 @@ async function saveAlertToServer(alertItem) {
 }
 
 
-function AiReport({ selected, stocks }) {
+function AiReport({ selected, stocks, chartContext }) {
   const name = getStockName(selected?.code, selected?.name, stocks);
   const defaultPrompt = `${name}(${selected?.code}) 단기/스윙 분석 리포트 생성`;
   const [prompt, setPrompt] = useState(defaultPrompt);
@@ -9672,7 +9682,7 @@ function AiReport({ selected, stocks }) {
     try {
       if (isFollowup) setChat((p) => [...p, { role: "user", text: followup }]);
 
-      const finalPrompt = buildAnalysisPrompt(selected, stocks, isFollowup ? followup : "", result);
+      const finalPrompt = buildAnalysisPrompt(selected, stocks, isFollowup ? followup : "", result, chartContext);
       const data = await fetchJson("/api/ai/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -10728,7 +10738,7 @@ const loadExtendedGogo = async (trigger = "manual") => {
   return (
     <div className="grid">
       <div className="ai-report-scroll-panel">
-        <AiReport selected={selected} stocks={stocks} />
+        <AiReport selected={selected} stocks={stocks} chartContext={{ activeTechnique, gogoSignal, psych }} />
         <div className="ai-report-scroll-note">AI 리포트 영역은 별도 스크롤입니다. 분석 결과 전체 박스 안에서 마우스 휠 또는 터치로 내려보세요.</div>
       </div>
       <div className="panel">

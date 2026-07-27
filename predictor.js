@@ -238,13 +238,30 @@ function predict(code, analysis, close) {
   }
 
   const resolved = model.wins + model.losses;
+  const direction = probUp >= 0.5 ? "UP" : "DOWN";
+  const technicalScore = Number.isFinite(analysis?.score) ? analysis.score : null;
+
+  // 기술 점수(추세·컨플루언스 기반)와 AI 예측(평균회귀 성향 포함)은 서로 다른 관점을 반영하므로
+  // 방향이 정반대일 때는 그 사실을 명시해 "고득점인데 하락 예측" 같은 오해를 줄인다.
+  let conflictNote = null;
+  if (technicalScore !== null) {
+    if (direction === "DOWN" && technicalScore >= 65) {
+      conflictNote = `기술 점수는 ${technicalScore}점(${analysis.grade}등급)으로 추세·컨플루언스는 우호적이지만, AI 예측은 과열·이격 등 평균회귀 신호를 근거로 단기 조정 가능성을 더 높게 봅니다. 두 지표는 서로 다른 관점이니 함께 참고하세요.`;
+    } else if (direction === "UP" && technicalScore <= 35) {
+      conflictNote = `기술 점수는 ${technicalScore}점(${analysis.grade}등급)으로 낮지만, AI 예측은 과매도 반등 등 평균회귀 신호를 근거로 단기 반등 가능성을 더 높게 봅니다. 두 지표는 서로 다른 관점이니 함께 참고하세요.`;
+    }
+  }
+
   return {
     probUp: Math.round(probUp * 1000) / 10,
     probDown: Math.round((1 - probUp) * 1000) / 10,
-    direction: probUp >= 0.5 ? "UP" : "DOWN",
+    direction,
     confidence: Math.abs(probUp - 0.5) >= 0.2 ? "high" : Math.abs(probUp - 0.5) >= 0.1 ? "medium" : "low",
     horizonDays: HORIZON_DAYS,
     topFactors: contributions,
+    technicalScore,
+    technicalGrade: analysis?.grade ?? null,
+    conflictNote,
     model: {
       trained: model.trained,
       accuracy: resolved ? Math.round((model.wins / resolved) * 1000) / 10 : null,

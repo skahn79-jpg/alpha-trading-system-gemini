@@ -784,6 +784,12 @@ struct AIPredictionCard: View {
                 Spacer()
             }
 
+            if let note = prediction.conflictNote, !note.isEmpty {
+                Text("⚠️ \(note)")
+                    .font(.paperlogy(10))
+                    .foregroundStyle(AppTheme.accent)
+            }
+
             Text("참고용 통계 모델 예측이며 투자 권유가 아닙니다.")
                 .font(.paperlogy(9))
                 .foregroundStyle(AppTheme.textSecondary.opacity(0.7))
