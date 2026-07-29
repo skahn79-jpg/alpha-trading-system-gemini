@@ -568,6 +568,7 @@ const styles = `
 .chart-range-toolbar .btn{min-width:86px}
 .chart-window-label{color:#6f899a;font-size:12px}
 .chart-window-range{width:260px;accent-color:#00d9ff}
+.chart-drag-hint{color:#6f899a;font-size:11px;margin:-4px 0 10px}
 .chart-box{height:430px!important;min-height:430px!important}
 @media(max-width:900px){
   .ai-report-scroll-panel{height:460px;max-height:56vh}
@@ -943,6 +944,8 @@ const styles = `
 .box-zone{fill:#00d9ff;opacity:.055;stroke:#00d9ff;stroke-width:1;stroke-dasharray:6 4}
 .fibo-line{stroke:#6f899a;stroke-width:1;stroke-dasharray:3 5;opacity:.62}
 .chart-svg-wrap{position:relative}
+.pro-chart-svg{cursor:grab;touch-action:pan-y;user-select:none}
+.pro-chart-svg.dragging{cursor:grabbing}
 @media(max-width:900px){
   .chart-pro-toolbar{grid-template-columns:1fr 1fr}
   .chart-tooltip{display:none}
@@ -10416,6 +10419,8 @@ function ChartView({ selected, stocks, selectedCode, setSelectedCode }) {
   const [windowOffset, setWindowOffset] = useState(0);
   const [chartFullscreen, setChartFullscreen] = useState(false);
   const [hoverIndex, setHoverIndex] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStateRef = useRef(null);
 
   // 자동 고고저 확장 무한 반복 방지용 잠금값입니다.
   // 기존에는 5Y ↔ 10Y처럼 range가 자동 변경되면서 useEffect가 다시 실행되어
@@ -10720,6 +10725,48 @@ const loadExtendedGogo = async (trigger = "manual") => {
       return Math.abs(item.i - prev.i) >= Math.max(3, Math.floor(axisLabelStep * 0.65)) || item.i === chartData.length - 1;
     });
 
+  // 차트 위 드래그로 과거/최근 이동, 휠로 확대/축소
+  const updateHoverFromClientX = (clientX, rect) => {
+    const relX = ((clientX - rect.left) / rect.width) * width;
+    const idx = Math.round((relX - main.x) / Math.max(1, step));
+    setHoverIndex(Math.max(0, Math.min(chartData.length - 1, idx)));
+  };
+
+  const handleChartPointerDown = (e) => {
+    dragStateRef.current = { startClientX: e.clientX, startOffset: safeOffset };
+    setIsDragging(true);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+  };
+
+  const handleChartPointerMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const drag = dragStateRef.current;
+    if (drag) {
+      const deltaClientX = e.clientX - drag.startClientX;
+      const svgScale = width / Math.max(1, rect.width);
+      const deltaBars = Math.round((deltaClientX * svgScale) / Math.max(1, step));
+      const nextOffset = Math.max(0, Math.min(maxOffset, drag.startOffset + deltaBars));
+      setWindowOffset(nextOffset);
+    }
+    updateHoverFromClientX(e.clientX, rect);
+  };
+
+  const endChartDrag = (e) => {
+    dragStateRef.current = null;
+    setIsDragging(false);
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
+  };
+
+  const handleChartWheel = (e) => {
+    try { e.preventDefault(); } catch {}
+    const zoomIn = e.deltaY < 0;
+    setVisibleCount((n) => {
+      const base = Math.max(20, Math.min(fullChartData.length, n));
+      const next = zoomIn ? Math.round(base * 0.85) : Math.round(base * 1.18);
+      return Math.max(20, Math.min(fullChartData.length, next));
+    });
+  };
+
   const lastTradeLabel = last?.date || "마지막 거래 시점";
   const ma20Last = ma20[ma20.length - 1];
 
@@ -10839,6 +10886,7 @@ const loadExtendedGogo = async (trigger = "manual") => {
             />
             <span className="chart-window-label">{chartData.length}봉 표시 / 전체 {fullChartData.length}봉</span>
           </div>
+          <div className="chart-drag-hint">차트 위에서 마우스로 드래그하면 과거/최근 구간으로 이동하고, 마우스 휠로 확대·축소할 수 있습니다.</div>
 
           <div className={`chart-box pro-chart-box ${chartFullscreen ? "chart-box-fullscreen" : ""}`}>
             {chartFullscreen && <button className="chart-back-btn" onClick={() => setChartFullscreen(false)}>돌아가기</button>}
@@ -10852,17 +10900,16 @@ const loadExtendedGogo = async (trigger = "manual") => {
             )}
             <div className="chart-svg-wrap">
             <svg
-              className="chart-svg pro-chart-svg"
+              className={`chart-svg pro-chart-svg${isDragging ? " dragging" : ""}`}
               viewBox={`0 0 ${width} ${height}`}
               preserveAspectRatio="xMidYMid meet"
               style={{ fontFamily: "var(--paperlogy-font)" }}
-              onMouseMove={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                const relX = ((e.clientX - rect.left) / rect.width) * width;
-                const idx = Math.round((relX - main.x) / Math.max(1, step));
-                setHoverIndex(Math.max(0, Math.min(chartData.length - 1, idx)));
-              }}
-              onMouseLeave={() => setHoverIndex(null)}
+              onPointerDown={handleChartPointerDown}
+              onPointerMove={handleChartPointerMove}
+              onPointerUp={endChartDrag}
+              onPointerCancel={endChartDrag}
+              onPointerLeave={(e) => { endChartDrag(e); setHoverIndex(null); }}
+              onWheel={handleChartWheel}
             >
               <defs>
                 <marker id="arrowHead" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
