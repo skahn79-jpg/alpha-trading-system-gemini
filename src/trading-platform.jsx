@@ -8801,6 +8801,139 @@ function calculateBoxBreakoutSignal(candles) {
   };
 }
 
+/** 삼각수렴 — 고점을 연결한 상단 추세선과 저점을 연결한 하단 추세선이 좁아지는 패턴 */
+function calculateTriangleSignal(candles, options = {}) {
+  const lookback = options.lookback || 90;
+  const swingWindow = options.swingWindow || 3;
+  if (!candles || candles.length < 30) {
+    return { status: "ERROR", signalName: "삼각수렴", score: 0, grade: "제외", message: "최소 30봉 이상 필요합니다." };
+  }
+
+  const sliceLen = Math.min(lookback, candles.length);
+  const offset = candles.length - sliceLen;
+  const data = candles.slice(-sliceLen);
+  const n = data.length;
+
+  const swingHighs = [];
+  const swingLows = [];
+  for (let i = swingWindow; i < n - swingWindow; i++) {
+    const hi = Number(data[i].high);
+    const lo = Number(data[i].low);
+    let isHigh = true;
+    let isLow = true;
+    for (let j = i - swingWindow; j <= i + swingWindow; j++) {
+      if (j === i) continue;
+      if (Number(data[j].high) >= hi) isHigh = false;
+      if (Number(data[j].low) <= lo) isLow = false;
+    }
+    if (isHigh) swingHighs.push({ index: offset + i, price: hi });
+    if (isLow) swingLows.push({ index: offset + i, price: lo });
+  }
+
+  if (swingHighs.length < 2 || swingLows.length < 2) {
+    return { status: "NO_SIGNAL", signalName: "삼각수렴", score: 0, grade: "제외", message: "유효한 스윙 고점/저점이 부족합니다." };
+  }
+
+  const regress = (points) => {
+    const m = points.length;
+    let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+    points.forEach((p) => {
+      sumX += p.index; sumY += p.price; sumXY += p.index * p.price; sumXX += p.index * p.index;
+    });
+    const denom = m * sumXX - sumX * sumX;
+    const slope = denom !== 0 ? (m * sumXY - sumX * sumY) / denom : 0;
+    const intercept = (sumY - slope * sumX) / m;
+    return { slope, intercept, valueAt: (i) => slope * i + intercept };
+  };
+
+  const upperReg = regress(swingHighs);
+  const lowerReg = regress(swingLows);
+
+  const lastIndex = candles.length - 1;
+  const firstIndex = Math.min(swingHighs[0].index, swingLows[0].index);
+  const widthAt = (i) => Math.max(0, upperReg.valueAt(i) - lowerReg.valueAt(i));
+  const widthStart = widthAt(firstIndex);
+  const widthNow = widthAt(lastIndex);
+  const priceRef = Number(data[n - 1].close) || 1;
+  const widthNowRate = (widthNow / priceRef) * 100;
+  const isConverging = widthStart > 0 && widthNow < widthStart * 0.85;
+
+  if (!isConverging || widthNow <= 0) {
+    return { status: "NO_SIGNAL", signalName: "삼각수렴", score: 0, grade: "제외", message: "고점·저점 추세선이 수렴하지 않아 삼각형 패턴이 아닙니다." };
+  }
+
+  const flatThreshold = priceRef * 0.0006;
+  const upperFlat = Math.abs(upperReg.slope) <= flatThreshold;
+  const lowerFlat = Math.abs(lowerReg.slope) <= flatThreshold;
+  const upperFalling = upperReg.slope < -flatThreshold;
+  const lowerRising = lowerReg.slope > flatThreshold;
+
+  let patternType = "대칭 삼각형";
+  if (upperFlat && lowerRising) patternType = "상승 삼각형";
+  else if (upperFalling && lowerFlat) patternType = "하락 삼각형";
+  else if (!(upperFalling && lowerRising)) patternType = "쐐기형";
+
+  const last = data[n - 1];
+  const close = Number(last.close);
+  const open = Number(last.open);
+  const volume = Number(last.volume || 0);
+  const avgVol20 = safeAvg(lastN(data, 20).map((d) => d.volume || 0));
+  const upperNow = upperReg.valueAt(lastIndex);
+  const lowerNow = lowerReg.valueAt(lastIndex);
+
+  const isBreakoutUp = close > upperNow;
+  const isBreakoutDown = close < lowerNow;
+  const isBullishCandle = close > open;
+  const volumeConfirm = avgVol20 ? volume >= avgVol20 * 1.3 : false;
+  const nearApex = widthNowRate <= 3;
+
+  let score = 30;
+  if (isConverging) score += 15;
+  if (nearApex) score += 10;
+  if (patternType === "상승 삼각형") score += 8;
+  if (isBreakoutUp) score += 20;
+  if (isBreakoutUp && volumeConfirm) score += 10;
+  if (isBreakoutUp && isBullishCandle) score += 5;
+  if (isBreakoutDown) score -= 20;
+  if (patternType === "하락 삼각형") score -= 5;
+  score = Math.max(0, Math.min(100, Math.round(score)));
+
+  let grade = "제외";
+  if (isBreakoutDown) grade = "제외";
+  else if (score >= 80) grade = "강한 매수 후보";
+  else if (score >= 65) grade = "관심 종목";
+  else if (score >= 50) grade = "관찰";
+
+  const action = isBreakoutUp
+    ? "상단 추세선 상향 돌파 — 거래량 동반 확인"
+    : isBreakoutDown
+      ? "하단 추세선 이탈 — 리스크 관리"
+      : nearApex
+        ? "꼭짓점 임박 — 방향성 돌파 대기"
+        : "수렴 진행 중 — 상/하단 돌파 대기";
+
+  return {
+    status: "OK",
+    signalName: "삼각수렴",
+    score,
+    grade,
+    action,
+    patternType,
+    widthNowRate: Number(widthNowRate.toFixed(2)),
+    // 시작점은 회귀선을 과거로 외삽하지 않고 실제로 닿은 스윙 고점/저점을 그대로 사용해
+    // 차트에 그릴 때 실제 캔들 범위를 벗어나 어긋나 보이지 않게 한다.
+    upperStart: { index: swingHighs[0].index, price: Math.round(swingHighs[0].price) },
+    upperEnd: { index: lastIndex, price: Math.round(upperNow) },
+    lowerStart: { index: swingLows[0].index, price: Math.round(swingLows[0].price) },
+    lowerEnd: { index: lastIndex, price: Math.round(lowerNow) },
+    upperNow: Math.round(upperNow),
+    lowerNow: Math.round(lowerNow),
+    isBreakoutUp,
+    isBreakoutDown,
+    checks: { isConverging, nearApex, upperFlat, lowerFlat, upperFalling, lowerRising, volumeConfirm, isBullishCandle },
+  };
+}
+
 function calculateGapSignal(candles) {
   if (!candles || candles.length < 10) {
     return { status: "ERROR", signalName: "갭/과열", score: 0, grade: "제외", message: "최소 10봉 이상 필요합니다." };
@@ -8869,6 +9002,7 @@ function recommendChartTechniques(candles, gogoSignal) {
     normalizeTechniqueSignal("maPullback", calculateMaPullbackSignal(candles)),
     normalizeTechniqueSignal("supportResistance", calculateSupportResistanceSignal(candles)),
     normalizeTechniqueSignal("boxBreakout", calculateBoxBreakoutSignal(candles)),
+    normalizeTechniqueSignal("triangle", calculateTriangleSignal(candles)),
     normalizeTechniqueSignal("bollinger", calculateBollingerSqueezeSignal(candles)),
     normalizeTechniqueSignal("volumeBreakout", calculateVolumeBreakoutSignal(candles)),
     normalizeTechniqueSignal("rsiReversal", calculateRsiReversalSignal(candles)),
@@ -8898,6 +9032,7 @@ function techniqueDescription(key) {
     maPullback: "20일선 눌림, MA5/MA20/MA60 정렬, 지지 후 반등을 봅니다.",
     supportResistance: "최근 매물대가 많이 겹친 지지·저항 가격대를 자동 추정합니다.",
     boxBreakout: "최근 박스권 상단 돌파 또는 돌파 임박 여부를 봅니다.",
+    triangle: "고점을 연결한 상단 추세선과 저점을 연결한 하단 추세선이 좁혀지는 삼각수렴 패턴과 돌파 방향을 봅니다.",
     bollinger: "볼린저 밴드 수축 후 상단 돌파와 거래량 동반 여부를 봅니다.",
     volumeBreakout: "최근 20봉 전고점 돌파와 거래량 급증을 봅니다.",
     rsiReversal: "RSI 과매도 회복, 가격 반등, 20일선 회복을 봅니다.",
@@ -10403,6 +10538,18 @@ function getChartVisualSignals({ activeTechniqueKey, chartData, gogoSignal, acti
     if (activeTechnique?.raw?.isBreakout) signals.push({ index: lastIndex, price: chartData[lastIndex]?.close, label: "박스 돌파", color: "#00ff88" });
   }
 
+  if (activeTechniqueKey === "triangle") {
+    const t = activeTechnique?.raw;
+    if (t?.status === "OK") {
+      signals.push({
+        index: lastIndex,
+        price: t.isBreakoutUp ? t.upperNow : t.isBreakoutDown ? t.lowerNow : t.upperNow,
+        label: t.isBreakoutUp ? "삼각수렴 상단 돌파" : t.isBreakoutDown ? "삼각수렴 하단 이탈" : `${t.patternType} 수렴 중`,
+        color: t.isBreakoutUp ? "#00ff88" : t.isBreakoutDown ? "#ff4466" : "#ffd447",
+      });
+    }
+  }
+
   return signals;
 }
 
@@ -10454,6 +10601,7 @@ function ChartView({ selected, stocks, selectedCode, setSelectedCode }) {
     { key: "maPullback", label: "이평 눌림" },
     { key: "supportResistance", label: "지지·저항" },
     { key: "boxBreakout", label: "박스권 돌파" },
+    { key: "triangle", label: "삼각수렴" },
     { key: "bollinger", label: "볼린저" },
     { key: "volumeBreakout", label: "거래량 돌파" },
     { key: "rsiReversal", label: "RSI 반등" },
@@ -10672,6 +10820,10 @@ const loadExtendedGogo = async (trigger = "manual") => {
   if (activeTechniqueKey === "volumeBreakout" && activeTechnique?.raw?.prevHigh) {
     extraValues.push(activeTechnique.raw.prevHigh);
   }
+  if (activeTechniqueKey === "triangle" && activeTechnique?.raw?.status === "OK") {
+    const t = activeTechnique.raw;
+    extraValues.push(t.upperStart.price, t.upperEnd.price, t.lowerStart.price, t.lowerEnd.price);
+  }
   const maxP = Math.max(...highs, ...maValues, ...bollValues, ...extraValues);
   const minP = Math.min(...lows, ...maValues, ...bollValues, ...extraValues);
   const pricePadding = Math.max(1, (maxP - minP) * 0.06);
@@ -10780,6 +10932,7 @@ const loadExtendedGogo = async (trigger = "manual") => {
   const showGogo = activeTechniqueKey === "gogojeo" || activeTechniqueKey === "auto" || techniqueMode === "auto";
   const bollinger = activeTechniqueKey === "bollinger" ? activeTechnique?.raw : null;
   const volumeBreak = activeTechniqueKey === "volumeBreakout" ? activeTechnique?.raw : null;
+  const triangleInfo = activeTechniqueKey === "triangle" && activeTechnique?.raw?.status === "OK" ? activeTechnique.raw : null;
   const visualSignals = getChartVisualSignals({ activeTechniqueKey, chartData, gogoSignal, activeTechnique });
 
   return (
@@ -10987,6 +11140,23 @@ const loadExtendedGogo = async (trigger = "manual") => {
                   <circle cx={trendStart.x} cy={trendStart.y} r="5" fill="#ff4466" />
                   <circle cx={xFor(selectedHigh2.index)} cy={yFor(selectedHigh2.price)} r="5" fill="#ff4466" />
                   <circle cx={trendEnd.x} cy={trendEnd.y} r="5" fill={gogoSignal.checks.isBreakout ? "#00ff88" : "#ff4466"} />
+                </>
+              )}
+
+              {triangleInfo && (
+                <>
+                  <line
+                    x1={xFor(triangleInfo.upperStart.index)} y1={yFor(triangleInfo.upperStart.price)}
+                    x2={xFor(triangleInfo.upperEnd.index)} y2={yFor(triangleInfo.upperEnd.price)}
+                    className="resistance-line"
+                  />
+                  <line
+                    x1={xFor(triangleInfo.lowerStart.index)} y1={yFor(triangleInfo.lowerStart.price)}
+                    x2={xFor(triangleInfo.lowerEnd.index)} y2={yFor(triangleInfo.lowerEnd.price)}
+                    className="support-line"
+                  />
+                  <circle cx={xFor(triangleInfo.upperEnd.index)} cy={yFor(triangleInfo.upperEnd.price)} r="5" fill={triangleInfo.isBreakoutUp ? "#00ff88" : "#9b5cff"} />
+                  <circle cx={xFor(triangleInfo.lowerEnd.index)} cy={yFor(triangleInfo.lowerEnd.price)} r="5" fill={triangleInfo.isBreakoutDown ? "#ff4466" : "#ffd447"} />
                 </>
               )}
 
