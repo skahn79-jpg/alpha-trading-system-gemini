@@ -160,7 +160,8 @@ final class LiveCryptoViewModel: NSObject, ObservableObject {
         okxPingTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 20_000_000_000)
-                self?.liqSocket?.send(.string("ping")) { _ in }
+                guard let self else { return }
+                self.liqSocket?.send(.string("ping")) { _ in }
             }
         }
     }
