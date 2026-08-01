@@ -585,9 +585,7 @@ struct ChartView: View {
         let confidence: String?
         let horizonDays: Int?
         let topFactors: [Factor]?
-        let technicalScore: Double?
-        let technicalGrade: String?
-        let conflictNote: String?
+        let context: String?
         let model: ModelInfo?
     }
 
@@ -961,8 +959,8 @@ struct ChartView: View {
         if let factor = p.topFactors?.first, let label = factor.label {
             text += " 판단에 가장 큰 영향을 준 요인은 '\(label)'입니다."
         }
-        if let note = p.conflictNote, !note.isEmpty {
-            text += "\n\n⚠️ \(note)"
+        if let context = p.context, !context.isEmpty {
+            text += "\n\n\(context)"
         }
         return text
     }

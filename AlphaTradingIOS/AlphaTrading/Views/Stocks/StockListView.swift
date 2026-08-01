@@ -87,6 +87,16 @@ struct StockDetailView: View {
                         if let badge = analysisVM.analysis?.signalBadge {
                             SignalBadgeView(label: badge)
                         }
+                        if let combined = analysisVM.prediction?.combined {
+                            let tone = combined.isUp ? AppTheme.up : AppTheme.down
+                            Text(combined.badge)
+                                .font(.paperlogy(13, weight: .bold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(tone.opacity(0.15))
+                                .foregroundStyle(tone)
+                                .clipShape(Capsule())
+                        }
                     }
                     Text(quote.displayChange)
                         .font(.paperlogy(18, weight: .semibold))

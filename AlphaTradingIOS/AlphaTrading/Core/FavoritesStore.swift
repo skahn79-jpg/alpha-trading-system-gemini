@@ -58,6 +58,14 @@ final class FavoritesStore: ObservableObject {
         cloud.set(data, forKey: key)
         cloud.set(stamp, forKey: stampKey)
         cloud.synchronize()
+
+        // 국내(kr) 관심종목 코드를 서버 워치리스트로 fire-and-forget 등록 (실패해도 무시)
+        let krCodes = favorites.filter { $0.kind == .kr }.map { $0.code }
+        Task {
+            struct B: Encodable { let codes: [String] }
+            struct R: Decodable { let ok: Bool? }
+            let _: R? = try? await APIClient.shared.post("/api/watchlist", body: B(codes: krCodes))
+        }
     }
 
     func isFavorite(_ code: String) -> Bool {

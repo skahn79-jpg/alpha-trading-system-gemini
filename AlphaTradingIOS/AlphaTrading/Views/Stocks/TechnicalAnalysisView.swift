@@ -746,6 +746,23 @@ struct AIPredictionCard: View {
                     .foregroundStyle(AppTheme.textSecondary)
             }
 
+            if let combined = prediction.combined {
+                let tone = combined.isUp ? AppTheme.up : AppTheme.down
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(combined.badge)
+                        .font(.paperlogy(13, weight: .bold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(tone.opacity(0.15))
+                        .foregroundStyle(tone)
+                        .clipShape(Capsule())
+                    Text(combined.note)
+                        .font(.paperlogy(12))
+                        .foregroundStyle(AppTheme.textPrimary.opacity(0.9))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(prediction.isUp ? "상승" : "하락")
                     .font(.paperlogy(20, weight: .bold))
@@ -784,10 +801,11 @@ struct AIPredictionCard: View {
                 Spacer()
             }
 
-            if let note = prediction.conflictNote, !note.isEmpty {
-                Text("⚠️ \(note)")
-                    .font(.paperlogy(10))
-                    .foregroundStyle(AppTheme.accent)
+            if let context = prediction.context, !context.isEmpty {
+                Text(context)
+                    .font(.paperlogy(11))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Text("참고용 통계 모델 예측이며 투자 권유가 아닙니다.")

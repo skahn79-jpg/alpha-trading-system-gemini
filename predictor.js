@@ -239,29 +239,37 @@ function predict(code, analysis, close) {
 
   const resolved = model.wins + model.losses;
   const direction = probUp >= 0.5 ? "UP" : "DOWN";
-  const technicalScore = Number.isFinite(analysis?.score) ? analysis.score : null;
 
-  // 기술 점수(추세·컨플루언스 기반)와 AI 예측(평균회귀 성향 포함)은 서로 다른 관점을 반영하므로
-  // 방향이 정반대일 때는 그 사실을 명시해 "고득점인데 하락 예측" 같은 오해를 줄인다.
-  let conflictNote = null;
-  if (technicalScore !== null) {
-    if (direction === "DOWN" && technicalScore >= 65) {
-      conflictNote = `기술 점수는 ${technicalScore}점(${analysis.grade}등급)으로 추세·컨플루언스는 우호적이지만, AI 예측은 과열·이격 등 평균회귀 신호를 근거로 단기 조정 가능성을 더 높게 봅니다. 두 지표는 서로 다른 관점이니 함께 참고하세요.`;
-    } else if (direction === "UP" && technicalScore <= 35) {
-      conflictNote = `기술 점수는 ${technicalScore}점(${analysis.grade}등급)으로 낮지만, AI 예측은 과매도 반등 등 평균회귀 신호를 근거로 단기 반등 가능성을 더 높게 봅니다. 두 지표는 서로 다른 관점이니 함께 참고하세요.`;
+  // 점수(현재 기술 상태)와 예측(7일 후 통계)이 반대로 보일 때의 해설 + 결합 판정
+  // 모델은 백테스트에서 평균 회귀(과열→되돌림, 과매도→반등)를 학습하므로
+  // 고점수+하락예측 / 저점수+상승예측은 모순이 아니라 통계적 판단임
+  const score = Number(analysis?.score);
+  const pu = Math.round(probUp * 1000) / 10;
+  let context = null;
+  let combined = null;
+  if (Number.isFinite(score)) {
+    if (score <= 45 && probUp >= 0.62) {
+      context = "기술 점수는 낮은 약세·과매도 국면이지만, 과거 통계상 이런 구간에서 7일 내 반등 확률이 높았습니다.";
+      combined = { badge: "반등 매수 후보", tone: "up", note: `약세 국면 + AI 상승 ${pu}%` };
+    } else if (score >= 75 && probUp <= 0.42) {
+      context = "기술 점수는 높은 강세·과열 국면이지만, 과거 통계상 단기 되돌림(차익실현) 확률이 높았습니다.";
+      combined = { badge: "과열 조정 주의", tone: "down", note: `강세 국면 + AI 하락 ${Math.round((1 - probUp) * 1000) / 10}%` };
+    } else if (score >= 65 && probUp >= 0.58) {
+      combined = { badge: "추세 지속 매수", tone: "up", note: `강세 국면 + AI 상승 ${pu}%` };
+    } else if (score <= 45 && probUp <= 0.42) {
+      combined = { badge: "약세 지속 주의", tone: "down", note: `약세 국면 + AI 하락 ${Math.round((1 - probUp) * 1000) / 10}%` };
     }
   }
 
   return {
-    probUp: Math.round(probUp * 1000) / 10,
+    probUp: pu,
     probDown: Math.round((1 - probUp) * 1000) / 10,
     direction,
     confidence: Math.abs(probUp - 0.5) >= 0.2 ? "high" : Math.abs(probUp - 0.5) >= 0.1 ? "medium" : "low",
     horizonDays: HORIZON_DAYS,
+    context,
+    combined,
     topFactors: contributions,
-    technicalScore,
-    technicalGrade: analysis?.grade ?? null,
-    conflictNote,
     model: {
       trained: model.trained,
       accuracy: resolved ? Math.round((model.wins / resolved) * 1000) / 10 : null,
