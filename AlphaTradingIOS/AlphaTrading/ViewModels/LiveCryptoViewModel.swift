@@ -108,20 +108,21 @@ final class LiveCryptoViewModel: NSObject, ObservableObject {
 
     private func receivePriceLoop() {
         priceSocket?.receive { [weak self] result in
-            guard let self else { return }
             switch result {
             case .success(let message):
                 if case .string(let text) = message, let data = text.data(using: .utf8) {
-                    Task { @MainActor in
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
                         self.connected = true
                         self.handlePrice(data)
                         self.receivePriceLoop()
                     }
                 } else {
-                    Task { @MainActor in self.receivePriceLoop() }
+                    Task { @MainActor [weak self] in self?.receivePriceLoop() }
                 }
             case .failure:
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
                     self.connected = false
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
                     if self.priceSocket != nil { self.connectPrice() }
@@ -168,20 +169,21 @@ final class LiveCryptoViewModel: NSObject, ObservableObject {
 
     private func receiveLiqLoop() {
         liqSocket?.receive { [weak self] result in
-            guard let self else { return }
             switch result {
             case .success(let message):
                 if case .string(let text) = message, text != "pong", let data = text.data(using: .utf8) {
-                    Task { @MainActor in
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
                         self.liqConnected = true
                         self.handleLiquidation(data)
                         self.receiveLiqLoop()
                     }
                 } else {
-                    Task { @MainActor in self.receiveLiqLoop() }
+                    Task { @MainActor [weak self] in self?.receiveLiqLoop() }
                 }
             case .failure:
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
                     self.liqConnected = false
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
                     if self.liqSocket != nil { self.connectLiquidations() }
