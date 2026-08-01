@@ -50,7 +50,7 @@ jobs:
           cd AlphaTradingIOS
           xcodebuild -project AlphaTrading.xcodeproj \
             -scheme AlphaTrading \
-            -destination 'platform=iOS Simulator,name=iPhone 15,OS=18.4' \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
