@@ -20,7 +20,7 @@ final class FavoritesStore: ObservableObject {
             object: cloud,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.mergeFromCloud() }
+            Task { @MainActor [weak self] in self?.mergeFromCloud() }
         }
         cloud.synchronize()
     }
