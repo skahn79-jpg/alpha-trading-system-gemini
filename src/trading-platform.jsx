@@ -568,6 +568,7 @@ const styles = `
 .chart-range-toolbar .btn{min-width:86px}
 .chart-window-label{color:#6f899a;font-size:12px}
 .chart-window-range{width:260px;accent-color:#00d9ff}
+.chart-drag-hint{color:#6f899a;font-size:11px;margin:-4px 0 10px}
 .chart-box{height:430px!important;min-height:430px!important}
 @media(max-width:900px){
   .ai-report-scroll-panel{height:460px;max-height:56vh}
@@ -943,6 +944,8 @@ const styles = `
 .box-zone{fill:#00d9ff;opacity:.055;stroke:#00d9ff;stroke-width:1;stroke-dasharray:6 4}
 .fibo-line{stroke:#6f899a;stroke-width:1;stroke-dasharray:3 5;opacity:.62}
 .chart-svg-wrap{position:relative}
+.pro-chart-svg{cursor:grab;touch-action:pan-y;user-select:none}
+.pro-chart-svg.dragging{cursor:grabbing}
 @media(max-width:900px){
   .chart-pro-toolbar{grid-template-columns:1fr 1fr}
   .chart-tooltip{display:none}
@@ -8798,6 +8801,290 @@ function calculateBoxBreakoutSignal(candles) {
   };
 }
 
+/** 삼각수렴 — 고점을 연결한 상단 추세선과 저점을 연결한 하단 추세선이 좁아지는 패턴 */
+function calculateTriangleSignal(candles, options = {}) {
+  const lookback = options.lookback || 90;
+  const swingWindow = options.swingWindow || 3;
+  if (!candles || candles.length < 30) {
+    return { status: "ERROR", signalName: "삼각수렴", score: 0, grade: "제외", message: "최소 30봉 이상 필요합니다." };
+  }
+
+  const sliceLen = Math.min(lookback, candles.length);
+  const offset = candles.length - sliceLen;
+  const data = candles.slice(-sliceLen);
+  const n = data.length;
+
+  const swingHighs = [];
+  const swingLows = [];
+  for (let i = swingWindow; i < n - swingWindow; i++) {
+    const hi = Number(data[i].high);
+    const lo = Number(data[i].low);
+    let isHigh = true;
+    let isLow = true;
+    for (let j = i - swingWindow; j <= i + swingWindow; j++) {
+      if (j === i) continue;
+      if (Number(data[j].high) >= hi) isHigh = false;
+      if (Number(data[j].low) <= lo) isLow = false;
+    }
+    if (isHigh) swingHighs.push({ index: offset + i, price: hi });
+    if (isLow) swingLows.push({ index: offset + i, price: lo });
+  }
+
+  if (swingHighs.length < 2 || swingLows.length < 2) {
+    return { status: "NO_SIGNAL", signalName: "삼각수렴", score: 0, grade: "제외", message: "유효한 스윙 고점/저점이 부족합니다." };
+  }
+
+  const regress = (points) => {
+    const m = points.length;
+    let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+    points.forEach((p) => {
+      sumX += p.index; sumY += p.price; sumXY += p.index * p.price; sumXX += p.index * p.index;
+    });
+    const denom = m * sumXX - sumX * sumX;
+    const slope = denom !== 0 ? (m * sumXY - sumX * sumY) / denom : 0;
+    const intercept = (sumY - slope * sumX) / m;
+    return { slope, intercept, valueAt: (i) => slope * i + intercept };
+  };
+
+  const upperReg = regress(swingHighs);
+  const lowerReg = regress(swingLows);
+
+  const lastIndex = candles.length - 1;
+  const firstIndex = Math.min(swingHighs[0].index, swingLows[0].index);
+  const widthAt = (i) => Math.max(0, upperReg.valueAt(i) - lowerReg.valueAt(i));
+  const widthStart = widthAt(firstIndex);
+  const widthNow = widthAt(lastIndex);
+  const priceRef = Number(data[n - 1].close) || 1;
+  const widthNowRate = (widthNow / priceRef) * 100;
+  const isConverging = widthStart > 0 && widthNow < widthStart * 0.85;
+
+  if (!isConverging || widthNow <= 0) {
+    return { status: "NO_SIGNAL", signalName: "삼각수렴", score: 0, grade: "제외", message: "고점·저점 추세선이 수렴하지 않아 삼각형 패턴이 아닙니다." };
+  }
+
+  const flatThreshold = priceRef * 0.0006;
+  const upperFlat = Math.abs(upperReg.slope) <= flatThreshold;
+  const lowerFlat = Math.abs(lowerReg.slope) <= flatThreshold;
+  const upperFalling = upperReg.slope < -flatThreshold;
+  const lowerRising = lowerReg.slope > flatThreshold;
+
+  let patternType = "대칭 삼각형";
+  if (upperFlat && lowerRising) patternType = "상승 삼각형";
+  else if (upperFalling && lowerFlat) patternType = "하락 삼각형";
+  else if (!(upperFalling && lowerRising)) patternType = "쐐기형";
+
+  const last = data[n - 1];
+  const close = Number(last.close);
+  const open = Number(last.open);
+  const volume = Number(last.volume || 0);
+  const avgVol20 = safeAvg(lastN(data, 20).map((d) => d.volume || 0));
+  const upperNow = upperReg.valueAt(lastIndex);
+  const lowerNow = lowerReg.valueAt(lastIndex);
+
+  const isBreakoutUp = close > upperNow;
+  const isBreakoutDown = close < lowerNow;
+  const isBullishCandle = close > open;
+  const volumeConfirm = avgVol20 ? volume >= avgVol20 * 1.3 : false;
+  const nearApex = widthNowRate <= 3;
+
+  let score = 30;
+  if (isConverging) score += 15;
+  if (nearApex) score += 10;
+  if (patternType === "상승 삼각형") score += 8;
+  if (isBreakoutUp) score += 20;
+  if (isBreakoutUp && volumeConfirm) score += 10;
+  if (isBreakoutUp && isBullishCandle) score += 5;
+  if (isBreakoutDown) score -= 20;
+  if (patternType === "하락 삼각형") score -= 5;
+  score = Math.max(0, Math.min(100, Math.round(score)));
+
+  let grade = "제외";
+  if (isBreakoutDown) grade = "제외";
+  else if (score >= 80) grade = "강한 매수 후보";
+  else if (score >= 65) grade = "관심 종목";
+  else if (score >= 50) grade = "관찰";
+
+  const action = isBreakoutUp
+    ? "상단 추세선 상향 돌파 — 거래량 동반 확인"
+    : isBreakoutDown
+      ? "하단 추세선 이탈 — 리스크 관리"
+      : nearApex
+        ? "꼭짓점 임박 — 방향성 돌파 대기"
+        : "수렴 진행 중 — 상/하단 돌파 대기";
+
+  return {
+    status: "OK",
+    signalName: "삼각수렴",
+    score,
+    grade,
+    action,
+    patternType,
+    widthNowRate: Number(widthNowRate.toFixed(2)),
+    // 시작점은 회귀선을 과거로 외삽하지 않고 실제로 닿은 스윙 고점/저점을 그대로 사용해
+    // 차트에 그릴 때 실제 캔들 범위를 벗어나 어긋나 보이지 않게 한다.
+    upperStart: { index: swingHighs[0].index, price: Math.round(swingHighs[0].price) },
+    upperEnd: { index: lastIndex, price: Math.round(upperNow) },
+    lowerStart: { index: swingLows[0].index, price: Math.round(swingLows[0].price) },
+    lowerEnd: { index: lastIndex, price: Math.round(lowerNow) },
+    upperNow: Math.round(upperNow),
+    lowerNow: Math.round(lowerNow),
+    isBreakoutUp,
+    isBreakoutDown,
+    checks: { isConverging, nearApex, upperFlat, lowerFlat, upperFalling, lowerRising, volumeConfirm, isBullishCandle },
+  };
+}
+
+/** TD 시퀀셜(디마크 지표) — 종가가 4봉 전보다 낮은/높은 흐름이 9회 연속되면 매수/매도 셋업 완성으로 보고,
+ * 이후 2봉 전 고가·저가 대비 조건을 13회까지 세는 카운트다운으로 반전 강도를 봅니다. */
+function calculateTdSequentialSignal(candles) {
+  if (!candles || candles.length < 30) {
+    return { status: "ERROR", signalName: "TD 시퀀셜", score: 0, grade: "제외", message: "최소 30봉 이상 필요합니다." };
+  }
+
+  const closes = candles.map((c) => Number(c.close));
+  const highs = candles.map((c) => Number(c.high));
+  const lows = candles.map((c) => Number(c.low));
+  const n = candles.length;
+  const lastIndex = n - 1;
+
+  let buyCount = 0;
+  let sellCount = 0;
+  let lastBuySetup9 = -1;
+  let lastSellSetup9 = -1;
+
+  for (let i = 4; i < n; i++) {
+    if (closes[i] < closes[i - 4]) {
+      buyCount += 1;
+      sellCount = 0;
+    } else if (closes[i] > closes[i - 4]) {
+      sellCount += 1;
+      buyCount = 0;
+    } else {
+      buyCount = 0;
+      sellCount = 0;
+    }
+    if (buyCount === 9) { lastBuySetup9 = i; buyCount = 0; }
+    if (sellCount === 9) { lastSellSetup9 = i; sellCount = 0; }
+  }
+
+  const countdownFrom = (setupIndex, direction) => {
+    if (setupIndex < 0) return 0;
+    let count = 0;
+    for (let i = setupIndex + 1; i < n && i - 2 >= 0; i++) {
+      const qualifies = direction === "buy" ? closes[i] <= lows[i - 2] : closes[i] >= highs[i - 2];
+      if (qualifies) {
+        count += 1;
+        if (count >= 13) return 13;
+      }
+    }
+    return count;
+  };
+
+  const buyCountdown = countdownFrom(lastBuySetup9, "buy");
+  const sellCountdown = countdownFrom(lastSellSetup9, "sell");
+  const buySetupRecent = lastBuySetup9 >= 0 && lastIndex - lastBuySetup9 <= 3;
+  const sellSetupRecent = lastSellSetup9 >= 0 && lastIndex - lastSellSetup9 <= 3;
+
+  let status = "NO_SIGNAL";
+  let signalType = "none";
+  let score = 25;
+  let action = "매수·매도 셋업 진행 중 — 9 완성 대기";
+
+  if (buyCountdown >= 13) {
+    status = "OK"; signalType = "buyCountdown13"; score = 92;
+    action = "매수 카운트다운 13 완성 — 강한 바닥 반전 신호";
+  } else if (sellCountdown >= 13) {
+    status = "OK"; signalType = "sellCountdown13"; score = 8;
+    action = "매도 카운트다운 13 완성 — 강한 상투 반전 신호";
+  } else if (buySetupRecent) {
+    status = "OK"; signalType = "buySetup9"; score = 78;
+    action = `매수 셋업 9 완성 (${lastIndex - lastBuySetup9}봉 전) — 과매도 반전 후보`;
+  } else if (sellSetupRecent) {
+    status = "OK"; signalType = "sellSetup9"; score = 15;
+    action = `매도 셋업 9 완성 (${lastIndex - lastSellSetup9}봉 전) — 과매수 반전 후보`;
+  } else if (buyCount >= 5) {
+    status = "OK"; signalType = "buyBuilding"; score = 45 + buyCount * 2;
+    action = `매수 셋업 진행 중 (${buyCount}/9)`;
+  } else if (sellCount >= 5) {
+    status = "OK"; signalType = "sellBuilding"; score = 45 - sellCount * 2;
+    action = `매도 셋업 진행 중 (${sellCount}/9)`;
+  }
+
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  let grade = "제외";
+  if (score >= 80) grade = "강한 매수 후보";
+  else if (score >= 65) grade = "관심 종목";
+  else if (score >= 50) grade = "관찰";
+
+  return {
+    status,
+    signalName: "TD 시퀀셜",
+    score,
+    grade,
+    action,
+    signalType,
+    buyCount,
+    sellCount,
+    buyCountdown,
+    sellCountdown,
+    lastBuySetup9BarsAgo: lastBuySetup9 >= 0 ? lastIndex - lastBuySetup9 : null,
+    lastSellSetup9BarsAgo: lastSellSetup9 >= 0 ? lastIndex - lastSellSetup9 : null,
+  };
+}
+
+/** 대세주 조정밴드(시스코 패러다임) — 52주 고점 대비 낙폭이 대형 주도주가 대세 상승 중 겪는
+ * 전형적 조정 구간(-30%~-40%)에 들어왔는지를 봅니다. */
+function calculateLeaderDrawdownSignal(candles) {
+  if (!candles || candles.length < 20) {
+    return { status: "ERROR", signalName: "대세주 조정밴드", score: 0, grade: "제외", message: "최소 20봉 이상 필요합니다." };
+  }
+
+  const lookback = Math.min(candles.length, 252);
+  const windowData = candles.slice(-lookback);
+  const high52w = Math.max(...windowData.map((c) => Number(c.high)));
+  const price = Number(candles[candles.length - 1].close);
+
+  if (!(high52w > 0)) {
+    return { status: "ERROR", signalName: "대세주 조정밴드", score: 0, grade: "제외", message: "52주 고점을 계산할 수 없습니다." };
+  }
+
+  const drawdownPct = ((price - high52w) / high52w) * 100;
+  const inLeaderBand = drawdownPct <= -30 && drawdownPct >= -40;
+  const deepBand = drawdownPct < -40;
+
+  let score = 30;
+  if (drawdownPct <= -15) score += 10;
+  if (inLeaderBand) score += 40;
+  else if (deepBand) score += 25;
+  if (drawdownPct > -10) score -= 10;
+  score = Math.max(0, Math.min(100, Math.round(score)));
+
+  let grade = "제외";
+  if (score >= 80) grade = "강한 매수 후보";
+  else if (score >= 65) grade = "관심 종목";
+  else if (score >= 50) grade = "관찰";
+
+  const action = inLeaderBand
+    ? "역사적 주도주 조정 밴드(-30%~-40%) 진입 — 분할 매수 관찰 구간"
+    : deepBand
+      ? "조정 밴드를 넘어선 급락 — 펀더멘털 재점검 필요"
+      : drawdownPct <= -15
+        ? "조정 진행 중 — 밴드 진입 대기"
+        : "52주 고점 근접 — 조정 매수 근거 약함";
+
+  return {
+    status: "OK",
+    signalName: "대세주 조정밴드",
+    score,
+    grade,
+    action,
+    high52w: Math.round(high52w),
+    drawdownPct: Number(drawdownPct.toFixed(2)),
+    inLeaderBand,
+    deepBand,
+  };
+}
+
 function calculateGapSignal(candles) {
   if (!candles || candles.length < 10) {
     return { status: "ERROR", signalName: "갭/과열", score: 0, grade: "제외", message: "최소 10봉 이상 필요합니다." };
@@ -8866,6 +9153,9 @@ function recommendChartTechniques(candles, gogoSignal) {
     normalizeTechniqueSignal("maPullback", calculateMaPullbackSignal(candles)),
     normalizeTechniqueSignal("supportResistance", calculateSupportResistanceSignal(candles)),
     normalizeTechniqueSignal("boxBreakout", calculateBoxBreakoutSignal(candles)),
+    normalizeTechniqueSignal("triangle", calculateTriangleSignal(candles)),
+    normalizeTechniqueSignal("td", calculateTdSequentialSignal(candles)),
+    normalizeTechniqueSignal("drawdown", calculateLeaderDrawdownSignal(candles)),
     normalizeTechniqueSignal("bollinger", calculateBollingerSqueezeSignal(candles)),
     normalizeTechniqueSignal("volumeBreakout", calculateVolumeBreakoutSignal(candles)),
     normalizeTechniqueSignal("rsiReversal", calculateRsiReversalSignal(candles)),
@@ -8895,6 +9185,9 @@ function techniqueDescription(key) {
     maPullback: "20일선 눌림, MA5/MA20/MA60 정렬, 지지 후 반등을 봅니다.",
     supportResistance: "최근 매물대가 많이 겹친 지지·저항 가격대를 자동 추정합니다.",
     boxBreakout: "최근 박스권 상단 돌파 또는 돌파 임박 여부를 봅니다.",
+    triangle: "고점을 연결한 상단 추세선과 저점을 연결한 하단 추세선이 좁혀지는 삼각수렴 패턴과 돌파 방향을 봅니다.",
+    td: "종가가 4봉 전보다 낮거나 높은 흐름이 9회 연속되면 매수/매도 셋업 완성으로 보고, 이후 2봉 전 고저 대비 카운트다운 13까지 반전 강도를 추적합니다.",
+    drawdown: "52주 고점 대비 낙폭이 대형 주도주가 대세 상승 중 겪는 전형적 조정 구간(-30%~-40%)에 들어왔는지를 봅니다.",
     bollinger: "볼린저 밴드 수축 후 상단 돌파와 거래량 동반 여부를 봅니다.",
     volumeBreakout: "최근 20봉 전고점 돌파와 거래량 급증을 봅니다.",
     rsiReversal: "RSI 과매도 회복, 가격 반등, 20일선 회복을 봅니다.",
@@ -9281,7 +9574,7 @@ function LeftPanel({ stocks, quotes, selectedCode, setSelectedCode, reload, load
   };
 
   const submitAdd = async () => {
-    const resolved = newStock.code.length === 6
+    let resolved = newStock.code.length === 6
       ? { code: newStock.code, name: newStock.name || newStock.code, tag: newStock.tag || "사용자추가", sector: newStock.tag || "사용자추가" }
       : resolveStockInput(newStock.query || newStock.name, stocks);
 
@@ -9421,8 +9714,17 @@ function Dashboard({ market, selected, stocks }) {
   );
 }
 
-function buildAnalysisPrompt(selected, stocks, followup, lastResult) {
+function buildAnalysisPrompt(selected, stocks, followup, lastResult, chartContext) {
   const name = selected?.assetClass === "global" ? (selected?.name || selected?.symbol || selected?.code) : getStockName(selected?.code, selected?.name, stocks);
+  const { activeTechnique, gogoSignal, psych } = chartContext || {};
+  const chartScoreBlock = activeTechnique
+    ? `
+[현재 화면에 표시 중인 차트 분석 점수 — 반드시 참고]
+선택 기법: ${activeTechnique.name} · 점수 ${activeTechnique.score}점 · 등급 ${activeTechnique.grade} · 권장 액션 ${activeTechnique.action || "-"}
+고고저 판정: ${gogoSignal?.status === "OK" ? `${gogoSignal.grade} (점수 ${gogoSignal.score}점, 돌파율 ${gogoSignal.breakoutRate}%, 저점구조 ${gogoSignal.lowStructure})` : gogoSignal?.message || "-"}
+시장 심리: ${psych?.phase || "-"} (공포·탐욕 ${psych?.fearGreedScore ?? "-"}점, RSI ${psych?.rsiValue ?? "-"})
+`
+    : "";
   const base = `
 [종목 데이터]
 종목명: ${name}
@@ -9433,7 +9735,7 @@ function buildAnalysisPrompt(selected, stocks, followup, lastResult) {
 저가: ${fmtPrice(selected?.low)}
 거래량: ${fmtPrice(selected?.volume)}
 PER/PBR: ${selected?.per ?? "-"} / ${selected?.pbr ?? "-"}
-
+${chartScoreBlock}
 [학습 가중치]
 ${WEIGHTS.map((w) => `- ${w.name}: ×${w.weight}, 최근 적중률 ${w.hit}%`).join("\n")}
 `;
@@ -9451,6 +9753,7 @@ ${WEIGHTS.map((w) => `- ${w.name}: ×${w.weight}, 최근 적중률 ${w.hit}%`).j
 - 종가가 고고저 추세선을 돌파하면 1차 신호, 다음 봉 저가가 추세선 위에서 유지되면 2차 확인 신호입니다.
 - 20선/60선 위치, 거래량 평균 대비 증가, RSI 과열 여부를 함께 확인합니다.
 - 추격 매수보다 종가 돌파, 저가 유지, 거래량 동반 여부를 조건으로 제시합니다.
+${chartContext ? "- 위 [현재 화면에 표시 중인 차트 분석 점수]와 반대되는 결론(예: 점수가 높은데 매도/하락 의견)을 낼 경우, 반드시 어떤 지표 때문에 점수와 다른 판단을 하는지 근거를 명시하세요. 근거 없이 점수와 모순된 결론만 제시하지 마세요." : ""}
 
 전체 답변은 2,500자 이내로 작성하되, 반드시 ①~⑥ 항목을 모두 완결된 문장으로 끝까지 작성하세요. 중간에 문장이 끊기면 안 됩니다.
 
@@ -9563,7 +9866,7 @@ async function saveAlertToServer(alertItem) {
 }
 
 
-function AiReport({ selected, stocks }) {
+function AiReport({ selected, stocks, chartContext }) {
   const name = getStockName(selected?.code, selected?.name, stocks);
   const defaultPrompt = `${name}(${selected?.code}) 단기/스윙 분석 리포트 생성`;
   const [prompt, setPrompt] = useState(defaultPrompt);
@@ -9672,7 +9975,7 @@ function AiReport({ selected, stocks }) {
     try {
       if (isFollowup) setChat((p) => [...p, { role: "user", text: followup }]);
 
-      const finalPrompt = buildAnalysisPrompt(selected, stocks, isFollowup ? followup : "", result);
+      const finalPrompt = buildAnalysisPrompt(selected, stocks, isFollowup ? followup : "", result, chartContext);
       const data = await fetchJson("/api/ai/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -10390,6 +10693,51 @@ function getChartVisualSignals({ activeTechniqueKey, chartData, gogoSignal, acti
     if (activeTechnique?.raw?.isBreakout) signals.push({ index: lastIndex, price: chartData[lastIndex]?.close, label: "박스 돌파", color: "#00ff88" });
   }
 
+  if (activeTechniqueKey === "triangle") {
+    const t = activeTechnique?.raw;
+    if (t?.status === "OK") {
+      signals.push({
+        index: lastIndex,
+        price: t.isBreakoutUp ? t.upperNow : t.isBreakoutDown ? t.lowerNow : t.upperNow,
+        label: t.isBreakoutUp ? "삼각수렴 상단 돌파" : t.isBreakoutDown ? "삼각수렴 하단 이탈" : `${t.patternType} 수렴 중`,
+        color: t.isBreakoutUp ? "#00ff88" : t.isBreakoutDown ? "#ff4466" : "#ffd447",
+      });
+    }
+  }
+
+  if (activeTechniqueKey === "td") {
+    const t = activeTechnique?.raw;
+    if (t?.status === "OK" && (t.signalType === "buySetup9" || t.signalType === "buyCountdown13")) {
+      const idx = t.signalType === "buyCountdown13" ? lastIndex : lastIndex - (t.lastBuySetup9BarsAgo || 0);
+      signals.push({
+        index: idx,
+        price: chartData[idx]?.low,
+        label: t.signalType === "buyCountdown13" ? "TD 매수 카운트다운 13" : "TD 매수 셋업 9",
+        color: "#00ff88",
+      });
+    } else if (t?.status === "OK" && (t.signalType === "sellSetup9" || t.signalType === "sellCountdown13")) {
+      const idx = t.signalType === "sellCountdown13" ? lastIndex : lastIndex - (t.lastSellSetup9BarsAgo || 0);
+      signals.push({
+        index: idx,
+        price: chartData[idx]?.high,
+        label: t.signalType === "sellCountdown13" ? "TD 매도 카운트다운 13" : "TD 매도 셋업 9",
+        color: "#ff4466",
+      });
+    }
+  }
+
+  if (activeTechniqueKey === "drawdown") {
+    const t = activeTechnique?.raw;
+    if (t?.status === "OK" && t.high52w) {
+      signals.push({
+        index: lastIndex,
+        price: t.high52w,
+        label: `52주 고점 대비 ${t.drawdownPct}%`,
+        color: t.inLeaderBand ? "#00ff88" : "#ffd447",
+      });
+    }
+  }
+
   return signals;
 }
 
@@ -10406,6 +10754,8 @@ function ChartView({ selected, stocks, selectedCode, setSelectedCode }) {
   const [windowOffset, setWindowOffset] = useState(0);
   const [chartFullscreen, setChartFullscreen] = useState(false);
   const [hoverIndex, setHoverIndex] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStateRef = useRef(null);
 
   // 자동 고고저 확장 무한 반복 방지용 잠금값입니다.
   // 기존에는 5Y ↔ 10Y처럼 range가 자동 변경되면서 useEffect가 다시 실행되어
@@ -10439,6 +10789,9 @@ function ChartView({ selected, stocks, selectedCode, setSelectedCode }) {
     { key: "maPullback", label: "이평 눌림" },
     { key: "supportResistance", label: "지지·저항" },
     { key: "boxBreakout", label: "박스권 돌파" },
+    { key: "triangle", label: "삼각수렴" },
+    { key: "td", label: "TD 시퀀셜" },
+    { key: "drawdown", label: "조정밴드" },
     { key: "bollinger", label: "볼린저" },
     { key: "volumeBreakout", label: "거래량 돌파" },
     { key: "rsiReversal", label: "RSI 반등" },
@@ -10657,6 +11010,13 @@ const loadExtendedGogo = async (trigger = "manual") => {
   if (activeTechniqueKey === "volumeBreakout" && activeTechnique?.raw?.prevHigh) {
     extraValues.push(activeTechnique.raw.prevHigh);
   }
+  if (activeTechniqueKey === "triangle" && activeTechnique?.raw?.status === "OK") {
+    const t = activeTechnique.raw;
+    extraValues.push(t.upperStart.price, t.upperEnd.price, t.lowerStart.price, t.lowerEnd.price);
+  }
+  if (activeTechniqueKey === "drawdown" && activeTechnique?.raw?.high52w) {
+    extraValues.push(activeTechnique.raw.high52w);
+  }
   const maxP = Math.max(...highs, ...maValues, ...bollValues, ...extraValues);
   const minP = Math.min(...lows, ...maValues, ...bollValues, ...extraValues);
   const pricePadding = Math.max(1, (maxP - minP) * 0.06);
@@ -10710,6 +11070,48 @@ const loadExtendedGogo = async (trigger = "manual") => {
       return Math.abs(item.i - prev.i) >= Math.max(3, Math.floor(axisLabelStep * 0.65)) || item.i === chartData.length - 1;
     });
 
+  // 차트 위 드래그로 과거/최근 이동, 휠로 확대/축소
+  const updateHoverFromClientX = (clientX, rect) => {
+    const relX = ((clientX - rect.left) / rect.width) * width;
+    const idx = Math.round((relX - main.x) / Math.max(1, step));
+    setHoverIndex(Math.max(0, Math.min(chartData.length - 1, idx)));
+  };
+
+  const handleChartPointerDown = (e) => {
+    dragStateRef.current = { startClientX: e.clientX, startOffset: safeOffset };
+    setIsDragging(true);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+  };
+
+  const handleChartPointerMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const drag = dragStateRef.current;
+    if (drag) {
+      const deltaClientX = e.clientX - drag.startClientX;
+      const svgScale = width / Math.max(1, rect.width);
+      const deltaBars = Math.round((deltaClientX * svgScale) / Math.max(1, step));
+      const nextOffset = Math.max(0, Math.min(maxOffset, drag.startOffset + deltaBars));
+      setWindowOffset(nextOffset);
+    }
+    updateHoverFromClientX(e.clientX, rect);
+  };
+
+  const endChartDrag = (e) => {
+    dragStateRef.current = null;
+    setIsDragging(false);
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
+  };
+
+  const handleChartWheel = (e) => {
+    try { e.preventDefault(); } catch {}
+    const zoomIn = e.deltaY < 0;
+    setVisibleCount((n) => {
+      const base = Math.max(20, Math.min(fullChartData.length, n));
+      const next = zoomIn ? Math.round(base * 0.85) : Math.round(base * 1.18);
+      return Math.max(20, Math.min(fullChartData.length, next));
+    });
+  };
+
   const lastTradeLabel = last?.date || "마지막 거래 시점";
   const ma20Last = ma20[ma20.length - 1];
 
@@ -10723,12 +11125,13 @@ const loadExtendedGogo = async (trigger = "manual") => {
   const showGogo = activeTechniqueKey === "gogojeo" || activeTechniqueKey === "auto" || techniqueMode === "auto";
   const bollinger = activeTechniqueKey === "bollinger" ? activeTechnique?.raw : null;
   const volumeBreak = activeTechniqueKey === "volumeBreakout" ? activeTechnique?.raw : null;
+  const triangleInfo = activeTechniqueKey === "triangle" && activeTechnique?.raw?.status === "OK" ? activeTechnique.raw : null;
   const visualSignals = getChartVisualSignals({ activeTechniqueKey, chartData, gogoSignal, activeTechnique });
 
   return (
     <div className="grid">
       <div className="ai-report-scroll-panel">
-        <AiReport selected={selected} stocks={stocks} />
+        <AiReport selected={selected} stocks={stocks} chartContext={{ activeTechnique, gogoSignal, psych }} />
         <div className="ai-report-scroll-note">AI 리포트 영역은 별도 스크롤입니다. 분석 결과 전체 박스 안에서 마우스 휠 또는 터치로 내려보세요.</div>
       </div>
       <div className="panel">
@@ -10829,6 +11232,7 @@ const loadExtendedGogo = async (trigger = "manual") => {
             />
             <span className="chart-window-label">{chartData.length}봉 표시 / 전체 {fullChartData.length}봉</span>
           </div>
+          <div className="chart-drag-hint">차트 위에서 마우스로 드래그하면 과거/최근 구간으로 이동하고, 마우스 휠로 확대·축소할 수 있습니다.</div>
 
           <div className={`chart-box pro-chart-box ${chartFullscreen ? "chart-box-fullscreen" : ""}`}>
             {chartFullscreen && <button className="chart-back-btn" onClick={() => setChartFullscreen(false)}>돌아가기</button>}
@@ -10842,17 +11246,16 @@ const loadExtendedGogo = async (trigger = "manual") => {
             )}
             <div className="chart-svg-wrap">
             <svg
-              className="chart-svg pro-chart-svg"
+              className={`chart-svg pro-chart-svg${isDragging ? " dragging" : ""}`}
               viewBox={`0 0 ${width} ${height}`}
               preserveAspectRatio="xMidYMid meet"
               style={{ fontFamily: "var(--paperlogy-font)" }}
-              onMouseMove={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                const relX = ((e.clientX - rect.left) / rect.width) * width;
-                const idx = Math.round((relX - main.x) / Math.max(1, step));
-                setHoverIndex(Math.max(0, Math.min(chartData.length - 1, idx)));
-              }}
-              onMouseLeave={() => setHoverIndex(null)}
+              onPointerDown={handleChartPointerDown}
+              onPointerMove={handleChartPointerMove}
+              onPointerUp={endChartDrag}
+              onPointerCancel={endChartDrag}
+              onPointerLeave={(e) => { endChartDrag(e); setHoverIndex(null); }}
+              onWheel={handleChartWheel}
             >
               <defs>
                 <marker id="arrowHead" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
@@ -10930,6 +11333,23 @@ const loadExtendedGogo = async (trigger = "manual") => {
                   <circle cx={trendStart.x} cy={trendStart.y} r="5" fill="#ff4466" />
                   <circle cx={xFor(selectedHigh2.index)} cy={yFor(selectedHigh2.price)} r="5" fill="#ff4466" />
                   <circle cx={trendEnd.x} cy={trendEnd.y} r="5" fill={gogoSignal.checks.isBreakout ? "#00ff88" : "#ff4466"} />
+                </>
+              )}
+
+              {triangleInfo && (
+                <>
+                  <line
+                    x1={xFor(triangleInfo.upperStart.index)} y1={yFor(triangleInfo.upperStart.price)}
+                    x2={xFor(triangleInfo.upperEnd.index)} y2={yFor(triangleInfo.upperEnd.price)}
+                    className="resistance-line"
+                  />
+                  <line
+                    x1={xFor(triangleInfo.lowerStart.index)} y1={yFor(triangleInfo.lowerStart.price)}
+                    x2={xFor(triangleInfo.lowerEnd.index)} y2={yFor(triangleInfo.lowerEnd.price)}
+                    className="support-line"
+                  />
+                  <circle cx={xFor(triangleInfo.upperEnd.index)} cy={yFor(triangleInfo.upperEnd.price)} r="5" fill={triangleInfo.isBreakoutUp ? "#00ff88" : "#9b5cff"} />
+                  <circle cx={xFor(triangleInfo.lowerEnd.index)} cy={yFor(triangleInfo.lowerEnd.price)} r="5" fill={triangleInfo.isBreakoutDown ? "#ff4466" : "#ffd447"} />
                 </>
               )}
 

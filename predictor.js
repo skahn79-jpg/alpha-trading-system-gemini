@@ -238,6 +238,7 @@ function predict(code, analysis, close) {
   }
 
   const resolved = model.wins + model.losses;
+  const direction = probUp >= 0.5 ? "UP" : "DOWN";
 
   // 점수(현재 기술 상태)와 예측(7일 후 통계)이 반대로 보일 때의 해설 + 결합 판정
   // 모델은 백테스트에서 평균 회귀(과열→되돌림, 과매도→반등)를 학습하므로
@@ -263,7 +264,7 @@ function predict(code, analysis, close) {
   return {
     probUp: pu,
     probDown: Math.round((1 - probUp) * 1000) / 10,
-    direction: probUp >= 0.5 ? "UP" : "DOWN",
+    direction,
     confidence: Math.abs(probUp - 0.5) >= 0.2 ? "high" : Math.abs(probUp - 0.5) >= 0.1 ? "medium" : "low",
     horizonDays: HORIZON_DAYS,
     context,

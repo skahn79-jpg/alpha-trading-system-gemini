@@ -180,6 +180,20 @@ function buildCommentary({ analysis = {}, profile = null, outlook = null, close 
     parts.push(`【종합】 기술적 종합 점수 ${analysis.score}점 (${analysis.grade}등급) · ${analysis.action || ''}. ${analysis.summary || ''}`);
   }
 
+  // 8) 지표 간 상충 안내 — 기술 점수(추세·컨플루언스)와 과거 패턴 전망(평균회귀 성향 표본)은
+  // 서로 다른 근거로 산출되므로, 방향이 반대일 때는 그 이유를 명시해 오해를 줄인다.
+  if (analysis.score !== undefined && outlook) {
+    const highScore = analysis.score >= 80;
+    const lowScore = analysis.score <= 40;
+    const bearishOutlook = outlook.avgReturn < 0 || outlook.upProbability < 40;
+    const bullishOutlook = outlook.avgReturn > 0 || outlook.upProbability > 60;
+    if (highScore && bearishOutlook) {
+      parts.push(`【참고】 기술적 종합 점수(${analysis.score}점)는 추세·컨플루언스 기준으로 우호적이지만, 과거 유사 패턴 전망은 표본 기준 하락 우위입니다. 두 지표는 산출 근거가 달라 상반될 수 있으니 함께 참고하고 단일 지표만으로 판단하지 마세요.`);
+    } else if (lowScore && bullishOutlook) {
+      parts.push(`【참고】 기술적 종합 점수(${analysis.score}점)는 낮지만, 과거 유사 패턴 전망은 표본 기준 상승 우위입니다. 두 지표는 산출 근거가 달라 상반될 수 있으니 함께 참고하고 단일 지표만으로 판단하지 마세요.`);
+    }
+  }
+
   parts.push('본 해설은 규칙 기반 자동 생성 참고 정보이며 투자 권유가 아닙니다.');
   return parts;
 }

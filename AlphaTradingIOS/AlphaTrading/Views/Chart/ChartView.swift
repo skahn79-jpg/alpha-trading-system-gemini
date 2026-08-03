@@ -585,6 +585,7 @@ struct ChartView: View {
         let confidence: String?
         let horizonDays: Int?
         let topFactors: [Factor]?
+        let context: String?
         let model: ModelInfo?
     }
 
@@ -957,6 +958,9 @@ struct ChartView: View {
         var text = "AI 모델이 \(days)일 뒤 \(directionText)로 봅니다 (신뢰도 \(confidenceText)). 점선은 확률 편향을 일별 누적한 중심 경로, 회색 영역은 변동성(ATR) 기반 불확실성 콘 — 멀어질수록 예측 범위가 넓어집니다."
         if let factor = p.topFactors?.first, let label = factor.label {
             text += " 판단에 가장 큰 영향을 준 요인은 '\(label)'입니다."
+        }
+        if let context = p.context, !context.isEmpty {
+            text += "\n\n\(context)"
         }
         return text
     }
