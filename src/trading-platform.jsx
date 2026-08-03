@@ -8934,6 +8934,157 @@ function calculateTriangleSignal(candles, options = {}) {
   };
 }
 
+/** TD 시퀀셜(디마크 지표) — 종가가 4봉 전보다 낮은/높은 흐름이 9회 연속되면 매수/매도 셋업 완성으로 보고,
+ * 이후 2봉 전 고가·저가 대비 조건을 13회까지 세는 카운트다운으로 반전 강도를 봅니다. */
+function calculateTdSequentialSignal(candles) {
+  if (!candles || candles.length < 30) {
+    return { status: "ERROR", signalName: "TD 시퀀셜", score: 0, grade: "제외", message: "최소 30봉 이상 필요합니다." };
+  }
+
+  const closes = candles.map((c) => Number(c.close));
+  const highs = candles.map((c) => Number(c.high));
+  const lows = candles.map((c) => Number(c.low));
+  const n = candles.length;
+  const lastIndex = n - 1;
+
+  let buyCount = 0;
+  let sellCount = 0;
+  let lastBuySetup9 = -1;
+  let lastSellSetup9 = -1;
+
+  for (let i = 4; i < n; i++) {
+    if (closes[i] < closes[i - 4]) {
+      buyCount += 1;
+      sellCount = 0;
+    } else if (closes[i] > closes[i - 4]) {
+      sellCount += 1;
+      buyCount = 0;
+    } else {
+      buyCount = 0;
+      sellCount = 0;
+    }
+    if (buyCount === 9) { lastBuySetup9 = i; buyCount = 0; }
+    if (sellCount === 9) { lastSellSetup9 = i; sellCount = 0; }
+  }
+
+  const countdownFrom = (setupIndex, direction) => {
+    if (setupIndex < 0) return 0;
+    let count = 0;
+    for (let i = setupIndex + 1; i < n && i - 2 >= 0; i++) {
+      const qualifies = direction === "buy" ? closes[i] <= lows[i - 2] : closes[i] >= highs[i - 2];
+      if (qualifies) {
+        count += 1;
+        if (count >= 13) return 13;
+      }
+    }
+    return count;
+  };
+
+  const buyCountdown = countdownFrom(lastBuySetup9, "buy");
+  const sellCountdown = countdownFrom(lastSellSetup9, "sell");
+  const buySetupRecent = lastBuySetup9 >= 0 && lastIndex - lastBuySetup9 <= 3;
+  const sellSetupRecent = lastSellSetup9 >= 0 && lastIndex - lastSellSetup9 <= 3;
+
+  let status = "NO_SIGNAL";
+  let signalType = "none";
+  let score = 25;
+  let action = "매수·매도 셋업 진행 중 — 9 완성 대기";
+
+  if (buyCountdown >= 13) {
+    status = "OK"; signalType = "buyCountdown13"; score = 92;
+    action = "매수 카운트다운 13 완성 — 강한 바닥 반전 신호";
+  } else if (sellCountdown >= 13) {
+    status = "OK"; signalType = "sellCountdown13"; score = 8;
+    action = "매도 카운트다운 13 완성 — 강한 상투 반전 신호";
+  } else if (buySetupRecent) {
+    status = "OK"; signalType = "buySetup9"; score = 78;
+    action = `매수 셋업 9 완성 (${lastIndex - lastBuySetup9}봉 전) — 과매도 반전 후보`;
+  } else if (sellSetupRecent) {
+    status = "OK"; signalType = "sellSetup9"; score = 15;
+    action = `매도 셋업 9 완성 (${lastIndex - lastSellSetup9}봉 전) — 과매수 반전 후보`;
+  } else if (buyCount >= 5) {
+    status = "OK"; signalType = "buyBuilding"; score = 45 + buyCount * 2;
+    action = `매수 셋업 진행 중 (${buyCount}/9)`;
+  } else if (sellCount >= 5) {
+    status = "OK"; signalType = "sellBuilding"; score = 45 - sellCount * 2;
+    action = `매도 셋업 진행 중 (${sellCount}/9)`;
+  }
+
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  let grade = "제외";
+  if (score >= 80) grade = "강한 매수 후보";
+  else if (score >= 65) grade = "관심 종목";
+  else if (score >= 50) grade = "관찰";
+
+  return {
+    status,
+    signalName: "TD 시퀀셜",
+    score,
+    grade,
+    action,
+    signalType,
+    buyCount,
+    sellCount,
+    buyCountdown,
+    sellCountdown,
+    lastBuySetup9BarsAgo: lastBuySetup9 >= 0 ? lastIndex - lastBuySetup9 : null,
+    lastSellSetup9BarsAgo: lastSellSetup9 >= 0 ? lastIndex - lastSellSetup9 : null,
+  };
+}
+
+/** 대세주 조정밴드(시스코 패러다임) — 52주 고점 대비 낙폭이 대형 주도주가 대세 상승 중 겪는
+ * 전형적 조정 구간(-30%~-40%)에 들어왔는지를 봅니다. */
+function calculateLeaderDrawdownSignal(candles) {
+  if (!candles || candles.length < 20) {
+    return { status: "ERROR", signalName: "대세주 조정밴드", score: 0, grade: "제외", message: "최소 20봉 이상 필요합니다." };
+  }
+
+  const lookback = Math.min(candles.length, 252);
+  const windowData = candles.slice(-lookback);
+  const high52w = Math.max(...windowData.map((c) => Number(c.high)));
+  const price = Number(candles[candles.length - 1].close);
+
+  if (!(high52w > 0)) {
+    return { status: "ERROR", signalName: "대세주 조정밴드", score: 0, grade: "제외", message: "52주 고점을 계산할 수 없습니다." };
+  }
+
+  const drawdownPct = ((price - high52w) / high52w) * 100;
+  const inLeaderBand = drawdownPct <= -30 && drawdownPct >= -40;
+  const deepBand = drawdownPct < -40;
+
+  let score = 30;
+  if (drawdownPct <= -15) score += 10;
+  if (inLeaderBand) score += 40;
+  else if (deepBand) score += 25;
+  if (drawdownPct > -10) score -= 10;
+  score = Math.max(0, Math.min(100, Math.round(score)));
+
+  let grade = "제외";
+  if (score >= 80) grade = "강한 매수 후보";
+  else if (score >= 65) grade = "관심 종목";
+  else if (score >= 50) grade = "관찰";
+
+  const action = inLeaderBand
+    ? "역사적 주도주 조정 밴드(-30%~-40%) 진입 — 분할 매수 관찰 구간"
+    : deepBand
+      ? "조정 밴드를 넘어선 급락 — 펀더멘털 재점검 필요"
+      : drawdownPct <= -15
+        ? "조정 진행 중 — 밴드 진입 대기"
+        : "52주 고점 근접 — 조정 매수 근거 약함";
+
+  return {
+    status: "OK",
+    signalName: "대세주 조정밴드",
+    score,
+    grade,
+    action,
+    high52w: Math.round(high52w),
+    drawdownPct: Number(drawdownPct.toFixed(2)),
+    inLeaderBand,
+    deepBand,
+  };
+}
+
 function calculateGapSignal(candles) {
   if (!candles || candles.length < 10) {
     return { status: "ERROR", signalName: "갭/과열", score: 0, grade: "제외", message: "최소 10봉 이상 필요합니다." };
@@ -9003,6 +9154,8 @@ function recommendChartTechniques(candles, gogoSignal) {
     normalizeTechniqueSignal("supportResistance", calculateSupportResistanceSignal(candles)),
     normalizeTechniqueSignal("boxBreakout", calculateBoxBreakoutSignal(candles)),
     normalizeTechniqueSignal("triangle", calculateTriangleSignal(candles)),
+    normalizeTechniqueSignal("td", calculateTdSequentialSignal(candles)),
+    normalizeTechniqueSignal("drawdown", calculateLeaderDrawdownSignal(candles)),
     normalizeTechniqueSignal("bollinger", calculateBollingerSqueezeSignal(candles)),
     normalizeTechniqueSignal("volumeBreakout", calculateVolumeBreakoutSignal(candles)),
     normalizeTechniqueSignal("rsiReversal", calculateRsiReversalSignal(candles)),
@@ -9033,6 +9186,8 @@ function techniqueDescription(key) {
     supportResistance: "최근 매물대가 많이 겹친 지지·저항 가격대를 자동 추정합니다.",
     boxBreakout: "최근 박스권 상단 돌파 또는 돌파 임박 여부를 봅니다.",
     triangle: "고점을 연결한 상단 추세선과 저점을 연결한 하단 추세선이 좁혀지는 삼각수렴 패턴과 돌파 방향을 봅니다.",
+    td: "종가가 4봉 전보다 낮거나 높은 흐름이 9회 연속되면 매수/매도 셋업 완성으로 보고, 이후 2봉 전 고저 대비 카운트다운 13까지 반전 강도를 추적합니다.",
+    drawdown: "52주 고점 대비 낙폭이 대형 주도주가 대세 상승 중 겪는 전형적 조정 구간(-30%~-40%)에 들어왔는지를 봅니다.",
     bollinger: "볼린저 밴드 수축 후 상단 돌파와 거래량 동반 여부를 봅니다.",
     volumeBreakout: "최근 20봉 전고점 돌파와 거래량 급증을 봅니다.",
     rsiReversal: "RSI 과매도 회복, 가격 반등, 20일선 회복을 봅니다.",
@@ -10550,6 +10705,39 @@ function getChartVisualSignals({ activeTechniqueKey, chartData, gogoSignal, acti
     }
   }
 
+  if (activeTechniqueKey === "td") {
+    const t = activeTechnique?.raw;
+    if (t?.status === "OK" && (t.signalType === "buySetup9" || t.signalType === "buyCountdown13")) {
+      const idx = t.signalType === "buyCountdown13" ? lastIndex : lastIndex - (t.lastBuySetup9BarsAgo || 0);
+      signals.push({
+        index: idx,
+        price: chartData[idx]?.low,
+        label: t.signalType === "buyCountdown13" ? "TD 매수 카운트다운 13" : "TD 매수 셋업 9",
+        color: "#00ff88",
+      });
+    } else if (t?.status === "OK" && (t.signalType === "sellSetup9" || t.signalType === "sellCountdown13")) {
+      const idx = t.signalType === "sellCountdown13" ? lastIndex : lastIndex - (t.lastSellSetup9BarsAgo || 0);
+      signals.push({
+        index: idx,
+        price: chartData[idx]?.high,
+        label: t.signalType === "sellCountdown13" ? "TD 매도 카운트다운 13" : "TD 매도 셋업 9",
+        color: "#ff4466",
+      });
+    }
+  }
+
+  if (activeTechniqueKey === "drawdown") {
+    const t = activeTechnique?.raw;
+    if (t?.status === "OK" && t.high52w) {
+      signals.push({
+        index: lastIndex,
+        price: t.high52w,
+        label: `52주 고점 대비 ${t.drawdownPct}%`,
+        color: t.inLeaderBand ? "#00ff88" : "#ffd447",
+      });
+    }
+  }
+
   return signals;
 }
 
@@ -10602,6 +10790,8 @@ function ChartView({ selected, stocks, selectedCode, setSelectedCode }) {
     { key: "supportResistance", label: "지지·저항" },
     { key: "boxBreakout", label: "박스권 돌파" },
     { key: "triangle", label: "삼각수렴" },
+    { key: "td", label: "TD 시퀀셜" },
+    { key: "drawdown", label: "조정밴드" },
     { key: "bollinger", label: "볼린저" },
     { key: "volumeBreakout", label: "거래량 돌파" },
     { key: "rsiReversal", label: "RSI 반등" },
@@ -10823,6 +11013,9 @@ const loadExtendedGogo = async (trigger = "manual") => {
   if (activeTechniqueKey === "triangle" && activeTechnique?.raw?.status === "OK") {
     const t = activeTechnique.raw;
     extraValues.push(t.upperStart.price, t.upperEnd.price, t.lowerStart.price, t.lowerEnd.price);
+  }
+  if (activeTechniqueKey === "drawdown" && activeTechnique?.raw?.high52w) {
+    extraValues.push(activeTechnique.raw.high52w);
   }
   const maxP = Math.max(...highs, ...maValues, ...bollValues, ...extraValues);
   const minP = Math.min(...lows, ...maValues, ...bollValues, ...extraValues);
