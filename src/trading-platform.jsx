@@ -943,6 +943,21 @@ const styles = `
 .sr-zone-resistance{fill:#9b5cff;opacity:.08}
 .box-zone{fill:#00d9ff;opacity:.055;stroke:#00d9ff;stroke-width:1;stroke-dasharray:6 4}
 .fibo-line{stroke:#6f899a;stroke-width:1;stroke-dasharray:3 5;opacity:.62}
+.forecast-cone-zone{fill:#00d9ff;opacity:.05}
+.forecast-high-line{stroke:#00d9ff;stroke-width:1.3;stroke-dasharray:2 5;opacity:.75}
+.forecast-low-line{stroke:#ff9d3d;stroke-width:1.3;stroke-dasharray:2 5;opacity:.75}
+.ai-forecast-high-line{stroke:#00ff88;stroke-width:1.6;stroke-dasharray:7 3}
+.ai-forecast-low-line{stroke:#ff4466;stroke-width:1.6;stroke-dasharray:7 3}
+.forecast-panel{border:1px solid rgba(0,217,255,.25);border-radius:10px;padding:10px 14px;margin:10px 0;background:rgba(0,217,255,.04)}
+.forecast-panel-title{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13px;font-weight:600;color:#c9e8ff}
+.forecast-panel-body{margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.forecast-stat-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:12.5px}
+.forecast-stat-row.ai{border-top:1px dashed rgba(255,255,255,.12);padding-top:6px}
+.forecast-stat-label{color:#8fa6bd;min-width:56px}
+.forecast-stat-high{color:#00ff88;font-weight:600}
+.forecast-stat-low{color:#ff9d3d;font-weight:600}
+.forecast-stat-note{color:#8fa6bd;flex:1 1 100%}
+.forecast-stat-error{color:#ff4466;font-size:12px}
 .chart-svg-wrap{position:relative}
 .pro-chart-svg{cursor:grab;touch-action:pan-y;user-select:none}
 .pro-chart-svg.dragging{cursor:grabbing}
@@ -9128,6 +9143,59 @@ function calcFibonacciLevels(candles, lookback = 120) {
   ];
 }
 
+// 최근 window봉 TR(True Range) 평균 / 마지막 종가 — iOS ChartView.atrPct와 동일 로직
+function calcAtrPct(candles, window = 14) {
+  if (!candles || candles.length < 2) return 0;
+  const last = candles[candles.length - 1];
+  const lastClose = Number(last?.close || 0);
+  if (!(lastClose > 0)) return 0;
+  const slice = candles.slice(-(window + 1));
+  const trs = [];
+  for (let i = 1; i < slice.length; i++) {
+    const prevClose = Number(slice[i - 1].close);
+    const c = slice[i];
+    const high = Number(c.high);
+    const low = Number(c.low);
+    trs.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+  }
+  if (!trs.length) return 0;
+  const atr = trs.reduce((a, b) => a + b, 0) / trs.length;
+  return atr / lastClose;
+}
+
+// 과거 데이터 기반 최고/최저 예측 — ATR% 변동폭 + 확률 드리프트 누적 + √t 불확실성 콘
+// (iOS ChartView.forecastPoints와 동일 공식; probUpPct 미지정 시 방향성 없는 순수 변동성 밴드)
+function computeForecastCone(candles, probUpPct, horizonDays = 7) {
+  const last = candles?.[candles.length - 1];
+  const lastClose = Number(last?.close || 0);
+  if (!candles || candles.length < 2 || !(lastClose > 0)) {
+    return { points: [], predictedHigh: null, predictedLow: null, atrPct: 0, horizonDays: 0, probUp: 50 };
+  }
+  const atr = calcAtrPct(candles, 14);
+  if (!(atr > 0)) {
+    return { points: [], predictedHigh: null, predictedLow: null, atrPct: 0, horizonDays: 0, probUp: 50 };
+  }
+  const probUp = Number.isFinite(Number(probUpPct)) ? Number(probUpPct) : 50;
+  const days = Math.min(Math.max(Math.round(horizonDays) || 7, 1), 7);
+  const dailyDrift = (probUp / 100 - 0.5) * 2 * atr;
+  const points = [{ label: String(last.date || ""), center: lastClose, lower: lastClose, upper: lastClose }];
+  for (let d = 1; d <= days; d++) {
+    const center = lastClose * (1 + dailyDrift * d);
+    const band = lastClose * atr * Math.sqrt(d);
+    points.push({ label: `→${d}`, center, lower: center - band, upper: center + band });
+  }
+  const uppers = points.slice(1).map((p) => p.upper);
+  const lowers = points.slice(1).map((p) => p.lower);
+  return {
+    points,
+    predictedHigh: Math.max(...uppers),
+    predictedLow: Math.max(0, Math.min(...lowers)),
+    atrPct: atr,
+    horizonDays: days,
+    probUp,
+  };
+}
+
 
 function normalizeTechniqueSignal(key, signal) {
   const gradeScore =
@@ -9766,6 +9834,37 @@ ${chartContext ? "- 위 [현재 화면에 표시 중인 차트 분석 점수]와
 `;
 }
 
+
+function buildForecastReviewPrompt(selected, stocks, chartContext, forecastCone) {
+  const name = selected?.assetClass === "global" ? (selected?.name || selected?.symbol || selected?.code) : getStockName(selected?.code, selected?.name, stocks);
+  const { activeTechnique, gogoSignal, psych } = chartContext || {};
+  return `
+[종목 데이터]
+종목명: ${name}
+종목코드: ${selected?.code}
+현재가: ${fmtPrice(selected?.price)}
+
+[통계 기반 예측 — ATR% 변동성 + 확률 드리프트, ${forecastCone.horizonDays}거래일 콘]
+예측 최고가: ${fmtPrice(Math.round(forecastCone.predictedHigh || 0))}원
+예측 최저가: ${fmtPrice(Math.round(forecastCone.predictedLow || 0))}원
+변동성(ATR%): ${((forecastCone.atrPct || 0) * 100).toFixed(2)}%
+상승확률: ${forecastCone.probUp}%
+
+[현재 화면 차트 분석]
+선택 기법: ${activeTechnique?.name || "-"} · 점수 ${activeTechnique?.score ?? "-"}점 · 등급 ${activeTechnique?.grade || "-"}
+고고저 판정: ${gogoSignal?.status === "OK" ? `${gogoSignal.grade} (점수 ${gogoSignal.score}점)` : gogoSignal?.message || "-"}
+시장 심리: ${psych?.phase || "-"} (RSI ${psych?.rsiValue ?? "-"})
+
+위 통계 기반 최고가/최저가 예측은 단순 변동성(ATR)과 확률 드리프트만 반영한 값이라 추세 전환, 지지/저항, 거래량 등은 반영하지 못합니다.
+위 차트 분석·시장 심리·최근 가격 흐름을 참고해 이 예측이 타당한지 검토하세요.
+동의하면 통계값을 그대로 제시하고, 조정이 필요하면 근거와 함께 새 값을 제시하세요.
+
+반드시 아래 형식으로만 답변하세요. 다른 설명은 추가하지 마세요.
+검토 최고가: [숫자]원
+검토 최저가: [숫자]원
+근거: [2~3문장]
+`;
+}
 
 function buildLocalAnalysis(selected, stocks, reason = "") {
   const name = selected?.assetClass === "global" ? (selected?.name || selected?.symbol || selected?.code) : getStockName(selected?.code, selected?.name, stocks);
@@ -10756,6 +10855,10 @@ function ChartView({ selected, stocks, selectedCode, setSelectedCode }) {
   const [hoverIndex, setHoverIndex] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const dragStateRef = useRef(null);
+  const [predictionInfo, setPredictionInfo] = useState(null);
+  const [aiForecast, setAiForecast] = useState(null);
+  const [aiForecastLoading, setAiForecastLoading] = useState(false);
+  const [aiForecastError, setAiForecastError] = useState("");
 
   // 자동 고고저 확장 무한 반복 방지용 잠금값입니다.
   // 기존에는 5Y ↔ 10Y처럼 range가 자동 변경되면서 useEffect가 다시 실행되어
@@ -10858,6 +10961,27 @@ const loadExtendedGogo = async (trigger = "manual") => {
     autoExtendRunningRef.current = false;
     autoExtendKeyRef.current = "";
   }, [selected?.code, period, range]);
+
+  // 국내 종목은 AI 방향성 확률(/api/predict)로 예측 콘에 드리프트를 반영하고,
+  // 해외/가상자산은 확률 없이(중립 50%) 변동성만 반영한 예측 콘을 표시합니다.
+  useEffect(() => {
+    let alive = true;
+    setPredictionInfo(null);
+    setAiForecast(null);
+    setAiForecastError("");
+    const code = selected?.code;
+    if (!code || selected?.assetClass === "global") return;
+    fetchJson(`/api/predict/${code}`)
+      .then((data) => {
+        if (alive) setPredictionInfo(data);
+      })
+      .catch(() => {
+        if (alive) setPredictionInfo(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [selected?.code, selected?.assetClass]);
 
   const loadChart = async () => {
     const code = selected?.code;
@@ -10986,6 +11110,52 @@ const loadExtendedGogo = async (trigger = "manual") => {
   const suggestedStop = srInfo?.stop || (last ? Math.round(Number(last.close) * 0.96) : 0);
   const hoverCandle = hoverIndex != null ? chartData[hoverIndex] : null;
 
+  // 과거 데이터(표시 구간) 기반 최고/최저 예측 콘 — ATR% 변동성 + (국내는) AI 방향성 확률 드리프트
+  const forecastCone = useMemo(
+    () => computeForecastCone(chartData, predictionInfo?.probUp, predictionInfo?.horizonDays || 7),
+    [chartData, predictionInfo?.probUp, predictionInfo?.horizonDays]
+  );
+
+  const reviewForecastWithAi = async () => {
+    if (!forecastCone.predictedHigh || !forecastCone.predictedLow) return;
+    setAiForecastLoading(true);
+    setAiForecastError("");
+    try {
+      const prompt = buildForecastReviewPrompt(selected, stocks, { activeTechnique, gogoSignal, psych }, forecastCone);
+      const data = await fetchJson("/api/ai/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          systemPrompt:
+            "당신은 15년 경력의 주식 트레이딩 분석가입니다. 통계 기반 최고가/최저가 예측을 차트 분석과 시장 상황을 반영해 검토하고, 지정된 형식으로만 답하세요.",
+          maxTokens: 700,
+        }),
+      });
+      const text = data.text || data.result || "";
+      const high = parseFirstPriceFromText(text, ["검토 최고가"]);
+      const low = parseFirstPriceFromText(text, ["검토 최저가"]);
+      const reasonMatch = text.match(/근거\s*[:：]\s*([\s\S]+)/);
+      const reasoning = (reasonMatch ? reasonMatch[1] : text).trim();
+      if (!high && !low) {
+        setAiForecastError("AI 응답에서 예측값을 해석하지 못해 통계 예측값을 그대로 사용합니다.");
+        setAiForecast({ high: null, low: null, reasoning: reasoning || "-" });
+      } else {
+        setAiForecast({
+          high: high || Math.round(forecastCone.predictedHigh),
+          low: low || Math.round(forecastCone.predictedLow),
+          reasoning: reasoning || "-",
+        });
+      }
+    } catch (e) {
+      const msg = e.message || String(e);
+      const isQuota = msg.includes("429") || msg.toLowerCase().includes("quota") || msg.toLowerCase().includes("rate");
+      setAiForecastError(isQuota ? "Gemini API 한도 초과로 검토를 완료하지 못했습니다. 잠시 후 다시 시도하세요." : `AI 검토 중 오류: ${msg}`);
+    } finally {
+      setAiForecastLoading(false);
+    }
+  };
+
   const width = 900;
   const height = 620;
   const pad = { l: 82, r: 42, t: 52, b: 44 };
@@ -11017,6 +11187,10 @@ const loadExtendedGogo = async (trigger = "manual") => {
   if (activeTechniqueKey === "drawdown" && activeTechnique?.raw?.high52w) {
     extraValues.push(activeTechnique.raw.high52w);
   }
+  if (forecastCone?.predictedHigh) extraValues.push(forecastCone.predictedHigh);
+  if (forecastCone?.predictedLow) extraValues.push(forecastCone.predictedLow);
+  if (aiForecast?.high) extraValues.push(aiForecast.high);
+  if (aiForecast?.low) extraValues.push(aiForecast.low);
   const maxP = Math.max(...highs, ...maValues, ...bollValues, ...extraValues);
   const minP = Math.min(...lows, ...maValues, ...bollValues, ...extraValues);
   const pricePadding = Math.max(1, (maxP - minP) * 0.06);
@@ -11204,6 +11378,41 @@ const loadExtendedGogo = async (trigger = "manual") => {
             <span>저점구조: {isGogoOk ? `${gogoSignal.lowStructure} · ${gogoSignal.lowSignal}` : "-"}</span>
           </div>
 
+          <div className="forecast-panel">
+            <div className="forecast-panel-title">
+              <span>과거 데이터 기반 최고/최저 예측 ({forecastCone.horizonDays || 7}거래일)</span>
+              <button className="btn" disabled={aiForecastLoading || !forecastCone.predictedHigh} onClick={reviewForecastWithAi}>
+                {aiForecastLoading ? "AI 검토 중..." : "AI로 검토하기"}
+              </button>
+            </div>
+            {forecastCone.predictedHigh != null ? (
+              <div className="forecast-panel-body">
+                <div className="forecast-stat-row">
+                  <span className="forecast-stat-label">통계 예측</span>
+                  <span className="forecast-stat-high">최고 {fmtPrice(Math.round(forecastCone.predictedHigh))}</span>
+                  <span className="forecast-stat-low">최저 {fmtPrice(Math.round(forecastCone.predictedLow))}</span>
+                  <span className="forecast-stat-note">
+                    변동성(ATR) {(forecastCone.atrPct * 100).toFixed(2)}%
+                    {selected?.assetClass !== "global" && predictionInfo?.probUp != null ? ` · AI 상승확률 ${predictionInfo.probUp}%` : " · 방향성 확률 미반영(순수 변동성)"}
+                  </span>
+                </div>
+                {aiForecast && (
+                  <div className="forecast-stat-row ai">
+                    <span className="forecast-stat-label">AI 검토</span>
+                    <span className="forecast-stat-high">최고 {aiForecast.high != null ? fmtPrice(aiForecast.high) : "-"}</span>
+                    <span className="forecast-stat-low">최저 {aiForecast.low != null ? fmtPrice(aiForecast.low) : "-"}</span>
+                    <span className="forecast-stat-note">{aiForecast.reasoning}</span>
+                  </div>
+                )}
+                {aiForecastError && <div className="forecast-stat-error">{aiForecastError}</div>}
+              </div>
+            ) : (
+              <div className="forecast-panel-body">
+                <span className="forecast-stat-note">변동성을 계산할 데이터가 부족합니다.</span>
+              </div>
+            )}
+          </div>
+
           <div className="indicator-legend">
             <span className="legend-pill"><span className="legend-dot" style={{ background: "#f59e0b" }} />MA5</span>
             <span className="legend-pill"><span className="legend-dot" style={{ background: "#06b6d4" }} />MA20</span>
@@ -11297,6 +11506,26 @@ const loadExtendedGogo = async (trigger = "manual") => {
                 </>
               )}
               {boxInfo?.upper && <rect x={main.x} y={yFor(boxInfo.upper)} width={main.w} height={Math.max(4, yFor(boxInfo.lower) - yFor(boxInfo.upper))} className="box-zone" />}
+
+              {forecastCone?.predictedHigh != null && forecastCone?.predictedLow != null && (
+                <>
+                  <rect
+                    x={main.x}
+                    y={yFor(forecastCone.predictedHigh)}
+                    width={main.w}
+                    height={Math.max(2, yFor(forecastCone.predictedLow) - yFor(forecastCone.predictedHigh))}
+                    className="forecast-cone-zone"
+                  />
+                  <line x1={main.x} y1={yFor(forecastCone.predictedHigh)} x2={main.x + main.w} y2={yFor(forecastCone.predictedHigh)} className="forecast-high-line" />
+                  <line x1={main.x} y1={yFor(forecastCone.predictedLow)} x2={main.x + main.w} y2={yFor(forecastCone.predictedLow)} className="forecast-low-line" />
+                </>
+              )}
+              {aiForecast?.high != null && (
+                <line x1={main.x} y1={yFor(aiForecast.high)} x2={main.x + main.w} y2={yFor(aiForecast.high)} className="ai-forecast-high-line" />
+              )}
+              {aiForecast?.low != null && (
+                <line x1={main.x} y1={yFor(aiForecast.low)} x2={main.x + main.w} y2={yFor(aiForecast.low)} className="ai-forecast-low-line" />
+              )}
 
               {chartData.map((d, i) => {
                 const x = xFor(i);
