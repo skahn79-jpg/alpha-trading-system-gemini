@@ -51,6 +51,7 @@ struct AlphaTradingApp: App {
     @AppStorage("hasAcceptedDisclaimer") private var hasAcceptedDisclaimer = false
     @Environment(\.scenePhase) private var scenePhase
     @UIApplicationDelegateAdaptor(PushRegistrar.self) private var pushRegistrar
+    @StateObject private var adminAuth = AdminAuthViewModel()
 
     init() {
         APIConfig.bootstrapSecrets()
@@ -61,7 +62,7 @@ struct AlphaTradingApp: App {
         WindowGroup {
             Group {
                 if hasAcceptedDisclaimer {
-                    MainTabView()
+                    AdminAuthGateView(auth: adminAuth)
                 } else {
                     OnboardingView(hasAcceptedDisclaimer: $hasAcceptedDisclaimer)
                 }
@@ -71,7 +72,10 @@ struct AlphaTradingApp: App {
         .onChange(of: scenePhase) { phase in
             switch phase {
             case .active:
-                Task { await AlertMonitor.checkNow() }
+                Task {
+                    await adminAuth.refreshSession(reason: .foreground)
+                    await AlertMonitor.checkNow()
+                }
             case .background:
                 AlertMonitor.scheduleNextRefresh()
             default:

@@ -1,11 +1,22 @@
 import SwiftUI
 
 struct MoreView: View {
+    @EnvironmentObject var auth: AdminAuthViewModel
+    @State private var showLogoutConfirm = false
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 12) {
                     apiInfoCard
+
+                    userCard
+
+                    NavigationLink {
+                        BrokerStatusView()
+                    } label: {
+                        moreRow(icon: "building.columns.circle.fill", title: "KB증권", subtitle: "연결 상태 · 조회 준비 중")
+                    }
 
                     NavigationLink {
                         FeaturedSignalsView()
@@ -76,7 +87,35 @@ struct MoreView: View {
             }
             .background(AppTheme.background)
             .navigationTitle("더보기")
+            .alert("로그아웃", isPresented: $showLogoutConfirm) {
+                Button("취소", role: .cancel) {}
+                Button("로그아웃", role: .destructive) {
+                    Task { await auth.logout() }
+                }
+            } message: {
+                Text("로그아웃하면 다시 로그인해야 합니다.")
+            }
         }
+    }
+
+    private var userCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("로그인 사용자: \(auth.displayName)")
+                .font(.paperlogy(15, weight: .semibold))
+                .foregroundStyle(AppTheme.textPrimary)
+            Button {
+                showLogoutConfirm = true
+            } label: {
+                Text("로그아웃")
+                    .font(.paperlogy(15, weight: .medium))
+                    .foregroundStyle(AppTheme.down)
+            }
+            .accessibilityLabel("로그아웃")
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     private var apiInfoCard: some View {

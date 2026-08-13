@@ -339,3 +339,13 @@ test("GET / and SPA fallback vs unmatched /api", async () => {
   assert.equal(api404.status, 404);
   assertJsonNotHtml(api404.res, api404.text, api404.json);
 });
+
+test("POST /api/auth/login without Origin succeeds", async () => {
+  const { status, json, text } = await api("POST", "/api/auth/login", {
+    ip: nextIp(),
+    body: { loginId: LOGIN_ID, password: PASSWORD },
+  });
+  assert.equal(status, 200);
+  assert.equal(json.authenticated, true);
+  assertNoSecrets(text);
+});

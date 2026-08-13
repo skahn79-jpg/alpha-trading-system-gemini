@@ -20,6 +20,9 @@ enum SecureSessionFactory {
         config.timeoutIntervalForRequest = 45
         config.timeoutIntervalForResource = 90
         config.waitsForConnectivity = true
+        config.httpShouldSetCookies = true
+        config.httpCookieAcceptPolicy = .always
+        config.httpCookieStorage = .shared
         return config
     }
 }
