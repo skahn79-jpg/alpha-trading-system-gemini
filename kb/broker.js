@@ -30,6 +30,7 @@ const {
   isDiagnosticError,
   wrapAxiosAsDiagnostic,
   sanitizeResultCode,
+  describeKbResponseShape,
 } = require("./diagnostic.js");
 
 const HTTP_TIMEOUT_MS = 10 * 1000;
@@ -180,7 +181,7 @@ async function _httpPost(url, body, headers = {}, timeout = HTTP_TIMEOUT_MS) {
  *  1) 토큰 획득 (미설정이면 네트워크 호출 없이 ConfigError 전파)
  *  2) POST {baseUrl}{path}, Authorization: Bearer …, body = buildRequest(cfg, dataBody)
  *  3) unwrap 후 resultCode 가 KB_SUCCESS_CODES("0","0000","200") 이면 성공
- * @returns {Promise<{header:any, body:any}>}
+ * @returns {Promise<{header:any, body:any, durationMs:number, shape:object}>}
  */
 async function callTr(trCode, path, dataBody = {}) {
   const stage = stageForTr(trCode);
@@ -226,6 +227,8 @@ async function callTr(trCode, path, dataBody = {}) {
     });
   }
 
+  const durationMs = Date.now() - startedAt;
+  const shape = describeKbResponseShape(data);
   const { header, body } = unwrap(data);
   const headerMissing =
     header === null || header === undefined || typeof header !== "object";
@@ -239,8 +242,9 @@ async function callTr(trCode, path, dataBody = {}) {
       errorType: "parsing",
       kbResultCode: null,
       upstreamStatus: 200,
-      durationMs: Date.now() - startedAt,
+      durationMs,
       retryCount: 0,
+      shape,
     });
   }
 
@@ -251,12 +255,12 @@ async function callTr(trCode, path, dataBody = {}) {
       errorType: "kb-business",
       kbResultCode: sanitizeResultCode(h.resultCode),
       upstreamStatus: 200,
-      durationMs: Date.now() - startedAt,
+      durationMs,
       retryCount: 0,
     });
   }
 
-  return { header: h, body };
+  return { header: h, body, durationMs, shape };
 }
 
 /* ── 1) SZQM0771 장운영상태 ────────────────────────────────────────── */
@@ -266,14 +270,16 @@ async function callTr(trCode, path, dataBody = {}) {
  * TODO(FIELD_SPEC): 장운영구분코드 값의 의미가 명세에 없어 isOpen 등 boolean 파생 금지.
  */
 async function getMarketStatus() {
-  const { body } = await callTr(TR.MARKET_STATUS.code, TR.MARKET_STATUS.path, {});
+  const { body, durationMs, shape } = await callTr(TR.MARKET_STATUS.code, TR.MARKET_STATUS.path, {});
   if (body === null || body === undefined || typeof body !== "object") {
     throw new KbDiagnosticError({
       stage: "market-status",
       errorType: "parsing",
       kbResultCode: null,
       upstreamStatus: 200,
+      durationMs,
       retryCount: 0,
+      shape,
     });
   }
   if (!hasOwn(body, "now_dt") && !hasOwn(body, "now_tm") && !hasOwn(body, "stk_mkoprt_ccd")) {
@@ -282,7 +288,9 @@ async function getMarketStatus() {
       errorType: "parsing",
       kbResultCode: null,
       upstreamStatus: 200,
+      durationMs,
       retryCount: 0,
+      shape,
     });
   }
   const b = body;
@@ -322,7 +330,7 @@ async function getQuote(symbol, excgClsf = "0") {
     e.code = "KB_INVALID_ARGUMENT";
     throw e;
   }
-  const { body } = await callTr(TR.QUOTE.code, TR.QUOTE.path, {
+  const { body, durationMs, shape } = await callTr(TR.QUOTE.code, TR.QUOTE.path, {
     excg_clsf: toStr(excgClsf) || "0",
     shrt_cd: code,
   });
@@ -332,7 +340,9 @@ async function getQuote(symbol, excgClsf = "0") {
       errorType: "parsing",
       kbResultCode: null,
       upstreamStatus: 200,
+      durationMs,
       retryCount: 0,
+      shape,
     });
   }
   if (!hasOwn(body, "now_prc") && !hasOwn(body, "is_nm")) {
@@ -341,7 +351,9 @@ async function getQuote(symbol, excgClsf = "0") {
       errorType: "parsing",
       kbResultCode: null,
       upstreamStatus: 200,
+      durationMs,
       retryCount: 0,
+      shape,
     });
   }
   const b = body;

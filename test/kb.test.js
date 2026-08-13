@@ -1337,3 +1337,320 @@ test("26. getQuote — resultCode '500' 은 여전히 kb-business", async () => 
     restoreEnv(snap);
   }
 });
+
+/* ────────────────────────────────────────────────────────────────────
+ * 27+. 시세 응답 SHAPE 진단 (키 이름만, 값 미수집)
+ * ──────────────────────────────────────────────────────────────────── */
+
+const SHAPE_SECRET_VALUE = "SECRET-VALUE-XYZ";
+const SHAPE_NAME_VALUE = "삼성전자";
+const SHAPE_PRICE_VALUE = "71500";
+const SHAPE_BODY_MARKER = "UNIQUE-FULL-BODY-MARKER-999";
+const SHAPE_KOREAN_NAME = "종목명값";
+const SHAPE_KOREAN_PRICE = "현재가값";
+
+function assertNoShapeValues(serialized) {
+  assert.ok(!String(serialized).includes(SHAPE_SECRET_VALUE), "비밀 값 미출력");
+  assert.ok(!String(serialized).includes(SHAPE_NAME_VALUE), "종목명 값 미출력");
+  assert.ok(!String(serialized).includes(SHAPE_PRICE_VALUE), "현재가 값 미출력");
+  assert.ok(!String(serialized).includes(SHAPE_BODY_MARKER), "응답 본문 마커 미출력");
+  assert.ok(!String(serialized).includes(SHAPE_KOREAN_NAME), "종목명값 미출력");
+  assert.ok(!String(serialized).includes(SHAPE_KOREAN_PRICE), "현재가값 미출력");
+}
+
+function leakyQuotePayload() {
+  return {
+    dataHeader: { resultCode: "200" },
+    dataBody: {
+      is_nm: SHAPE_NAME_VALUE,
+      now_prc: SHAPE_PRICE_VALUE,
+      appKey: SHAPE_SECRET_VALUE,
+      appSecret: SHAPE_SECRET_VALUE,
+      access_token: SHAPE_SECRET_VALUE,
+      Authorization: SHAPE_SECRET_VALUE,
+      Cookie: SHAPE_SECRET_VALUE,
+      extra: SHAPE_BODY_MARKER,
+    },
+    note: SHAPE_KOREAN_NAME,
+    priceNote: SHAPE_KOREAN_PRICE,
+  };
+}
+
+test("27. safeKeys — 최상위 키 이름만 추출하고 값은 넣지 않는다", () => {
+  const obj = {
+    dataHeader: { hidden: SHAPE_SECRET_VALUE },
+    dataBody: { is_nm: SHAPE_NAME_VALUE, now_prc: SHAPE_PRICE_VALUE },
+    items: [SHAPE_SECRET_VALUE, Number(SHAPE_PRICE_VALUE)],
+  };
+  const keys = diagnostic.safeKeys(obj);
+  assert.deepEqual(keys, ["dataHeader", "dataBody", "items"]);
+  const dumped = JSON.stringify(keys);
+  assert.ok(!dumped.includes(SHAPE_SECRET_VALUE));
+  assert.ok(!dumped.includes(SHAPE_NAME_VALUE));
+  assert.ok(!dumped.includes(SHAPE_PRICE_VALUE));
+});
+
+test("28. describeKbResponseShape — 배열/문자/숫자 값을 출력에 넣지 않는다", () => {
+  const payload = {
+    dataHeader: { resultCode: "200" },
+    dataBody: {
+      is_nm: SHAPE_NAME_VALUE,
+      now_prc: Number(SHAPE_PRICE_VALUE),
+      items: [SHAPE_SECRET_VALUE, SHAPE_NAME_VALUE, Number(SHAPE_PRICE_VALUE)],
+    },
+  };
+  const shape = diagnostic.describeKbResponseShape(payload);
+  const json = JSON.stringify(shape);
+  assertNoShapeValues(json);
+  assert.equal(shape.payloadType, "object");
+  assert.deepEqual(shape.topLevelKeys, ["dataHeader", "dataBody"]);
+  assert.equal(shape.dataBodyType, "object");
+  assert.ok(shape.dataBodyKeys.includes("is_nm"));
+  assert.ok(shape.dataBodyKeys.includes("now_prc"));
+  assert.ok(shape.dataBodyKeys.includes("items"));
+  assert.equal(shape.expectedFieldLocations.is_nm, "present");
+  assert.equal(shape.expectedFieldLocations.now_prc, "present");
+});
+
+test("29. describeKbResponseShape — dataBody object/array 타입과 Record 컨테이너", () => {
+  const asObject = diagnostic.describeKbResponseShape({
+    dataHeader: { resultCode: "200" },
+    dataBody: { is_nm: SHAPE_NAME_VALUE, now_prc: SHAPE_PRICE_VALUE },
+  });
+  assert.equal(asObject.dataBodyType, "object");
+  assert.deepEqual(asObject.dataBodyKeys.slice().sort(), ["is_nm", "now_prc"]);
+  assert.equal(asObject.recordCount, null);
+
+  const asArray = diagnostic.describeKbResponseShape({
+    dataHeader: { resultCode: "200" },
+    dataBody: [{ is_nm: SHAPE_NAME_VALUE }, { now_prc: SHAPE_PRICE_VALUE }],
+  });
+  assert.equal(asArray.dataBodyType, "array");
+  assert.deepEqual(asArray.dataBodyKeys, []);
+  assert.equal(asArray.recordCount, 2);
+  assert.equal(typeof asArray.recordCount, "number");
+  assert.equal(asArray.expectedFieldLocations.is_nm, "present");
+  assertNoShapeValues(JSON.stringify(asArray));
+
+  const withRecord = diagnostic.describeKbResponseShape({
+    dataHeader: { resultCode: "200" },
+    dataBody: { Record1: [{ now_prc: SHAPE_PRICE_VALUE, is_nm: SHAPE_NAME_VALUE }] },
+  });
+  assert.deepEqual(withRecord.recordContainers, ["Record1"]);
+  assert.equal(withRecord.recordCount, 1);
+  assert.equal(typeof withRecord.recordCount, "number");
+  assert.ok(!JSON.stringify(withRecord.recordContainers).includes(SHAPE_PRICE_VALUE));
+  assertNoShapeValues(JSON.stringify(withRecord));
+
+  const recordSizeNotContainer = diagnostic.describeKbResponseShape({
+    RecordSize: "120",
+    is_nm: SHAPE_NAME_VALUE,
+  });
+  assert.ok(!recordSizeNotContainer.recordContainers.includes("RecordSize"));
+});
+
+test("30. describeKbResponseShape — depth/키 수/긴 키/이상한 키 제한", () => {
+  const deep = {
+    dataHeader: { resultCode: "200" },
+    dataBody: {
+      a: { b: { c: { is_nm: SHAPE_NAME_VALUE, now_prc: SHAPE_PRICE_VALUE, secretDeepKey: SHAPE_SECRET_VALUE } } },
+    },
+  };
+  const deepShape = diagnostic.describeKbResponseShape(deep);
+  assert.equal(deepShape.expectedFieldLocations.is_nm, "missing");
+  assert.equal(deepShape.expectedFieldLocations.now_prc, "missing");
+  const deepJson = JSON.stringify(deepShape);
+  assert.ok(!deepJson.includes("secretDeepKey"), "MAX_DEPTH 밖 키 이름은 포함하지 않는다");
+  assertNoShapeValues(deepJson);
+
+  const many = {};
+  for (let i = 0; i < 25; i += 1) many[`k${i}`] = SHAPE_SECRET_VALUE;
+  const manyKeys = diagnostic.safeKeys(many);
+  assert.equal(manyKeys.length, 20);
+  assert.ok(!manyKeys.includes("k20"));
+  assert.ok(!manyKeys.includes("k24"));
+
+  const longKey = "K".repeat(41);
+  const weird = {
+    ok_key: 1,
+    [longKey]: SHAPE_SECRET_VALUE,
+    "has space": SHAPE_SECRET_VALUE,
+    한글키: SHAPE_SECRET_VALUE,
+    $dollar: SHAPE_SECRET_VALUE,
+  };
+  const filtered = diagnostic.safeKeys(weird);
+  assert.deepEqual(filtered, ["ok_key"]);
+  const weirdJson = JSON.stringify(diagnostic.describeKbResponseShape(weird));
+  assert.ok(!weirdJson.includes(longKey));
+  assert.ok(!weirdJson.includes("has space"));
+  assert.ok(!weirdJson.includes("한글키"));
+  assert.ok(!weirdJson.includes("$dollar"));
+  assertNoShapeValues(weirdJson);
+});
+
+test("31. describeKbResponseShape/logKbDiagnostic — 비밀값·본문이 로그에 없다", () => {
+  const payload = leakyQuotePayload();
+  const shape = diagnostic.describeKbResponseShape(payload);
+  const shapeJson = JSON.stringify(shape);
+  assertNoShapeValues(shapeJson);
+  assert.ok(shape.topLevelKeys.includes("dataHeader"));
+  assert.ok(shape.dataBodyKeys.includes("appKey"), "키 이름 appKey 는 허용");
+  assert.ok(shape.dataBodyKeys.includes("is_nm"));
+
+  const orig = console.error;
+  const logs = [];
+  console.error = (...args) => {
+    logs.push(args);
+  };
+  try {
+    const err = new diagnostic.KbDiagnosticError({
+      stage: "quote",
+      errorType: "parsing",
+      upstreamStatus: 200,
+      kbResultCode: null,
+      durationMs: 1800,
+      retryCount: 0,
+      shape,
+    });
+    err.appKey = APP_KEY;
+    err.appSecret = APP_SECRET;
+    err.access_token = "fake-access-token-value";
+    err.Authorization = "Bearer fake-access-token-value";
+    err.Cookie = "session=abc";
+    err.responseBody = payload;
+
+    const fields = diagnostic.toLogFields(err);
+    assert.equal(fields.stage, "quote");
+    assert.equal(fields.upstreamStatus, 200);
+    assert.equal(fields.kbResultCode, null);
+    assert.equal(fields.errorType, "parsing");
+    assert.equal(fields.durationMs, 1800);
+    assert.equal(fields.retryCount, 0);
+    assert.equal(fields.payloadType, "object");
+    assert.ok(Array.isArray(fields.topLevelKeys));
+    assert.equal(fields.dataBodyType, "object");
+    assert.ok(Array.isArray(fields.dataBodyKeys));
+    assert.ok(Array.isArray(fields.recordContainers));
+    assert.ok(fields.expectedFieldLocations);
+    assertNoShapeValues(JSON.stringify(fields));
+    assertNoSecrets(JSON.stringify(fields));
+
+    diagnostic.logKbDiagnostic(err);
+    assert.equal(logs.length, 1);
+    const logged = stringifyLogArgs(logs[0]);
+    assertNoShapeValues(logged);
+    assertNoSecrets(logged);
+    assert.ok(!logged.includes(SHAPE_BODY_MARKER));
+    assert.ok(logged.includes("1800"));
+  } finally {
+    console.error = orig;
+  }
+});
+
+test("32. normalizeDuration(null) 은 0 이 아니고 getQuote parsing 은 callTr durationMs 를 유지", async () => {
+  assert.equal(diagnostic.normalizeDuration(null), null);
+  assert.equal(diagnostic.normalizeDuration(undefined), null);
+  assert.equal(diagnostic.normalizeDuration(""), null);
+  assert.equal(diagnostic.normalizeDuration(0), 0);
+  assert.equal(diagnostic.normalizeDuration(1800), 1800);
+
+  const nullFields = diagnostic.toLogFields({
+    stage: "quote",
+    errorType: "parsing",
+    durationMs: null,
+  });
+  assert.equal(nullFields.durationMs, null);
+  assert.notEqual(nullFields.durationMs, 0);
+
+  const preserved = diagnostic.toLogFields(
+    new diagnostic.KbDiagnosticError({
+      stage: "quote",
+      errorType: "parsing",
+      durationMs: 1800,
+    }),
+  );
+  assert.equal(preserved.durationMs, 1800);
+
+  const snap = snapshotEnv();
+  resetAll();
+  try {
+    setConfigured();
+    installFakeToken();
+    broker.__setHttpForTest(async () => {
+      await new Promise((r) => setTimeout(r, 15));
+      return {
+        dataHeader: { resultCode: "200" },
+        dataBody: {},
+      };
+    });
+    let caught = null;
+    try {
+      await broker.getQuote("005930");
+    } catch (err) {
+      caught = err;
+    }
+    assert.ok(caught instanceof diagnostic.KbDiagnosticError);
+    assert.equal(caught.stage, "quote");
+    assert.equal(caught.errorType, "parsing");
+    assert.equal(typeof caught.durationMs, "number");
+    assert.ok(caught.durationMs >= 10, `durationMs should reflect HTTP delay, got ${caught.durationMs}`);
+    assert.equal(diagnostic.toLogFields(caught).durationMs, caught.durationMs);
+    assert.notEqual(diagnostic.toLogFields(caught).durationMs, null);
+    assert.equal(caught.shape.payloadType, "object");
+    assert.ok(caught.shape.topLevelKeys.includes("dataHeader"));
+    assert.ok(caught.shape.topLevelKeys.includes("dataBody"));
+    assert.equal(caught.shape.dataBodyType, "object");
+    assert.equal(caught.shape.expectedFieldLocations.is_nm, "missing");
+    assert.equal(caught.shape.expectedFieldLocations.now_prc, "missing");
+  } finally {
+    resetAll();
+    restoreEnv(snap);
+  }
+});
+
+test("33. getMarketStatus parsing 도 durationMs/shape 를 유지하고 성공 매핑은 그대로", async () => {
+  const snap = snapshotEnv();
+  resetAll();
+  try {
+    setConfigured();
+    installFakeToken();
+    broker.__setHttpForTest(async () => {
+      await new Promise((r) => setTimeout(r, 15));
+      return {
+        dataHeader: { resultCode: "200" },
+        dataBody: {},
+      };
+    });
+    let caught = null;
+    try {
+      await broker.getMarketStatus();
+    } catch (err) {
+      caught = err;
+    }
+    assert.ok(caught instanceof diagnostic.KbDiagnosticError);
+    assert.equal(caught.stage, "market-status");
+    assert.equal(caught.errorType, "parsing");
+    assert.equal(typeof caught.durationMs, "number");
+    assert.ok(caught.durationMs >= 10);
+    assert.equal(caught.shape.payloadType, "object");
+  } finally {
+    resetAll();
+    restoreEnv(snap);
+  }
+});
+
+test("34. payloadTypeOf 와 순환 참조는 값을 노출하지 않는다", () => {
+  assert.equal(diagnostic.payloadTypeOf(null), "null");
+  assert.equal(diagnostic.payloadTypeOf([]), "array");
+  assert.equal(diagnostic.payloadTypeOf({}), "object");
+  assert.equal(diagnostic.payloadTypeOf("x"), "string");
+  assert.equal(diagnostic.payloadTypeOf(1), "number");
+  assert.equal(diagnostic.payloadTypeOf(true), "boolean");
+  assert.equal(diagnostic.payloadTypeOf(undefined), "unknown");
+
+  const cyclic = { dataHeader: { resultCode: "200" }, dataBody: { is_nm: SHAPE_NAME_VALUE } };
+  cyclic.dataBody.self = cyclic;
+  const shape = diagnostic.describeKbResponseShape(cyclic);
+  assert.equal(shape.expectedFieldLocations.is_nm, "present");
+  assertNoShapeValues(JSON.stringify(shape));
+});
