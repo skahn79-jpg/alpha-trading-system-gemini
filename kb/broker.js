@@ -7,8 +7,8 @@
  * 미확정 항목 목록 (TODO(FIELD_SPEC))
  *  1) TR 코드(SZQM0771 등)를 요청에 어떻게 실어야 하는지 명세 미확보.
  *     현재는 path(/api/v1/xxx)가 TR을 식별한다고 보고 trCode 는 에러 표기용으로만 쓴다.
- *  2) 공통 응답 헤더(dataHeader)의 성공 판정 필드는 resultCode="200" & processCode="0000" 로
- *     지시받았으나, 코드 체계 전체 목록은 미확보.
+ *  2) 공통 응답 헤더(dataHeader)의 성공 판정은 resultCode 가 "0" / "0000" / "200"
+ *     이면 성공이다. processCode 는 AND 조건이 아니다. 코드 체계 전체 목록은 미확보.
  *  3) SZQM0771 의 장운영구분코드(stk_mkoprt_ccd / ksdq_mkoprt_ccd / bnd_mkoprt_ccd /
  *     fts_mkoprt_ccd / opt_mkoprt_ccd)와 마감여부 플래그(on_clsng_f, jb_clsng_f)의
  *     **코드값 의미가 명세에 없다** → isOpen 같은 boolean 파생값을 추측해 만들지 않는다.
@@ -34,9 +34,22 @@ const {
 
 const HTTP_TIMEOUT_MS = 10 * 1000;
 
-/** 성공 판정 상수 */
-const OK_RESULT_CODE = "200";
-const OK_PROCESS_CODE = "0000";
+/** 성공 판정 — 문서·실측 resultCode 만 허용. 2xx 전체나 startsWith("2") 는 쓰지 않는다. */
+const KB_SUCCESS_CODES = new Set(["0", "0000", "200"]);
+
+function normalizeKbResultCode(value) {
+  if (value === null || value === undefined) return null;
+  return String(value).trim();
+}
+
+function isKbSuccessCode(value) {
+  const normalized = normalizeKbResultCode(value);
+  return normalized !== null && normalized !== "" && KB_SUCCESS_CODES.has(normalized);
+}
+
+function hasOwn(obj, key) {
+  return obj != null && Object.prototype.hasOwnProperty.call(obj, key);
+}
 
 /** TR 코드 → 경로 */
 const TR = {
@@ -166,7 +179,7 @@ async function _httpPost(url, body, headers = {}, timeout = HTTP_TIMEOUT_MS) {
  * 공통 TR 호출.
  *  1) 토큰 획득 (미설정이면 네트워크 호출 없이 ConfigError 전파)
  *  2) POST {baseUrl}{path}, Authorization: Bearer …, body = buildRequest(cfg, dataBody)
- *  3) unwrap 후 resultCode/processCode 로 성공 판정
+ *  3) unwrap 후 resultCode 가 KB_SUCCESS_CODES("0","0000","200") 이면 성공
  * @returns {Promise<{header:any, body:any}>}
  */
 async function callTr(trCode, path, dataBody = {}) {
@@ -232,9 +245,7 @@ async function callTr(trCode, path, dataBody = {}) {
   }
 
   const h = header;
-  const ok =
-    String(h.resultCode) === OK_RESULT_CODE && String(h.processCode) === OK_PROCESS_CODE;
-  if (!ok) {
+  if (!isKbSuccessCode(h.resultCode)) {
     throw new KbDiagnosticError({
       stage,
       errorType: "kb-business",
@@ -256,7 +267,25 @@ async function callTr(trCode, path, dataBody = {}) {
  */
 async function getMarketStatus() {
   const { body } = await callTr(TR.MARKET_STATUS.code, TR.MARKET_STATUS.path, {});
-  const b = body || {};
+  if (body === null || body === undefined || typeof body !== "object") {
+    throw new KbDiagnosticError({
+      stage: "market-status",
+      errorType: "parsing",
+      kbResultCode: null,
+      upstreamStatus: 200,
+      retryCount: 0,
+    });
+  }
+  if (!hasOwn(body, "now_dt") && !hasOwn(body, "now_tm") && !hasOwn(body, "stk_mkoprt_ccd")) {
+    throw new KbDiagnosticError({
+      stage: "market-status",
+      errorType: "parsing",
+      kbResultCode: null,
+      upstreamStatus: 200,
+      retryCount: 0,
+    });
+  }
+  const b = body;
   return {
     date: toStr(b.now_dt),
     time: toStr(b.now_tm),
@@ -297,7 +326,25 @@ async function getQuote(symbol, excgClsf = "0") {
     excg_clsf: toStr(excgClsf) || "0",
     shrt_cd: code,
   });
-  const b = body || {};
+  if (body === null || body === undefined || typeof body !== "object") {
+    throw new KbDiagnosticError({
+      stage: "quote",
+      errorType: "parsing",
+      kbResultCode: null,
+      upstreamStatus: 200,
+      retryCount: 0,
+    });
+  }
+  if (!hasOwn(body, "now_prc") && !hasOwn(body, "is_nm")) {
+    throw new KbDiagnosticError({
+      stage: "quote",
+      errorType: "parsing",
+      kbResultCode: null,
+      upstreamStatus: 200,
+      retryCount: 0,
+    });
+  }
+  const b = body;
   return {
     symbol: code,
     name: toStr(b.is_nm),
@@ -624,6 +671,9 @@ module.exports = {
   KbApiError,
   ConfigError,
   HTTP_TIMEOUT_MS,
+  KB_SUCCESS_CODES,
+  normalizeKbResultCode,
+  isKbSuccessCode,
   TRADING_DISABLED_MSG,
   TRADING_NOT_IMPLEMENTED_MSG,
   toNum,

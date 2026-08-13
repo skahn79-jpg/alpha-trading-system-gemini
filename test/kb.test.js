@@ -1194,3 +1194,146 @@ test("20. tradingEnabled/autoTradingEnabled 는 env 가 정확히 true 가 아�
     restoreEnv(snap);
   }
 });
+
+/* ────────────────────────────────────────────────────────────────────
+ * 21+. resultCode 성공 판정 (processCode AND 제거)
+ * ──────────────────────────────────────────────────────────────────── */
+
+test("21. isKbSuccessCode — 허용값만 true, 유사 2xx/빈값은 false", () => {
+  assert.equal(broker.isKbSuccessCode("200"), true);
+  assert.equal(broker.isKbSuccessCode(200), true);
+  assert.equal(broker.isKbSuccessCode(" 200 "), true);
+  assert.equal(broker.isKbSuccessCode("0"), true);
+  assert.equal(broker.isKbSuccessCode("0000"), true);
+
+  assert.equal(broker.isKbSuccessCode(null), false);
+  assert.equal(broker.isKbSuccessCode(undefined), false);
+  assert.equal(broker.isKbSuccessCode(""), false);
+  assert.equal(broker.isKbSuccessCode("0200"), false);
+  assert.equal(broker.isKbSuccessCode("2000"), false);
+  assert.equal(broker.isKbSuccessCode("200 OK"), false);
+  assert.equal(broker.isKbSuccessCode("201"), false);
+
+  assert.equal(broker.normalizeKbResultCode(200), "200");
+  assert.equal(broker.normalizeKbResultCode(" 200 "), "200");
+  assert.equal(broker.normalizeKbResultCode(null), null);
+  assert.equal(broker.normalizeKbResultCode(undefined), null);
+  assert.ok(broker.KB_SUCCESS_CODES.has("0"));
+  assert.ok(broker.KB_SUCCESS_CODES.has("0000"));
+  assert.ok(broker.KB_SUCCESS_CODES.has("200"));
+});
+
+test("22. getQuote — resultCode '200' 이고 processCode 없어도 시세 매핑", async () => {
+  const snap = snapshotEnv();
+  resetAll();
+  try {
+    setConfigured();
+    installFakeToken();
+    broker.__setHttpForTest(async () => ({
+      dataHeader: { resultCode: "200" },
+      dataBody: { is_nm: "삼성전자", now_prc: "75,300" },
+    }));
+    const q = await broker.getQuote("005930");
+    assert.equal(q.name, "삼성전자");
+    assert.equal(q.price, 75300);
+  } finally {
+    resetAll();
+    restoreEnv(snap);
+  }
+});
+
+test("23. getQuote — resultCode '200' 이지만 dataBody 누락 → parsing/quote", async () => {
+  const snap = snapshotEnv();
+  resetAll();
+  try {
+    setConfigured();
+    installFakeToken();
+    broker.__setHttpForTest(async () => ({
+      dataHeader: { resultCode: "200" },
+    }));
+    await assert.rejects(
+      () => broker.getQuote("005930"),
+      (err) => {
+        assert.ok(err instanceof diagnostic.KbDiagnosticError);
+        assert.equal(err.stage, "quote");
+        assert.equal(err.errorType, "parsing");
+        assert.equal(err.upstreamStatus, 200);
+        return true;
+      },
+    );
+  } finally {
+    resetAll();
+    restoreEnv(snap);
+  }
+});
+
+test("24. getQuote — resultCode '200' + 빈 dataBody(now_prc/is_nm 없음) → parsing/quote", async () => {
+  const snap = snapshotEnv();
+  resetAll();
+  try {
+    setConfigured();
+    installFakeToken();
+    broker.__setHttpForTest(async () => ({
+      dataHeader: { resultCode: "200" },
+      dataBody: {},
+    }));
+    await assert.rejects(
+      () => broker.getQuote("005930"),
+      (err) => {
+        assert.ok(err instanceof diagnostic.KbDiagnosticError);
+        assert.equal(err.stage, "quote");
+        assert.equal(err.errorType, "parsing");
+        assert.equal(err.upstreamStatus, 200);
+        return true;
+      },
+    );
+  } finally {
+    resetAll();
+    restoreEnv(snap);
+  }
+});
+
+test("25. getQuote — now_prc '0' 은 parsing 이 아니고 toInt('0')===0", async () => {
+  const snap = snapshotEnv();
+  resetAll();
+  try {
+    setConfigured();
+    installFakeToken();
+    broker.__setHttpForTest(async () => ({
+      dataHeader: { resultCode: "200" },
+      dataBody: { now_prc: "0", is_nm: "테스트" },
+    }));
+    const q = await broker.getQuote("005930");
+    assert.equal(q.price, 0);
+    assert.equal(envelope.toInt("0"), 0);
+  } finally {
+    resetAll();
+    restoreEnv(snap);
+  }
+});
+
+test("26. getQuote — resultCode '500' 은 여전히 kb-business", async () => {
+  const snap = snapshotEnv();
+  resetAll();
+  try {
+    setConfigured();
+    installFakeToken();
+    broker.__setHttpForTest(async () => ({
+      dataHeader: { resultCode: "500" },
+      dataBody: { is_nm: "삼성전자", now_prc: "75,300" },
+    }));
+    await assert.rejects(
+      () => broker.getQuote("005930"),
+      (err) => {
+        assert.ok(err instanceof diagnostic.KbDiagnosticError);
+        assert.equal(err.stage, "quote");
+        assert.equal(err.errorType, "kb-business");
+        assert.equal(err.kbResultCode, "500");
+        return true;
+      },
+    );
+  } finally {
+    resetAll();
+    restoreEnv(snap);
+  }
+});
