@@ -9508,7 +9508,7 @@ function Header({ now, tab }) {
 }
 
 function Nav({ tab, setTab }) {
-  const tabs = ["대시보드", "차트 분석", "스크리너", "저평가 스크리너", "US/CRYPTO", "포트폴리오", "알림 센터", "AI 리포트", "AXIOS 마켓 인사이트", "일일 브리핑", "섹터/테마", "전종목 스캔", "백테스트", "AI 시뮬레이션", "지표 통합 최적분석"];
+  const tabs = ["대시보드", "차트 분석", "스크리너", "저평가 스크리너", "US/CRYPTO", "포트폴리오", "알림 센터", "AI 리포트", "AXIOS 마켓 인사이트", "일일 브리핑", "섹터/테마", "전종목 스캔", "백테스트", "AI 시뮬레이션", "지표 통합 최적분석", "투자운영"];
   return (
     <div className="nav">
       {tabs.map((t) => <button key={t} onClick={() => setTab(t)} className={tab === t ? "active" : ""}>{t}</button>)}
@@ -9576,6 +9576,7 @@ function ScreenFrame({ tab, children }) {
     "백테스트": "신호 발생 후 N일 수익률 검증 화면입니다.",
     "AI 시뮬레이션": "신호 가중치와 학습 결과를 AI 판단에 자동 주입합니다.",
     "지표 통합 최적분석": "가치, 섹터 심리, RSI, 모멘텀, 기술 조건을 통합해 코스피/코스닥 최적 후보 20개와 WORST 10개를 선정합니다.",
+    "투자운영": "KB증권 연동 상태와 조회 전용 계좌 정보를 확인합니다. 주문 기능은 비활성입니다.",
   };
   return (
     <div className="screen-shell" key={tab}>
@@ -14126,6 +14127,136 @@ function AiSimulation() {
   );
 }
 
+const TRADING_OPS_SECTIONS = [
+  { key: "balance", title: "잔고", note: "예수금·평가금액은 연결 후 표시됩니다." },
+  { key: "holdings", title: "보유 종목", note: "보유 종목 목록은 연결 후 표시됩니다." },
+  { key: "openOrders", title: "미체결 주문", note: "미체결 주문 내역은 연결 후 표시됩니다." },
+  { key: "fills", title: "체결 내역", note: "체결 내역은 연결 후 표시됩니다." },
+  { key: "buyingPower", title: "매수주문가능금액", note: "매수 가능 금액은 연결 후 표시됩니다." },
+];
+
+function TradingOps() {
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  const loadStatus = async () => {
+    setLoading(true);
+    setErr("");
+    try {
+      const res = await fetchJson("/api/broker/status");
+      setStatus(res && typeof res === "object" ? res : null);
+    } catch (e) {
+      setStatus(null);
+      setErr(e.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadStatus();
+  }, []);
+
+  const configured = status?.configured === true;
+  const missing = Array.isArray(status?.missing) ? status.missing : [];
+  const optionalMissing = Array.isArray(status?.optionalMissing) ? status.optionalMissing : [];
+  const connection = status?.connection || "-";
+  const connectionLabel = connection === "unconfigured" ? "설정 없음" : connection === "unverified" ? "미검증" : connection;
+
+  return (
+    <div className="grid">
+      <div className="panel">
+        <div className="panel-title">
+          <span>투자운영 — KB증권 연동 상태</span>
+          <span className="row">
+            <span className="tag yellow">조회 전용</span>
+            <span className="tag red">주문 기능 비활성</span>
+          </span>
+        </div>
+        <div className="panel-body">
+          <div className="row">
+            <button className="btn" type="button" onClick={loadStatus} disabled={loading}>
+              {loading ? "확인 중" : "연동 상태 새로고침"}
+            </button>
+            <span className="sub">이 화면은 조회만 가능하며 매수/매도 주문은 제공하지 않습니다.</span>
+          </div>
+          <div style={{ height: 12 }} />
+          {loading && <div className="loading">연동 상태 조회 중...</div>}
+          {err && <div className="error">연동 상태 조회 실패: {err}</div>}
+          {!loading && !err && !status && <div className="sub">연동 상태 정보가 없습니다.</div>}
+          {!err && status && !configured && (
+            <div className="error" style={{ borderColor: "#ffd44766", color: "#ffd447", background: "#ffd44711" }}>
+              <b>KB증권 연결 설정 필요</b>
+              <br />
+              {status.message || "서버에 KB증권 연동 환경변수가 설정되어 있지 않습니다."}
+              <br />
+              <br />
+              미설정 환경변수: {missing.length ? missing.join(", ") : "정보 없음"}
+              {optionalMissing.length ? (
+                <>
+                  <br />
+                  선택 항목 미설정: {optionalMissing.join(", ")}
+                </>
+              ) : null}
+            </div>
+          )}
+          {!err && status && configured && (
+            <>
+              <div className="card-grid">
+                <div className="card">
+                  <div className="card-title">연결 상태</div>
+                  <div className="value">{connectionLabel}</div>
+                  <div className="sub">connection: {connection}</div>
+                </div>
+                <div className="card">
+                  <div className="card-title">환경변수 설정</div>
+                  <div className="value">완료</div>
+                  <div className="sub">{optionalMissing.length ? `선택 항목 미설정: ${optionalMissing.join(", ")}` : "필수/선택 항목 모두 설정됨"}</div>
+                </div>
+                <div className="card">
+                  <div className="card-title">거래 활성화</div>
+                  <div className="value">{status.tradingEnabled ? "ON" : "OFF"}</div>
+                  <div className="sub">이 화면에서는 주문을 실행하지 않습니다.</div>
+                </div>
+                <div className="card">
+                  <div className="card-title">자동매매</div>
+                  <div className="value">{status.autoTradingEnabled ? "ON" : "OFF"}</div>
+                  <div className="sub">서버 설정 값입니다.</div>
+                </div>
+              </div>
+              {status.message && <div className="sub" style={{ marginTop: 10, lineHeight: 1.6 }}>{status.message}</div>}
+            </>
+          )}
+        </div>
+        <div className="footer-note">조회 전용 화면입니다. 매수/매도/주문 기능은 제공되지 않습니다.</div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-title">
+          <span>계좌 조회 항목</span>
+          <span className="tag yellow">조회 전용</span>
+        </div>
+        <div className="panel-body">
+          <div className="card-grid">
+            {TRADING_OPS_SECTIONS.map((s) => (
+              <div className="card" key={s.key}>
+                <div className="card-title">{s.title}</div>
+                <div className="value">연결 후 표시</div>
+                <div className="sub">{s.note}</div>
+              </div>
+            ))}
+          </div>
+          <div className="sub" style={{ marginTop: 10, lineHeight: 1.6 }}>
+            각 항목은 KB증권 응답 필드 명세 확보 후 활성화됩니다. 임의의 예시 수치는 표시하지 않습니다.
+          </div>
+        </div>
+        <div className="footer-note">데이터 없음 — 실제 연동 응답이 확인되기 전까지 값은 표시되지 않습니다.</div>
+      </div>
+    </div>
+  );
+}
+
 export default function TradingPlatform() {
   const [tab, setTab] = useState("대시보드");
   const [customStocks, setCustomStocks] = useState(() => loadLS("alpha_custom_stocks", []));
@@ -14251,6 +14382,7 @@ export default function TradingPlatform() {
             {tab === "백테스트" && <Backtest selected={selected} stocks={stocks} />}
             {tab === "AI 시뮬레이션" && <AiSimulation />}
             {tab === "지표 통합 최적분석" && <IntegratedOptimalAnalysis stocks={stocks} quotes={quotes} globalQuotes={globalQuotes} />}
+            {tab === "투자운영" && <TradingOps />}
           </ScreenFrame>
         </div>
       </div>

@@ -33,6 +33,9 @@ const { buildLiqMap } = require("./liqmap.js");
 const evolver = require("./evolve.js");
 const dartFund = require("./dart-fund.js");
 const { buildBtcCycle } = require("./btc-cycle.js");
+const kbConfig = require("./kb/config.js");
+const kbToken = require("./kb/token.js");
+const kbBroker = require("./kb/broker.js");
 
 const app = express();
 // CORS: Firebase Hosting URL + 로컬 개발 모두 허용
@@ -3669,6 +3672,181 @@ app.get("/api/global/health", async (req, res) => {
     checks,
     time: new Date().toISOString(),
   });
+});
+
+
+// ── KB증권 조회 전용 API ──────────────────────────────────────────
+// 모든 라우트는 읽기 전용이다. 주문(매수/매도/정정/취소)은 제공하지 않는다.
+// 응답에 appKey/appSecret/access token 원문이 절대 포함되지 않도록 주의할 것.
+
+const KB_NOT_CONFIGURED_MSG = "KB증권 연동 환경변수가 설정되어 있지 않습니다.";
+
+/** KB 라우트 공통 에러 응답. 비밀정보는 절대 담지 않는다. */
+function sendKbError(res, err) {
+  const e = err || {};
+  // 1) 설정 미비 → 503
+  if (e.code === "KB_NOT_CONFIGURED") {
+    const missing = Array.isArray(e.missing) ? e.missing : [];
+    let optionalMissing = [];
+    try {
+      optionalMissing = kbConfig.getKbConfig().optionalMissing || [];
+    } catch (_) {
+      optionalMissing = [];
+    }
+    console.error("[kb]", KB_NOT_CONFIGURED_MSG);
+    return res.status(503).json({
+      ok: false,
+      code: "KB_NOT_CONFIGURED",
+      missing,
+      optionalMissing,
+      configured: false,
+      connection: "unconfigured",
+      message: KB_NOT_CONFIGURED_MSG,
+    });
+  }
+  // 2) KB API 업무 실패 → 502
+  if (e.name === "KbApiError") {
+    console.error("[kb]", e.message);
+    return res.status(502).json({
+      ok: false,
+      code: e.code || "KB_API_ERROR",
+      message: String(e.message || "KB API 호출에 실패했습니다."),
+    });
+  }
+  // 3) 그 외(네트워크/타임아웃 등) → 502. 원본 메시지는 노출하지 않는다.
+  console.error("[kb]", e.message || String(e));
+  return res.status(502).json({
+    ok: false,
+    code: e.code || "KB_REQUEST_FAILED",
+    message: "KB증권 API 요청에 실패했습니다.",
+  });
+}
+
+/** 성공 응답 공통 포맷 */
+function sendKbOk(res, data) {
+  res.json({ ok: true, data, time: new Date().toISOString() });
+}
+
+// 연결 설정 상태 — 네트워크 호출 없이 환경변수만 확인한다(토큰 발급 시도 금지).
+app.get("/api/broker/status", (req, res) => {
+  try {
+    const cfg = kbConfig.getKbConfig();
+    if (!cfg.configured) {
+      // 상태 조회는 "미설정"이라는 사실을 정상 응답으로 알린다 —
+      // 503으로 던지면 프런트가 조회 실패로 처리해 '연결 설정 필요' 안내를 못 띄움.
+      // 실제 데이터 엔드포인트(/api/trading/*)는 그대로 503을 유지한다.
+      return res.status(200).json({
+        ok: true,
+        code: "KB_NOT_CONFIGURED",
+        configured: false,
+        connection: "unconfigured",
+        missing: cfg.missing,
+        optionalMissing: cfg.optionalMissing,
+        readOnly: true,
+        tradingEnabled: false,
+        message:
+          "KB증권 연동 환경변수가 설정되어 있지 않습니다. KBSEC_APP_KEY, KBSEC_APP_SECRET 를 설정하세요.",
+      });
+    }
+    res.json({
+      ok: true,
+      configured: true,
+      connection: "unverified", // 실제 API 호출로 검증한 적 없음
+      readOnly: true,
+      tradingEnabled: false,
+      missing: [],
+      optionalMissing: cfg.optionalMissing,
+      baseUrl: cfg.baseUrl,
+      appKey: kbConfig.maskSecret(cfg.appKey),
+      token: kbToken.getTokenCacheInfo(),
+      time: new Date().toISOString(),
+    });
+  } catch (e) {
+    sendKbError(res, e);
+  }
+});
+
+// 장운영상태
+app.get("/api/trading/market-status", async (req, res) => {
+  try {
+    sendKbOk(res, await kbBroker.getMarketStatus());
+  } catch (e) {
+    sendKbError(res, e);
+  }
+});
+
+// 현재가 — 단축코드 6자리
+app.get("/api/trading/quotes/:symbol", async (req, res) => {
+  try {
+    const symbol = String(req.params.symbol || "").trim();
+    if (!/^\d{6}$/.test(symbol)) {
+      return res
+        .status(400)
+        .json({ ok: false, code: "BAD_SYMBOL", message: "단축코드 6자리를 입력하세요." });
+    }
+    sendKbOk(res, await kbBroker.getQuote(symbol, req.query.excg || "0"));
+  } catch (e) {
+    sendKbError(res, e);
+  }
+});
+
+// 잔고 요약(체결기준)
+app.get("/api/trading/balance", async (req, res) => {
+  try {
+    sendKbOk(res, await kbBroker.getBalance({ excg_mktpr_ccd: req.query.excg }));
+  } catch (e) {
+    sendKbError(res, e);
+  }
+});
+
+// 보유종목(체결기준)
+app.get("/api/trading/positions", async (req, res) => {
+  try {
+    sendKbOk(res, await kbBroker.getPositions({ excg_mktpr_ccd: req.query.excg }));
+  } catch (e) {
+    sendKbError(res, e);
+  }
+});
+
+// 매수주문가능금액
+app.get("/api/trading/orderable-amount", async (req, res) => {
+  try {
+    sendKbOk(res, await kbBroker.getOrderableAmount({ symbol: req.query.symbol }));
+  } catch (e) {
+    sendKbError(res, e);
+  }
+});
+
+// 주문 내역(기본: 전체)
+app.get("/api/trading/orders", async (req, res) => {
+  try {
+    sendKbOk(
+      res,
+      await kbBroker.getExecutions({
+        cclsClsf: req.query.cclsClsf || "0",
+        ordrDt: req.query.date,
+        maxPages: 20,
+      })
+    );
+  } catch (e) {
+    sendKbError(res, e);
+  }
+});
+
+// 체결 내역(기본: 체결)
+app.get("/api/trading/executions", async (req, res) => {
+  try {
+    sendKbOk(
+      res,
+      await kbBroker.getExecutions({
+        cclsClsf: req.query.cclsClsf || "1",
+        ordrDt: req.query.date,
+        maxPages: 20,
+      })
+    );
+  } catch (e) {
+    sendKbError(res, e);
+  }
 });
 
 
