@@ -41,6 +41,39 @@ services:
       - key: ALERT_CHECK_SECRET
         sync: false
 
+      - key: ADMIN_LOGIN_ID
+        sync: false
+
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+
+      - key: SESSION_SECRET
+        sync: false
+
+      - key: SESSION_TTL_MINUTES
+        value: "60"
+
+      - key: KBSEC_BASE_URL
+        value: "https://developer.kbsec.com:32484"
+
+      - key: KBSEC_APP_KEY
+        sync: false
+
+      - key: KBSEC_APP_SECRET
+        sync: false
+
+      - key: KBSEC_IP_ADDR
+        sync: false
+
+      - key: KBSEC_MAC_ADDR
+        sync: false
+
+      - key: KBSEC_TRADING_ENABLED
+        value: "false"
+
+      - key: KBSEC_AUTO_TRADING_ENABLED
+        value: "false"
+
       - key: RATE_LIMIT_GENERAL
         value: "60"
 

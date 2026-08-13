@@ -7,6 +7,8 @@
     "dev": "npm run sync:ios && concurrently \"npm run server\" \"npm run client\"",
     "server": "node server.js",
     "test": "node --test test/*.test.js",
+    "kb:check": "node scripts/kb-check.mjs",
+    "auth:hash-password": "node scripts/hash-password.mjs",
     "server:watch": "nodemon server.js",
     "client": "vite --host 0.0.0.0",
     "build": "vite build",
@@ -31,6 +33,7 @@
     "preflight:ios": "bash AlphaTradingIOS/scripts/run-local-ci-preflight.sh"
   },
   "dependencies": {
+    "argon2": "^0.45.1",
     "axios": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",

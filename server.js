@@ -36,27 +36,13 @@ const { buildBtcCycle } = require("./btc-cycle.js");
 const kbConfig = require("./kb/config.js");
 const kbToken = require("./kb/token.js");
 const kbBroker = require("./kb/broker.js");
+const kbAuth = require("./kb/auth.js");
 
 const app = express();
-// CORS: Firebase Hosting URL + 로컬 개발 모두 허용
-const ALLOWED_ORIGINS = [
-  "http://localhost:5173",   // Vite 개발 서버
-  "http://localhost:3000",   // CRA 개발 서버
-  // Firebase Hosting URL — .env에 ALLOWED_ORIGIN=https://xxx.web.app 형태로 추가
-  ...(process.env.ALLOWED_ORIGIN ? [process.env.ALLOWED_ORIGIN] : []),
-  // 추가 도메인이 있으면 여기에 직접 추가
-];
+// Render 는 리버스 프록시 1홉. 로그인 Rate Limit·감사로그가 실제 클라이언트 IP를 쓰도록 한 번만 설정한다.
+app.set("trust proxy", 1);
 app.use(cors({
-  origin: (origin, cb) => {
-    // origin이 없으면 같은 서버(서버사이드 렌더링, curl 등) — 허용
-    if (!origin) return cb(null, true);
-    if (ALLOWED_ORIGINS.includes(origin) || origin.endsWith(".web.app") || origin.endsWith(".firebaseapp.com")) {
-      return cb(null, true);
-    }
-    // 개발 중에는 전체 허용 (NODE_ENV=development)
-    if (process.env.NODE_ENV !== "production") return cb(null, true);
-    cb(new Error(`CORS 차단: ${origin}`));
-  },
+  origin: kbAuth.corsOriginDelegate,
   credentials: true,
 }));
 app.use(express.json());
@@ -99,6 +85,61 @@ app.use("/api", generalRateLimit);
 app.use("/api/ai", aiRateLimit, requireAppAuth);
 app.use("/api/alerts", requireAppAuth);
 app.use("/api/sim", requireAppAuth);
+
+// ── 단일 관리자 세션 인증 ────────────────────────────────────────
+// 로그인 실패 기준: 동일 IP 15분에 5회. 성공 요청은 카운트하지 않는다.
+const loginRateLimit = rateLimit(kbAuth.loginRateLimitOptions);
+const requireAdminSession = kbAuth.requireAuth(["admin"]);
+
+app.post("/api/auth/login", kbAuth.requireCsrf, loginRateLimit, async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const loginId = typeof body.loginId === "string" ? body.loginId : typeof body.id === "string" ? body.id : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    const result = await kbAuth.verifyAdminCredentials(loginId, password);
+    if (!result.configured) {
+      kbAuth.logAuthEvent("login_unconfigured", req);
+      return res.status(503).json({ error: "관리자 인증이 설정되어 있지 않습니다." });
+    }
+    if (!result.ok) {
+      kbAuth.logAuthEvent("login_failure", req);
+      return res.status(401).json({ error: kbAuth.LOGIN_ERROR_MESSAGE });
+    }
+    const token = kbAuth.issueToken({ role: "admin" });
+    const check = kbAuth.verifyToken(token);
+    res.setHeader("Set-Cookie", kbAuth.buildSessionCookie(token));
+    kbAuth.logAuthEvent("login_success", req);
+    return res.json(kbAuth.sessionPublicPayload(check && check.ok ? check.payload : { name: kbAuth.ADMIN_DISPLAY_NAME }));
+  } catch (e) {
+    console.error("[auth] 로그인 처리 실패");
+    return res.status(500).json({ error: "서버 오류가 발생했습니다." });
+  }
+});
+
+app.post("/api/auth/logout", kbAuth.requireCsrf, (req, res) => {
+  const payload = kbAuth.optionalAuth(req);
+  if (payload && payload.jti) kbAuth.revokeJti(payload.jti, payload.exp);
+  res.setHeader("Set-Cookie", kbAuth.buildClearCookie());
+  kbAuth.logAuthEvent("logout", req);
+  return res.json({ authenticated: false });
+});
+
+app.get("/api/auth/session", (req, res) => {
+  const payload = kbAuth.optionalAuth(req);
+  return res.json(kbAuth.sessionPublicPayload(payload));
+});
+
+// KB 조회 API 는 라우터 그룹 단위로 인증한다. 개별 라우트에 다시 붙이지 않는다.
+app.use("/api/broker", requireAdminSession);
+app.use("/api/trading", requireAdminSession);
+app.use("/api/trading", (req, res, next) => {
+  const method = String(req.method || "").toUpperCase();
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return next();
+  if (process.env.KBSEC_TRADING_ENABLED !== "true") {
+    return res.status(403).json({ error: "주문 기능이 비활성화되어 있습니다." });
+  }
+  return next();
+});
 
 const KIS_BASE = process.env.KIS_BASE_URL || "https://openapi.koreainvestment.com:9443"; // 실전투자
 
@@ -3681,44 +3722,24 @@ app.get("/api/global/health", async (req, res) => {
 
 const KB_NOT_CONFIGURED_MSG = "KB증권 연동 환경변수가 설정되어 있지 않습니다.";
 
-/** KB 라우트 공통 에러 응답. 비밀정보는 절대 담지 않는다. */
+/** KB 라우트 공통 에러 응답. 환경변수명·스택·비밀정보는 절대 담지 않는다. */
 function sendKbError(res, err) {
   const e = err || {};
-  // 1) 설정 미비 → 503
   if (e.code === "KB_NOT_CONFIGURED") {
-    const missing = Array.isArray(e.missing) ? e.missing : [];
-    let optionalMissing = [];
-    try {
-      optionalMissing = kbConfig.getKbConfig().optionalMissing || [];
-    } catch (_) {
-      optionalMissing = [];
-    }
     console.error("[kb]", KB_NOT_CONFIGURED_MSG);
     return res.status(503).json({
-      ok: false,
-      code: "KB_NOT_CONFIGURED",
-      missing,
-      optionalMissing,
-      configured: false,
-      connection: "unconfigured",
-      message: KB_NOT_CONFIGURED_MSG,
+      error: "KB증권 연동을 사용할 수 없습니다.",
     });
   }
-  // 2) KB API 업무 실패 → 502
   if (e.name === "KbApiError") {
     console.error("[kb]", e.message);
     return res.status(502).json({
-      ok: false,
-      code: e.code || "KB_API_ERROR",
-      message: String(e.message || "KB API 호출에 실패했습니다."),
+      error: "KB증권 조회에 실패했습니다.",
     });
   }
-  // 3) 그 외(네트워크/타임아웃 등) → 502. 원본 메시지는 노출하지 않는다.
   console.error("[kb]", e.message || String(e));
   return res.status(502).json({
-    ok: false,
-    code: e.code || "KB_REQUEST_FAILED",
-    message: "KB증권 API 요청에 실패했습니다.",
+    error: "KB증권 조회에 실패했습니다.",
   });
 }
 
@@ -3727,46 +3748,24 @@ function sendKbOk(res, data) {
   res.json({ ok: true, data, time: new Date().toISOString() });
 }
 
-// 연결 설정 상태 — 네트워크 호출 없이 환경변수만 확인한다(토큰 발급 시도 금지).
+// 연결 설정 상태 — 인증 후에만 도달한다. 네트워크 호출·토큰 발급 없음.
+// 응답은 아래 4개 필드만. 환경변수명·키·토큰·경로를 포함하지 않는다.
 app.get("/api/broker/status", (req, res) => {
+  let cfg = null;
   try {
-    const cfg = kbConfig.getKbConfig();
-    if (!cfg.configured) {
-      // 상태 조회는 "미설정"이라는 사실을 정상 응답으로 알린다 —
-      // 503으로 던지면 프런트가 조회 실패로 처리해 '연결 설정 필요' 안내를 못 띄움.
-      // 실제 데이터 엔드포인트(/api/trading/*)는 그대로 503을 유지한다.
-      return res.status(200).json({
-        ok: true,
-        code: "KB_NOT_CONFIGURED",
-        configured: false,
-        connection: "unconfigured",
-        missing: cfg.missing,
-        optionalMissing: cfg.optionalMissing,
-        readOnly: true,
-        tradingEnabled: false,
-        message:
-          "KB증권 연동 환경변수가 설정되어 있지 않습니다. KBSEC_APP_KEY, KBSEC_APP_SECRET 를 설정하세요.",
-      });
-    }
-    res.json({
-      ok: true,
-      configured: true,
-      connection: "unverified", // 실제 API 호출로 검증한 적 없음
-      readOnly: true,
-      tradingEnabled: false,
-      missing: [],
-      optionalMissing: cfg.optionalMissing,
-      baseUrl: cfg.baseUrl,
-      appKey: kbConfig.maskSecret(cfg.appKey),
-      token: kbToken.getTokenCacheInfo(),
-      time: new Date().toISOString(),
-    });
-  } catch (e) {
-    sendKbError(res, e);
+    cfg = kbConfig.getKbConfig();
+  } catch (_) {
+    cfg = null;
   }
+  return res.status(200).json({
+    configured: !!(cfg && cfg.configured),
+    connection: "unverified",
+    tradingEnabled: !!(cfg && cfg.tradingEnabled),
+    autoTradingEnabled: !!(cfg && cfg.autoTradingEnabled),
+  });
 });
 
-// 장운영상태
+// 장운영상태 — 계좌 정보는 아니지만 KB 호출 쿼터를 소모하므로 비공개.
 app.get("/api/trading/market-status", async (req, res) => {
   try {
     sendKbOk(res, await kbBroker.getMarketStatus());
@@ -3850,10 +3849,20 @@ app.get("/api/trading/executions", async (req, res) => {
 });
 
 
+// 스택·내부 오류 객체를 클라이언트에 노출하지 않는다.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  console.error("[server]", err && err.message ? err.message : "unhandled error");
+  return res.status(500).json({ error: "서버 오류가 발생했습니다." });
+});
+
 // ── 서버 시작 ─────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`
+// 테스트에서 이 파일을 require 할 수 있도록, 직접 실행될 때만 서버를 기동한다.
+// (node server.js / npm start 동작은 이전과 완전히 동일하다.)
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`
 ╔══════════════════════════════════════════════════════╗
 ║  ALPHA TRADING - KIS 시세 + 분석 프록시 서버 v3       ║
 ║  http://localhost:${PORT}                                ║
@@ -3885,70 +3894,73 @@ app.listen(PORT, () => {
 ║  자가학습: 시그널 채점 → 신호별 가중치 자동 조정     ║
 ╚══════════════════════════════════════════════════════╝
   `);
-  if (!process.env.DART_API_KEY) {
-    console.log("⚠️  DART_API_KEY 미설정 — /api/nps 엔드포인트 비활성");
-    console.log("   .env에 DART_API_KEY=... 추가하세요.\n");
-  }
+    if (!process.env.DART_API_KEY) {
+      console.log("⚠️  DART_API_KEY 미설정 — /api/nps 엔드포인트 비활성");
+      console.log("   .env에 DART_API_KEY=... 추가하세요.\n");
+    }
 
-  // 수출입 리포트(관세청 품목 수집 ~20분 포함)를 미리 준비해
-  // 첫 사용자가 수집을 기다리지 않게 함
-  setTimeout(() => {
-    buildTradeReport().catch((e) => console.error("[trade-warmup]", e.message));
-  }, 10 * 1000);
+    // 수출입 리포트(관세청 품목 수집 ~20분 포함)를 미리 준비해
+    // 첫 사용자가 수집을 기다리지 않게 함
+    setTimeout(() => {
+      buildTradeReport().catch((e) => console.error("[trade-warmup]", e.message));
+    }, 10 * 1000);
 
-  // ── AI 예측 모델 지속 자동 학습 ──
-  // 1) 부팅 시 과거 백테스트 재학습 (무료 호스팅 재시작으로 소실된 학습 복구)
-  // 2) 6시간마다: 최신 데이터 재학습 + 만기 예측 채점 + 새 예측 자동 생성
-  async function selfTrainPredictor() {
-    try {
-      const codes = KRX_MASTER_ALL.slice(0, 30).map((x) => x.code);
-      const trained = await aiPredictor.trainFromHistory(
-        codes,
-        (c, n) => fetchDailyCandles(c, n),
-        analyzeCandles,
-      );
-      console.log("[predict-train] history:", JSON.stringify(trained));
-      const matured = await aiPredictor.processMatured((c, n) => fetchDailyCandles(c, n), { maxPerRun: 20 });
-      if (matured.processed) console.log("[predict-train] matured:", matured.processed);
-      // 다음 채점 주기를 위한 새 예측 자동 축적 (사용자 요청 없이도 학습 재료 생성)
-      for (const code of codes.slice(0, 10)) {
-        try {
-          const candles = await fetchDailyCandles(code, 260);
-          const newest = [...candles].sort((a, b) => String(b.date).localeCompare(String(a.date)));
-          const analysis = analyzeCandles(newest);
-          aiPredictor.predict(code, analysis, Number(newest[0]?.close));
-        } catch { /* 개별 실패 무시 */ }
+    // ── AI 예측 모델 지속 자동 학습 ──
+    // 1) 부팅 시 과거 백테스트 재학습 (무료 호스팅 재시작으로 소실된 학습 복구)
+    // 2) 6시간마다: 최신 데이터 재학습 + 만기 예측 채점 + 새 예측 자동 생성
+    async function selfTrainPredictor() {
+      try {
+        const codes = KRX_MASTER_ALL.slice(0, 30).map((x) => x.code);
+        const trained = await aiPredictor.trainFromHistory(
+          codes,
+          (c, n) => fetchDailyCandles(c, n),
+          analyzeCandles,
+        );
+        console.log("[predict-train] history:", JSON.stringify(trained));
+        const matured = await aiPredictor.processMatured((c, n) => fetchDailyCandles(c, n), { maxPerRun: 20 });
+        if (matured.processed) console.log("[predict-train] matured:", matured.processed);
+        // 다음 채점 주기를 위한 새 예측 자동 축적 (사용자 요청 없이도 학습 재료 생성)
+        for (const code of codes.slice(0, 10)) {
+          try {
+            const candles = await fetchDailyCandles(code, 260);
+            const newest = [...candles].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+            const analysis = analyzeCandles(newest);
+            aiPredictor.predict(code, analysis, Number(newest[0]?.close));
+          } catch { /* 개별 실패 무시 */ }
+        }
+      } catch (e) {
+        console.error("[predict-train]", e.message);
       }
-    } catch (e) {
-      console.error("[predict-train]", e.message);
     }
-  }
-  setTimeout(selfTrainPredictor, 60 * 1000);
-  setInterval(selfTrainPredictor, 6 * 60 * 60 * 1000);
+    setTimeout(selfTrainPredictor, 60 * 1000);
+    setInterval(selfTrainPredictor, 6 * 60 * 60 * 1000);
 
-  // ── 자체 기법 발굴 진화 사이클 ──
-  // 부팅 3분 후 첫 진화, 이후 6시간마다 세대를 이어가며 발전
-  async function runEvolution() {
-    try {
-      const codes = KRX_MASTER_ALL.slice(0, 20).map((x) => x.code);
-      const r = await evolver.evolveCycle(codes, (c, n) => fetchDailyCandles(c, n), analyzeCandles);
-      console.log("[evolve]", JSON.stringify(r));
-    } catch (e) {
-      console.error("[evolve]", e.message);
+    // ── 자체 기법 발굴 진화 사이클 ──
+    // 부팅 3분 후 첫 진화, 이후 6시간마다 세대를 이어가며 발전
+    async function runEvolution() {
+      try {
+        const codes = KRX_MASTER_ALL.slice(0, 20).map((x) => x.code);
+        const r = await evolver.evolveCycle(codes, (c, n) => fetchDailyCandles(c, n), analyzeCandles);
+        console.log("[evolve]", JSON.stringify(r));
+      } catch (e) {
+        console.error("[evolve]", e.message);
+      }
     }
-  }
-  setTimeout(runEvolution, 3 * 60 * 1000);
-  setInterval(runEvolution, 6 * 60 * 60 * 1000);
+    setTimeout(runEvolution, 3 * 60 * 1000);
+    setInterval(runEvolution, 6 * 60 * 60 * 1000);
 
-  // ── 관심종목 실적 공시 감시 (분기·반기·사업보고서 → 푸시) ──
-  async function scanEarningsLoop() {
-    try {
-      const r = await dartFund.scanEarnings((title, body) => apns.sendPushToAll({ title, body }));
-      if (r.found) console.log("[earnings]", JSON.stringify(r));
-    } catch (e) {
-      console.error("[earnings]", e.message);
+    // ── 관심종목 실적 공시 감시 (분기·반기·사업보고서 → 푸시) ──
+    async function scanEarningsLoop() {
+      try {
+        const r = await dartFund.scanEarnings((title, body) => apns.sendPushToAll({ title, body }));
+        if (r.found) console.log("[earnings]", JSON.stringify(r));
+      } catch (e) {
+        console.error("[earnings]", e.message);
+      }
     }
-  }
-  setTimeout(scanEarningsLoop, 5 * 60 * 1000);
-  setInterval(scanEarningsLoop, 12 * 60 * 60 * 1000);
-});
+    setTimeout(scanEarningsLoop, 5 * 60 * 1000);
+    setInterval(scanEarningsLoop, 12 * 60 * 60 * 1000);
+  });
+}
+
+module.exports = app;

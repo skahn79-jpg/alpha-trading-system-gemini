@@ -512,16 +512,45 @@ async function getExecutions(query = {}) {
 /* ── 주문(쓰기) — 전면 비활성 ──────────────────────────────────────── */
 
 const TRADING_DISABLED_MSG = "주문 기능 비활성 (KBSEC_TRADING_ENABLED=false)";
+const TRADING_NOT_IMPLEMENTED_MSG = "주문 기능 미구현 (현재 어댑터는 조회 전용입니다)";
+
+/**
+ * 주문 계열 함수의 공통 차단 게이트.
+ * 어떤 경로로도 네트워크 호출(fetch/axios)에 도달하지 않도록 **항상** throw 한다.
+ *  - tradingEnabled=false → code "TRADING_DISABLED"
+ *  - tradingEnabled=true  → 구현이 없으므로 code "NOT_IMPLEMENTED"
+ * @param {string} op 호출된 주문 함수 이름
+ * @throws {Error} 반드시 throw 한다(정상 반환 경로 없음).
+ */
+function assertOrderBlocked(op) {
+  let tradingEnabled = false;
+  try {
+    tradingEnabled = getKbConfig().tradingEnabled === true;
+  } catch (_) {
+    // 설정 자체를 읽지 못하면 비활성으로 간주한다(fail-closed).
+    tradingEnabled = false;
+  }
+  if (!tradingEnabled) {
+    const err = new Error(TRADING_DISABLED_MSG);
+    err.code = "TRADING_DISABLED";
+    err.op = op;
+    throw err;
+  }
+  const err = new Error(TRADING_NOT_IMPLEMENTED_MSG);
+  err.code = "NOT_IMPLEMENTED";
+  err.op = op;
+  throw err;
+}
 
 /* eslint-disable no-unused-vars */
 async function placeOrder(order = {}) {
-  throw new Error(TRADING_DISABLED_MSG);
+  assertOrderBlocked("placeOrder");
 }
 async function amendOrder(order = {}) {
-  throw new Error(TRADING_DISABLED_MSG);
+  assertOrderBlocked("amendOrder");
 }
 async function cancelOrder(order = {}) {
-  throw new Error(TRADING_DISABLED_MSG);
+  assertOrderBlocked("cancelOrder");
 }
 /* eslint-enable no-unused-vars */
 
@@ -547,6 +576,7 @@ module.exports = {
   ConfigError,
   HTTP_TIMEOUT_MS,
   TRADING_DISABLED_MSG,
+  TRADING_NOT_IMPLEMENTED_MSG,
   toNum,
   toRecords,
   kstToday,

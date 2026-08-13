@@ -445,7 +445,7 @@ const styles = `
   .card{background:#101923;border:1px solid #1e3445;padding:14px}.card-title{font-size:11px;color:#6f899a;margin-bottom:8px}.value{font-size:20px;font-weight:900;font-family:var(--paperlogy-font)}.sub{font-size:12px;color:#6f899a;line-height:1.6}
   .stock-list{display:grid;gap:8px;max-height:470px;overflow:auto;padding-right:2px}.stock-btn{background:#101923;border:1px solid #1e3445;padding:12px;text-align:left;color:#d9ecf5;cursor:pointer;transition:.15s}.stock-btn.active{border-color:#00d9ff;background:#00d9ff11;box-shadow:inset 0 0 0 1px #00d9ff44}.stock-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}.stock-name{font-weight:900}
   .input,.select,.textarea{width:100%;background:#070b10;border:1px solid #1e3445;color:#d9ecf5;padding:11px;outline:none}.textarea{min-height:76px;resize:vertical;line-height:1.5}
-  .btn{background:#003647;border:1px solid #00d9ff;color:#00d9ff;padding:10px 14px;font-weight:900;cursor:pointer}.btn:hover{background:#004d63}.btn.full{width:100%}.btn.red{border-color:#ff4466;color:#ff4466;background:#48111b}.btn.small{padding:6px 8px;font-size:11px}
+  .btn{background:#003647;border:1px solid #00d9ff;color:#00d9ff;padding:10px 14px;font-weight:900;cursor:pointer}.btn:hover{background:#004d63}.btn.full{width:100%}.btn.red{border-color:#ff4466;color:#ff4466;background:#48111b}.btn.small{padding:6px 8px;font-size:11px}.auth-gate{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#070b10;padding:24px}.auth-card{width:100%;max-width:420px;background:#0b1118;border:1px solid #1e3445;padding:28px 24px}.auth-card h1{margin:0 0 8px;color:#00d9ff;letter-spacing:4px;font-size:18px}.auth-card .sub{margin-bottom:18px}.auth-field{margin-bottom:12px}.auth-field label{display:block;font-size:11px;color:#6f899a;margin-bottom:6px;font-weight:800}.auth-pw-row{display:flex;gap:8px}.auth-user{color:#d9ecf5;font-weight:800}
   .row{display:flex;gap:8px;align-items:center}.form-grid{display:grid;grid-template-columns:1.1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:12px}.add-stock-grid{display:grid;grid-template-columns:1fr 1.1fr .9fr;gap:8px;margin-top:10px}
   .error{color:#ffb4c0;background:#ff446611;border:1px solid #ff446644;padding:12px;white-space:pre-wrap;font-size:13px;line-height:1.5}.loading{color:#ffd447}
   .report-layout{display:grid;grid-template-columns:170px 1fr;gap:10px}.score-box{height:172px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid #1e3445;background:#101923}.score{font-size:54px;color:#ffd447;font-weight:900;font-family:var(--paperlogy-font)}
@@ -6759,9 +6759,12 @@ async function fetchJson(path, options = {}) {
     ...(APP_API_KEY ? { "X-App-Key": APP_API_KEY } : {}),
     ...(options.headers || {}),
   };
-  const res = await fetch(url, { ...options, headers });
+  const res = await fetch(url, { ...options, headers, credentials: "include" });
   const type = res.headers.get("content-type") || "";
   const text = await res.text();
+  if (res.status === 401 && path !== "/api/auth/login") {
+    window.dispatchEvent(new Event("alpha-auth-unauthorized"));
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}\n${text.slice(0, 700)}`);
   if (!type.includes("application/json")) throw new Error(`JSON이 아닌 응답입니다.\n${text.slice(0, 300)}`);
   return JSON.parse(text);
@@ -9487,7 +9490,7 @@ function IndicatorReadMe() {
   );
 }
 
-function Header({ now, tab }) {
+function Header({ now, tab, user, onLogout }) {
   return (
     <div className="top-wrap">
       <div className="top">
@@ -9500,6 +9503,12 @@ function Header({ now, tab }) {
           <span className="tag green">US/CRYPTO API</span>
           <span className="tag green">KRX API</span>
           <span>2026.05.26</span>
+          {user?.name ? (
+            <>
+              <span className="auth-user">{user.name}</span>
+              <button className="btn small" type="button" onClick={onLogout}>로그아웃</button>
+            </>
+          ) : null}
         </div>
       </div>
       <div className="mobile-current">현재 화면 · {tab}</div>
@@ -14159,8 +14168,6 @@ function TradingOps() {
   }, []);
 
   const configured = status?.configured === true;
-  const missing = Array.isArray(status?.missing) ? status.missing : [];
-  const optionalMissing = Array.isArray(status?.optionalMissing) ? status.optionalMissing : [];
   const connection = status?.connection || "-";
   const connectionLabel = connection === "unconfigured" ? "설정 없음" : connection === "unverified" ? "미검증" : connection;
 
@@ -14187,18 +14194,7 @@ function TradingOps() {
           {!loading && !err && !status && <div className="sub">연동 상태 정보가 없습니다.</div>}
           {!err && status && !configured && (
             <div className="error" style={{ borderColor: "#ffd44766", color: "#ffd447", background: "#ffd44711" }}>
-              <b>KB증권 연결 설정 필요</b>
-              <br />
-              {status.message || "서버에 KB증권 연동 환경변수가 설정되어 있지 않습니다."}
-              <br />
-              <br />
-              미설정 환경변수: {missing.length ? missing.join(", ") : "정보 없음"}
-              {optionalMissing.length ? (
-                <>
-                  <br />
-                  선택 항목 미설정: {optionalMissing.join(", ")}
-                </>
-              ) : null}
+              서버에 KB증권 연동 설정이 없습니다.
             </div>
           )}
           {!err && status && configured && (
@@ -14212,7 +14208,7 @@ function TradingOps() {
                 <div className="card">
                   <div className="card-title">환경변수 설정</div>
                   <div className="value">완료</div>
-                  <div className="sub">{optionalMissing.length ? `선택 항목 미설정: ${optionalMissing.join(", ")}` : "필수/선택 항목 모두 설정됨"}</div>
+                  <div className="sub">서버 연동 설정이 확인되었습니다.</div>
                 </div>
                 <div className="card">
                   <div className="card-title">거래 활성화</div>
@@ -14257,7 +14253,7 @@ function TradingOps() {
   );
 }
 
-export default function TradingPlatform() {
+function TradingPlatform({ user, onLogout }) {
   const [tab, setTab] = useState("대시보드");
   const [customStocks, setCustomStocks] = useState(() => loadLS("alpha_custom_stocks", []));
   const stocks = useMemo(() => {
@@ -14354,7 +14350,7 @@ export default function TradingPlatform() {
   return (
     <div className={`app device-${deviceMode}`}>
       <style>{styles}</style>
-      <Header now={now} tab={tab} />
+      <Header now={now} tab={tab} user={user} onLogout={onLogout} />
       <div className="mobile-nav-label">메뉴 선택 · 선택한 메뉴만 아래에 표시됩니다</div>
       <Nav tab={tab} setTab={setTab} />
       <TickerBar quotes={quotes} stocks={stocks} globalQuotes={globalQuotes} />
@@ -14389,4 +14385,147 @@ export default function TradingPlatform() {
       <div className="creator-mark">Built by <b>ASK</b></div>
     </div>
   );
+}
+
+const LOGIN_FAIL_MESSAGE = "로그인 정보가 올바르지 않습니다.";
+
+function AuthLoadingScreen() {
+  return (
+    <div className="auth-gate">
+      <style>{styles}</style>
+      <div className="auth-card">
+        <h1>ALPHA</h1>
+        <div className="sub">세션을 확인하는 중입니다.</div>
+      </div>
+    </div>
+  );
+}
+
+function LoginScreen({ onLoggedIn }) {
+  const [loginId, setLoginId] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const data = await fetchJson("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ loginId, password }),
+      });
+      onLoggedIn(data);
+    } catch (e) {
+      const msg = String(e && e.message ? e.message : e);
+      if (msg.includes("HTTP 429")) setError("로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.");
+      else setError(LOGIN_FAIL_MESSAGE);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="auth-gate">
+      <style>{styles}</style>
+      <form className="auth-card" onSubmit={submit}>
+        <h1>ALPHA</h1>
+        <div className="sub">관리자 로그인</div>
+        {error ? <div className="error">{error}</div> : null}
+        <div className="auth-field">
+          <label htmlFor="auth-login-id">아이디</label>
+          <input
+            id="auth-login-id"
+            className="input"
+            type="text"
+            autoComplete="username"
+            value={loginId}
+            disabled={submitting}
+            onChange={(e) => setLoginId(e.target.value)}
+          />
+        </div>
+        <div className="auth-field">
+          <label htmlFor="auth-password">비밀번호</label>
+          <div className="auth-pw-row">
+            <input
+              id="auth-password"
+              className="input"
+              type={showPassword ? "text" : "password"}
+              autoComplete="current-password"
+              value={password}
+              disabled={submitting}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <button
+              className="btn small"
+              type="button"
+              disabled={submitting}
+              onClick={() => setShowPassword((v) => !v)}
+            >
+              {showPassword ? "숨김" : "표시"}
+            </button>
+          </div>
+        </div>
+        <button className="btn full" type="submit" disabled={submitting}>
+          {submitting ? "로그인 중" : "로그인"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function AuthGate() {
+  const [phase, setPhase] = useState("checking");
+  const [user, setUser] = useState(null);
+
+  const goLogin = () => {
+    setUser(null);
+    setPhase("login");
+  };
+
+  const goReady = (session) => {
+    setUser(session?.user || null);
+    setPhase("ready");
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchJson("/api/auth/session");
+        if (cancelled) return;
+        if (data && data.authenticated) goReady(data);
+        else goLogin();
+      } catch {
+        if (!cancelled) goLogin();
+      }
+    })();
+    const onUnauthorized = () => goLogin();
+    window.addEventListener("alpha-auth-unauthorized", onUnauthorized);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("alpha-auth-unauthorized", onUnauthorized);
+    };
+  }, []);
+
+  const onLogout = async () => {
+    try {
+      await fetchJson("/api/auth/logout", { method: "POST" });
+    } catch {
+      /* 로그아웃 실패여도 로그인 화면으로 되돌린다. */
+    }
+    goLogin();
+  };
+
+  if (phase === "checking") return <AuthLoadingScreen />;
+  if (phase === "login") return <LoginScreen onLoggedIn={goReady} />;
+  return <TradingPlatform user={user} onLogout={onLogout} />;
+}
+
+export default function App() {
+  return <AuthGate />;
 }
