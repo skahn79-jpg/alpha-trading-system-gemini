@@ -126,6 +126,38 @@ final class AdminAuthTests: XCTestCase {
         XCTAssertNotEqual(vm.loginError, "로그인 정보가 올바르지 않습니다.")
     }
 
+    func testLoginFormLockedDuringInFlightRequestAndRecoversAfter() async throws {
+        StubURLProtocol.responseDelay = 0.2
+        StubURLProtocol.handler = { _ in
+            (200, Data("{\"authenticated\":true,\"user\":{\"name\":\"테스트\"}}".utf8))
+        }
+        let vm = makeViewModel()
+        vm.loginId = "tester"
+        vm.password = "invalid"
+        async let login: Void = vm.login()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertTrue(vm.isLoginFormLocked)
+        XCTAssertTrue(vm.isSubmitting)
+        await login
+        XCTAssertFalse(vm.isLoginFormLocked)
+        XCTAssertFalse(vm.isSubmitting)
+    }
+
+    func testLoginIgnoresDuplicateSubmitWhileInFlight() async throws {
+        StubURLProtocol.responseDelay = 0.2
+        StubURLProtocol.handler = { _ in
+            (200, Data("{\"authenticated\":true,\"user\":{\"name\":\"테스트\"}}".utf8))
+        }
+        let vm = makeViewModel()
+        vm.loginId = "tester"
+        vm.password = "invalid"
+        async let first: Void = vm.login()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        await vm.login()
+        await first
+        XCTAssertEqual(StubURLProtocol.recordedPaths.filter { $0 == "/api/auth/login" }.count, 1)
+    }
+
     func testLoginSuccessClearsCredentials() async {
         StubURLProtocol.handler = { _ in
             (200, Data("{\"authenticated\":true,\"user\":{\"name\":\"테스트\"}}".utf8))

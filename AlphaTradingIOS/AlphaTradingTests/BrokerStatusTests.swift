@@ -13,6 +13,37 @@ final class BrokerStatusTests: XCTestCase {
         super.tearDown()
     }
 
+    func testMoreScreenCopyHidesInternalImplementation() {
+        let joined = [
+            MoreScreenCopy.serviceTitle,
+            MoreScreenCopy.serviceStatus,
+            MoreScreenCopy.securityTitle,
+            MoreScreenCopy.securityStatus,
+        ].joined()
+        XCTAssertFalse(joined.contains(".env.local"))
+        XCTAssertFalse(joined.contains("Generated.xcconfig"))
+        XCTAssertFalse(joined.contains("Keychain"))
+        XCTAssertFalse(joined.contains("API Key"))
+        XCTAssertFalse(joined.contains("https://"))
+    }
+
+    func testFloatingTabBarClearanceIsModest() {
+        XCTAssertTrue((40...72).contains(MainTabBarLayout.contentClearance))
+    }
+
+    func testMoreViewSourceHidesInternalImplementation() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("AlphaTrading/Views/More/MoreView.swift")
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            throw XCTSkip("MoreView.swift not readable from test host")
+        }
+        XCTAssertFalse(text.contains(".env.local"))
+        XCTAssertFalse(text.contains("Generated.xcconfig"))
+        XCTAssertFalse(text.contains("Keychain API Key"))
+    }
+
     func testInquiryFlagsRemainDisabled() {
         XCTAssertFalse(KBInquiryPolicy.networkEnabled)
         XCTAssertFalse(KBInquiryPolicy.orderControlsEnabled)

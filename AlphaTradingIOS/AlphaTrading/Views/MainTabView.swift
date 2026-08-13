@@ -1,5 +1,21 @@
 import SwiftUI
 
+/// Extra bottom clearance so scroll content sits above the floating tab bar.
+/// Home-indicator safe area is left to the system; this is only the bar itself.
+enum MainTabBarLayout {
+    static let contentClearance: CGFloat = 56
+}
+
+extension View {
+    func floatingTabBarContentInset() -> some View {
+        safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.clear
+                .frame(height: MainTabBarLayout.contentClearance)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
 struct MainTabView: View {
     @StateObject private var stockListVM = StockListViewModel()
 

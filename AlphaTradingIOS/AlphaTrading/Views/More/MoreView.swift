@@ -85,6 +85,7 @@ struct MoreView: View {
                 }
                 .padding(16)
             }
+            .floatingTabBarContentInset()
             .background(AppTheme.background)
             .navigationTitle("더보기")
             .alert("로그아웃", isPresented: $showLogoutConfirm) {
@@ -119,19 +120,25 @@ struct MoreView: View {
     }
 
     private var apiInfoCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("API 서버")
-                .font(.paperlogy(14, weight: .medium))
-                .foregroundStyle(AppTheme.textSecondary)
-            Text(APIConfig.baseURL.absoluteString)
-                .font(.paperlogy(13))
-                .foregroundStyle(AppTheme.accent)
-            Text("설정 소스: 웹앱 .env.local → Generated.xcconfig")
-                .font(.paperlogy(11))
-                .foregroundStyle(AppTheme.textSecondary)
-            Text("보안: TLS + 호스트 검증 + Keychain API Key")
-                .font(.paperlogy(11))
-                .foregroundStyle(AppTheme.textSecondary)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(MoreScreenCopy.serviceTitle)
+                    .font(.paperlogy(14, weight: .medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+                Spacer()
+                Text(MoreScreenCopy.serviceStatus)
+                    .font(.paperlogy(13, weight: .medium))
+                    .foregroundStyle(AppTheme.accent)
+            }
+            HStack {
+                Text(MoreScreenCopy.securityTitle)
+                    .font(.paperlogy(14, weight: .medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+                Spacer()
+                Text(MoreScreenCopy.securityStatus)
+                    .font(.paperlogy(13, weight: .medium))
+                    .foregroundStyle(AppTheme.accent)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -161,4 +168,11 @@ struct MoreView: View {
         .background(AppTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
+}
+
+enum MoreScreenCopy {
+    static let serviceTitle = "서비스 연결"
+    static let serviceStatus = "정상"
+    static let securityTitle = "보안 연결"
+    static let securityStatus = "정상"
 }

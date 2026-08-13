@@ -31,13 +31,16 @@ struct AdminLoginView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                             .accessibilityLabel("아이디")
                             .submitLabel(.next)
+                            .disabled(auth.isLoginFormLocked)
 
                         HStack(spacing: 8) {
                             Group {
                                 if isPasswordVisible {
                                     TextField("비밀번호", text: $auth.password)
+                                        .disabled(auth.isLoginFormLocked)
                                 } else {
                                     SecureField("비밀번호", text: $auth.password)
+                                        .disabled(auth.isLoginFormLocked)
                                 }
                             }
                             .textContentType(.password)
@@ -56,6 +59,7 @@ struct AdminLoginView: View {
                                     .foregroundStyle(AppTheme.accent)
                             }
                             .accessibilityLabel(isPasswordVisible ? "비밀번호 숨김" : "비밀번호 표시")
+                            .disabled(auth.isLoginFormLocked)
                         }
                         .padding(14)
                         .background(AppTheme.card)
@@ -94,7 +98,7 @@ struct AdminLoginView: View {
                             .foregroundStyle(AppTheme.background)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
-                        .disabled(auth.isSubmitting)
+                        .disabled(auth.isLoginFormLocked)
                         .accessibilityLabel("로그인")
                     }
                     .padding(.horizontal, 24)
@@ -102,6 +106,7 @@ struct AdminLoginView: View {
                 .padding(.bottom, 32)
             }
             .onSubmit {
+                guard !auth.isLoginFormLocked else { return }
                 Task { await auth.login() }
             }
         }

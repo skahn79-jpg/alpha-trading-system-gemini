@@ -10,6 +10,9 @@ final class AdminAuthViewModel: ObservableObject {
     @Published var loginError: String?
     @Published var logoutNotice: String?
 
+    /// Login fields and submit controls stay locked while a request is in flight.
+    var isLoginFormLocked: Bool { isSubmitting }
+
     private let service: AdminAuthService
     private var cancellables = Set<AnyCancellable>()
 
