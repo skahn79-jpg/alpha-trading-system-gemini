@@ -84,3 +84,28 @@ test("origin allowlist rejects an evil origin", () => {
   assert.equal(auth.isAllowedOrigin("https://evil.example"), false);
   assert.equal(auth.isAllowedOrigin("https://evil.example.com"), false);
 });
+
+test("same origin is allowed in production even when ALLOWED_ORIGIN is empty", () => {
+  const prevEnv = process.env.NODE_ENV;
+  const prevAllowed = process.env.ALLOWED_ORIGIN;
+  process.env.NODE_ENV = "production";
+  process.env.ALLOWED_ORIGIN = "";
+  try {
+    const origin = "https://alpha-trading-server.onrender.com";
+    const req = {
+      headers: {
+        host: "alpha-trading-server.onrender.com",
+        "x-forwarded-proto": "https",
+      },
+    };
+    assert.equal(auth.isSameOrigin(origin, req), true);
+    assert.equal(auth.isAllowedOrigin(origin, req), true);
+    assert.equal(auth.isAllowedOrigin(origin), false);
+    assert.equal(auth.isAllowedOrigin("https://evil.example"), false);
+    assert.equal(auth.isAllowedOrigin("https://evil.example", req), false);
+  } finally {
+    process.env.NODE_ENV = prevEnv;
+    if (prevAllowed === undefined) delete process.env.ALLOWED_ORIGIN;
+    else process.env.ALLOWED_ORIGIN = prevAllowed;
+  }
+});

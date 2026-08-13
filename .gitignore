@@ -78,6 +78,5 @@ dist/
 # dataconnect generated files
 .dataconnect
 
-# KB API 명세 (개발 참고용 — 배포 제외)
-docs/kb/
+.DS_Store
 

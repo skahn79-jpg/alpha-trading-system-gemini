@@ -39,12 +39,17 @@ const kbBroker = require("./kb/broker.js");
 const kbAuth = require("./kb/auth.js");
 
 const app = express();
+app.disable("x-powered-by");
 // Render 는 리버스 프록시 1홉. 로그인 Rate Limit·감사로그가 실제 클라이언트 IP를 쓰도록 한 번만 설정한다.
 app.set("trust proxy", 1);
-app.use(cors({
-  origin: kbAuth.corsOriginDelegate,
-  credentials: true,
-}));
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("X-DNS-Prefetch-Control", "off");
+  next();
+});
+app.use(cors(kbAuth.corsOptionsDelegate));
 app.use(express.json());
 
 const isProduction = process.env.NODE_ENV === "production";
@@ -3848,6 +3853,48 @@ app.get("/api/trading/executions", async (req, res) => {
   }
 });
 
+
+// 미등록 /api/* 는 React HTML 이 아니라 JSON 404.
+app.use("/api", (req, res) => {
+  res.status(404).json({ error: "요청한 API를 찾을 수 없습니다." });
+});
+
+const DIST_DIR = path.join(__dirname, "dist");
+const DIST_INDEX = path.join(DIST_DIR, "index.html");
+
+app.use((req, res, next) => {
+  if (req.path.endsWith(".map") || req.path.endsWith(".md")) {
+    return res.status(404).end();
+  }
+  next();
+});
+
+app.use(
+  express.static(DIST_DIR, {
+    index: false,
+    fallthrough: true,
+    dotfiles: "ignore",
+    maxAge: "1h",
+    setHeaders(res, filePath) {
+      if (filePath.endsWith(".html")) {
+        res.setHeader("Cache-Control", "no-store");
+      }
+    },
+  }),
+);
+
+// Express 4 SPA fallback — API 가 아닌 GET 만 index.html.
+app.use((req, res, next) => {
+  const method = String(req.method || "").toUpperCase();
+  if (method !== "GET" && method !== "HEAD") return next();
+  if (req.path.startsWith("/api")) return next();
+  if (!fs.existsSync(DIST_INDEX)) {
+    return res.status(503).json({ error: "프런트엔드 빌드가 없습니다." });
+  }
+  res.sendFile(DIST_INDEX, (err) => {
+    if (err) next(err);
+  });
+});
 
 // 스택·내부 오류 객체를 클라이언트에 노출하지 않는다.
 app.use((err, req, res, next) => {

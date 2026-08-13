@@ -18,7 +18,12 @@ process.env.KBSEC_APP_SECRET = "";
 
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("fs");
+const path = require("path");
 const auth = require("../kb/auth.js");
+
+const DIST_INDEX = path.join(__dirname, "..", "dist", "index.html");
+const hasDist = fs.existsSync(DIST_INDEX);
 
 const LOGIN_ID = "admin-test";
 const PASSWORD = "correct-password-value";
@@ -282,4 +287,55 @@ test("POST /api/trading/orders while authed and trading disabled is 403", async 
   });
   assert.equal(status, 403);
   assert.ok(json && json.error);
+});
+
+function assertJsonNotHtml(res, text, json) {
+  const ct = String(res.headers.get("content-type") || "");
+  assert.match(ct, /json/i);
+  assert.ok(json && typeof json === "object");
+  assert.equal(/<html/i.test(text), false);
+  assert.equal(/<!DOCTYPE/i.test(text), false);
+}
+
+test("GET /api/not-found returns JSON 404 not HTML", async () => {
+  const { res, status, text, json } = await api("GET", "/api/not-found", { ip: nextIp() });
+  assert.equal(status, 404);
+  assertJsonNotHtml(res, text, json);
+});
+
+test("GET /api/broker/status still 401 without session", async () => {
+  const { status } = await api("GET", "/api/broker/status", { ip: nextIp() });
+  assert.equal(status, 401);
+});
+
+test("GET /api/trading/balance still 401 without session", async () => {
+  const { status } = await api("GET", "/api/trading/balance", { ip: nextIp() });
+  assert.equal(status, 401);
+});
+
+test("GET /api/some-missing-api-like returns JSON 404 not HTML", async () => {
+  const { res, status, text, json } = await api("GET", "/api/some-missing-api-like", { ip: nextIp() });
+  assert.equal(status, 404);
+  assertJsonNotHtml(res, text, json);
+});
+
+test("GET /assets/index.js.map is 404", async () => {
+  const { status } = await api("GET", "/assets/index.js.map", { ip: nextIp() });
+  assert.equal(status, 404);
+});
+
+test("GET / and SPA fallback vs unmatched /api", async () => {
+  const root = await api("GET", "/", { ip: nextIp() });
+  if (hasDist) {
+    assert.match(String(root.res.headers.get("content-type") || ""), /html/i);
+    assert.equal(/application\/json/i.test(String(root.res.headers.get("content-type") || "")), false);
+    const spa = await api("GET", "/does-not-exist-spa", { ip: nextIp() });
+    assert.match(String(spa.res.headers.get("content-type") || ""), /html/i);
+  } else {
+    assert.equal(root.status, 503);
+    assertJsonNotHtml(root.res, root.text, root.json);
+  }
+  const api404 = await api("GET", "/api/not-found", { ip: nextIp() });
+  assert.equal(api404.status, 404);
+  assertJsonNotHtml(api404.res, api404.text, api404.json);
 });

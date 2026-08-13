@@ -1,8 +1,8 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// VITE_API_URL: 배포된 server.js Render URL
-// 없으면 로컬 localhost:3001 프록시 사용
+// 운영 웹은 동일 Render 출처에서 Express가 dist 를 서빙합니다.
+// Vite `/api` 프록시는 로컬 개발 전용입니다.
 const API_URL = process.env.VITE_API_URL || "http://localhost:3001";
 
 export default defineConfig({
@@ -21,7 +21,7 @@ export default defineConfig({
     },
   },
 
-  // 빌드 출력 (firebase.json의 hosting.public과 일치)
+  // 빌드 출력 — 운영에서는 Express가 동일 Render 출처에서 dist 서빙
   build: {
     outDir: "dist",
     sourcemap: false,

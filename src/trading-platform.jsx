@@ -20,7 +20,9 @@
  * 12) AI 학습 가중치 자동 주입 UI
  */
 
-const API_BASE = import.meta.env.VITE_API_URL || "https://alpha-trading-server.onrender.com";
+// 웹은 항상 현재 출처의 상대경로 /api 를 사용한다.
+// 운영: Render Express 동일 출처. 개발: Vite /api 프록시.
+const API_BASE = "";
 const APP_API_KEY = import.meta.env.VITE_APP_API_KEY || "";
 
 const DEFAULT_STOCKS = [
@@ -9750,7 +9752,7 @@ function LeftPanel({ stocks, quotes, selectedCode, setSelectedCode, reload, load
       </div>
       <div className="panel">
         <div className="panel-title">연결 상태</div>
-        <div className="panel-body sub">API 서버:<br /><b>{API_BASE}</b><br /><br />국내 시세는 KIS API 기준입니다.<br />미국 주식/코인은 Render API 연결 시 실시간으로 표시됩니다.</div>
+        <div className="panel-body sub">API 서버:<br /><b>{API_BASE || "동일 출처 /api"}</b><br /><br />국내 시세는 KIS API 기준입니다.<br />미국 주식/코인은 Render API 연결 시 실시간으로 표시됩니다.</div>
       </div>
     </div>
   );

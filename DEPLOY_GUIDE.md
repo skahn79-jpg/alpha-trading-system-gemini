@@ -1,5 +1,10 @@
 # ALPHA TRADING SYSTEM — 최종 배포 가이드
 
+현재 관리자 인증·웹앱 운영 경로는 Firebase Hosting이 아니라 Render 동일 출처입니다.
+- 브라우저: https://alpha-trading-server.onrender.com/  (Express가 dist + /api 제공)
+- Firebase Hosting/Firestore 설정 파일은 유지하지만, 세션 쿠키 인증 경로에서는 사용하지 않습니다.
+- Firebase 설정을 삭제하지 마세요.
+
 서버(server.js) → Render 배포
 클라이언트(trading-platform.jsx) → Firebase Hosting 배포
 데이터(시뮬레이션 시그널) → Firestore 동기화

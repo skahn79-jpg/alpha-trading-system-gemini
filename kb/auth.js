@@ -393,10 +393,31 @@ function originFromValue(value) {
   }
 }
 
-function isAllowedOrigin(origin) {
+function requestSelfOrigin(req) {
+  if (!req || typeof req !== "object") return "";
+  const headers = req.headers && typeof req.headers === "object" ? req.headers : {};
+  const hostRaw = headers["x-forwarded-host"] || headers.host;
+  if (typeof hostRaw !== "string" || !hostRaw.trim()) return "";
+  const host = hostRaw.split(",")[0].trim();
+  const xfProto = headers["x-forwarded-proto"];
+  let proto = "http";
+  if (typeof xfProto === "string" && xfProto.trim()) proto = xfProto.split(",")[0].trim();
+  else if (req.secure) proto = "https";
+  if (!/^https?$/i.test(proto)) proto = "http";
+  return `${proto}://${host}`;
+}
+
+function isSameOrigin(origin, req) {
+  const o = originFromValue(origin) || String(origin || "").trim();
+  const self = requestSelfOrigin(req);
+  return !!(o && self && o === self);
+}
+
+function isAllowedOrigin(origin, req) {
   const o = originFromValue(origin) || String(origin || "").trim();
   if (!o) return false;
-  return getAllowedOrigins().includes(o);
+  if (getAllowedOrigins().includes(o)) return true;
+  return isSameOrigin(o, req);
 }
 
 function corsOriginDelegate(origin, cb) {
@@ -405,19 +426,27 @@ function corsOriginDelegate(origin, cb) {
   return cb(null, false);
 }
 
+function corsOptionsDelegate(req, callback) {
+  const origin = req && req.headers ? req.headers.origin : "";
+  if (!origin) return callback(null, { origin: true, credentials: true });
+  if (isAllowedOrigin(origin, req)) return callback(null, { origin: true, credentials: true });
+  return callback(null, { origin: false, credentials: true });
+}
+
 /**
  * 로그인·로그아웃 등 상태 변경 요청의 Origin/Referer 검증.
  * SameSite=Strict 만으로 CSRF 를 생략하지 않는다.
+ * 동일 출처(프런트와 API가 같은 호스트)는 allowlist에 없어도 허용한다.
  */
 function requireCsrf(req, res, next) {
   const origin = typeof req.headers.origin === "string" ? req.headers.origin : "";
   if (origin) {
-    if (isAllowedOrigin(origin)) return next();
+    if (isAllowedOrigin(origin, req)) return next();
     return res.status(403).json({ error: CSRF_ERROR_MESSAGE });
   }
   const referer = typeof req.headers.referer === "string" ? req.headers.referer : "";
   if (!referer) return next();
-  if (isAllowedOrigin(originFromValue(referer))) return next();
+  if (isAllowedOrigin(originFromValue(referer), req)) return next();
   return res.status(403).json({ error: CSRF_ERROR_MESSAGE });
 }
 
@@ -530,7 +559,10 @@ module.exports = {
   requireCsrf,
   getAllowedOrigins,
   isAllowedOrigin,
+  isSameOrigin,
+  requestSelfOrigin,
   corsOriginDelegate,
+  corsOptionsDelegate,
   buildSessionCookie,
   buildClearCookie,
   sessionPublicPayload,
