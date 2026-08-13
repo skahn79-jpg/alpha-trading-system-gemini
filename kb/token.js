@@ -11,14 +11,16 @@
  *  - 메모리 캐시 + 만료 5분(300초) 전 선제 갱신
  *  - 동시 호출 시 발급은 1회만(inflight Promise 공유)
  *  - 미설정이면 네트워크 호출 없이 즉시 ConfigError
- *  - 에러 메시지·로그에 appKey/appSecret/token 원문 절대 미포함(maskSecret 사용)
+ *  - 에러 메시지·로그에 appKey/appSecret/token 원문·마스킹본을 넣지 않는다
+ *  - 업스트림 실패는 KbDiagnosticError 로만 전파하고, 진단 로그는 호출측에서 1회
  */
 
 "use strict";
 
 const axios = require("axios");
 const { getKbConfig, maskSecret, ConfigError } = require("./config.js");
-const { buildRequest, unwrap } = require("./envelope.js");
+const { buildRequest } = require("./envelope.js");
+const { wrapOauthAxios, oauthParsingError } = require("./diagnostic.js");
 
 const TOKEN_PATH = "/oauth2/token";
 const REVOKE_PATH = "/oauth2/revoke";
@@ -77,17 +79,21 @@ function extractTokenPayload(data) {
       : o.expiresIn !== undefined ? o.expiresIn
       : o.expire_in !== undefined ? o.expire_in
       : null;
+    const expiresPresent = rawExpires !== undefined && rawExpires !== null && rawExpires !== "";
     const expiresInSec = Number(rawExpires);
+    const expiresValid = Number.isFinite(expiresInSec) && expiresInSec > 0;
     return {
       accessToken: String(accessToken),
       tokenType: String(o.token_type || o.tokenType || "bearer"),
-      expiresInSec: Number.isFinite(expiresInSec) && expiresInSec > 0 ? expiresInSec : null,
+      expiresInSec: expiresValid ? expiresInSec : null,
+      expiresInvalid: expiresPresent && !expiresValid,
     };
   }
   return null;
 }
 
 async function _issueToken(cfg) {
+  const startedAt = Date.now();
   const url = `${cfg.baseUrl}${TOKEN_PATH}`;
   const payload = buildRequest(cfg, {
     appKey: cfg.appKey,
@@ -99,30 +105,15 @@ async function _issueToken(cfg) {
   try {
     data = await _httpPost(url, payload);
   } catch (err) {
-    // 비밀값이 섞일 수 있는 axios err.config / 응답 원문은 절대 전파하지 않는다.
-    const status = err && err.response ? err.response.status : null;
-    const safe = new Error(
-      `KB 토큰 발급 실패${status ? ` (HTTP ${status})` : ""} — appKey=${maskSecret(cfg.appKey)}`,
-    );
-    safe.code = "KB_TOKEN_ISSUE_FAILED";
-    safe.status = status;
-    // 응답 본문이 있으면 마스킹된 사본만 첨부
-    if (err && err.response && err.response.data) {
-      safe.responseSafe = unwrap(err.response.data).rawSafe;
-    }
-    console.error("[kb/token] 발급 실패:", safe.message);
-    throw safe;
+    throw wrapOauthAxios(err, startedAt);
   }
 
   const parsed = extractTokenPayload(data);
   if (!parsed) {
-    const safe = new Error(
-      "KB 토큰 응답에서 access_token 을 찾지 못했습니다 — 응답 필드 명세 확인 필요",
-    );
-    safe.code = "KB_TOKEN_RESPONSE_UNPARSED";
-    safe.responseSafe = unwrap(data).rawSafe;
-    console.error("[kb/token]", safe.message);
-    throw safe;
+    throw oauthParsingError({ startedAt, upstreamStatus: 200 });
+  }
+  if (parsed.expiresInvalid) {
+    throw oauthParsingError({ startedAt, upstreamStatus: 200 });
   }
 
   // expires_in 미제공 시 보수적으로 짧게(10분) 잡아 재발급을 유도한다.
@@ -132,9 +123,6 @@ async function _issueToken(cfg) {
     tokenType: parsed.tokenType,
     expiresAt: Date.now() + ttlSec * 1000,
   };
-  console.log(
-    `[kb/token] 발급 완료 token=${maskSecret(parsed.accessToken)} ttl=${ttlSec}s`,
-  );
   return _cache.accessToken;
 }
 
@@ -186,7 +174,7 @@ async function revokeToken() {
   });
   try {
     await _httpPost(url, payload);
-    console.log(`[kb/token] 폐기 완료 token=${maskSecret(cached.accessToken)}`);
+    console.log("[kb/token] 폐기 완료");
     return { revoked: true };
   } catch (err) {
     const status = err && err.response ? err.response.status : null;

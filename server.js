@@ -37,6 +37,7 @@ const kbConfig = require("./kb/config.js");
 const kbToken = require("./kb/token.js");
 const kbBroker = require("./kb/broker.js");
 const kbAuth = require("./kb/auth.js");
+const kbDiagnostic = require("./kb/diagnostic.js");
 
 const app = express();
 app.disable("x-powered-by");
@@ -3730,21 +3731,24 @@ const KB_NOT_CONFIGURED_MSG = "KB증권 연동 환경변수가 설정되어 있�
 /** KB 라우트 공통 에러 응답. 환경변수명·스택·비밀정보는 절대 담지 않는다. */
 function sendKbError(res, err) {
   const e = err || {};
-  if (e.code === "KB_NOT_CONFIGURED") {
+  if (e instanceof kbConfig.ConfigError || e.code === "KB_NOT_CONFIGURED") {
     console.error("[kb]", KB_NOT_CONFIGURED_MSG);
     return res.status(503).json({
       error: "KB증권 연동을 사용할 수 없습니다.",
     });
   }
-  if (e.name === "KbApiError") {
-    console.error("[kb]", e.message);
-    return res.status(502).json({
-      error: "KB증권 조회에 실패했습니다.",
-    });
+  if (kbDiagnostic.isDiagnosticError(e)) {
+    kbDiagnostic.logKbDiagnostic(e);
+  } else {
+    kbDiagnostic.logKbDiagnostic(
+      new kbDiagnostic.KbDiagnosticError({
+        stage: "unknown",
+        errorType: "unknown",
+      }),
+    );
   }
-  console.error("[kb]", e.message || String(e));
   return res.status(502).json({
-    error: "KB증권 조회에 실패했습니다.",
+    error: kbDiagnostic.KB_CLIENT_ERROR,
   });
 }
 

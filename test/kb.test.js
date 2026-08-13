@@ -12,6 +12,7 @@ const config = require("../kb/config.js");
 const envelope = require("../kb/envelope.js");
 const token = require("../kb/token.js");
 const broker = require("../kb/broker.js");
+const diagnostic = require("../kb/diagnostic.js");
 
 const APP_KEY = "AK-live-0123456789abcdef";
 const APP_SECRET = "SEC-live-zzzz-9876543210-qwerty";
@@ -79,6 +80,28 @@ function okEnvelope(dataBody) {
 function resetAll() {
   broker.__resetForTest(); // 토큰 캐시까지 초기화
   token.__setHttpForTest(null);
+}
+
+function axiosLike({ status, code, data, config } = {}) {
+  const err = new Error(code || "axios error");
+  if (code) err.code = code;
+  if (status !== undefined) err.response = { status, data: data !== undefined ? data : {} };
+  if (config) err.config = config;
+  return err;
+}
+
+function stringifyLogArgs(args) {
+  return args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
+}
+
+function enumerableErrorJson(err) {
+  return JSON.stringify({ ...err, message: err.message, stack: err.stack });
+}
+
+function assertNoSecrets(serialized) {
+  assert.ok(!serialized.includes(APP_SECRET), "에러 직렬화에 appSecret 원문 금지");
+  assert.ok(!serialized.includes(APP_KEY), "에러 직렬화에 appKey 원문 금지");
+  assert.ok(!serialized.includes("fake-access-token-value"), "에러에 토큰 원문 금지");
 }
 
 /* ────────────────────────────────────────────────────────────────────
@@ -471,9 +494,9 @@ test("7c. 주문(쓰기) 메서드는 항상 차단된다", async () => {
 });
 
 /* ────────────────────────────────────────────────────────────────────
- * 8. 실패 응답 → KbApiError (비밀정보 미포함)
+ * 8. 실패 응답 → KbDiagnosticError (비밀정보 미포함)
  * ──────────────────────────────────────────────────────────────────── */
-test("8. 실패 응답(resultCode 500 / processCode 9999) → KbApiError", async () => {
+test("8. 실패 응답(resultCode 500 / processCode 9999) → KbDiagnosticError", async () => {
   const snap = snapshotEnv();
   resetAll();
   try {
@@ -493,25 +516,13 @@ test("8. 실패 응답(resultCode 500 / processCode 9999) → KbApiError", async
     await assert.rejects(
       () => broker.getQuote("005930"),
       (err) => {
-        assert.ok(err instanceof broker.KbApiError);
-        assert.equal(err.name, "KbApiError");
-        assert.equal(err.message, "일시적인 오류가 발생했습니다");
-        assert.equal(err.code, "9999");
-        assert.equal(err.resultCode, "500");
-        assert.equal(err.trCode, "IVU10140");
-
-        const serialized = JSON.stringify({
-          name: err.name,
-          message: err.message,
-          code: err.code,
-          resultCode: err.resultCode,
-          trCode: err.trCode,
-          own: { ...err },
-          stack: err.stack,
-        });
-        assert.ok(!serialized.includes(APP_SECRET), "에러 직렬화에 appSecret 원문 금지");
-        assert.ok(!serialized.includes(APP_KEY), "에러 직렬화에 appKey 원문 금지");
-        assert.ok(!serialized.includes("fake-access-token-value"), "에러에 토큰 원문 금지");
+        assert.ok(err instanceof diagnostic.KbDiagnosticError);
+        assert.equal(err.name, "KbDiagnosticError");
+        assert.equal(err.message, "KB upstream request failed");
+        assert.equal(err.stage, "quote");
+        assert.equal(err.errorType, "kb-business");
+        assert.equal(err.kbResultCode, "500");
+        assertNoSecrets(enumerableErrorJson(err));
         return true;
       },
     );
@@ -521,7 +532,7 @@ test("8. 실패 응답(resultCode 500 / processCode 9999) → KbApiError", async
   }
 });
 
-test("8b. processMessage 가 없으면 resultMessage 를 쓴다", async () => {
+test("8b. getMarketStatus resultCode 500 → market-status/kb-business", async () => {
   const snap = snapshotEnv();
   resetAll();
   try {
@@ -534,8 +545,10 @@ test("8b. processMessage 가 없으면 resultMessage 를 쓴다", async () => {
     await assert.rejects(
       () => broker.getMarketStatus(),
       (err) => {
-        assert.equal(err.message, "서버오류");
-        assert.equal(err.trCode, "SZQM0771");
+        assert.ok(err instanceof diagnostic.KbDiagnosticError);
+        assert.equal(err.stage, "market-status");
+        assert.equal(err.errorType, "kb-business");
+        assert.equal(err.kbResultCode, "500");
         return true;
       },
     );
@@ -771,29 +784,413 @@ test("13. axios 예외는 비밀정보 없는 KB_REQUEST_FAILED 로 감싼다", 
     installFakeToken();
 
     broker.__setHttpForTest(async () => {
-      const err = new Error("connect ECONNREFUSED");
-      err.response = {
+      const err = axiosLike({
         status: 502,
+        code: "ECONNREFUSED",
         data: { dataHeader: { appSecret: APP_SECRET }, dataBody: { token: "abc" } },
-      };
-      err.config = { headers: { Authorization: `Bearer fake-access-token-value` } };
+        config: { headers: { Authorization: "Bearer fake-access-token-value" } },
+      });
       throw err;
     });
 
     await assert.rejects(
       () => broker.getQuote("005930"),
       (err) => {
+        assert.ok(err instanceof diagnostic.KbDiagnosticError);
+        assert.equal(err.stage, "quote");
+        assert.equal(err.errorType, "http");
         assert.equal(err.code, "KB_REQUEST_FAILED");
-        assert.equal(err.status, 502);
+        assert.equal(err.upstreamStatus, 502);
         assert.equal(err.config, undefined, "axios err.config 원문 전파 금지");
         const serialized = JSON.stringify({ ...err, message: err.message });
-        assert.ok(!serialized.includes(APP_SECRET));
-        assert.ok(!serialized.includes("fake-access-token-value"));
+        assert.ok(!Object.prototype.hasOwnProperty.call(JSON.parse(serialized), "cause"));
+        assert.ok(!serialized.includes("cause"));
+        assertNoSecrets(serialized);
         return true;
       },
     );
   } finally {
     resetAll();
+    restoreEnv(snap);
+  }
+});
+
+/* ────────────────────────────────────────────────────────────────────
+ * 14+. 안전 진단 로그 (가짜 HTTP 만 사용)
+ * ──────────────────────────────────────────────────────────────────── */
+
+async function rejectOauth(httpImpl, check) {
+  const snap = snapshotEnv();
+  resetAll();
+  try {
+    setConfigured();
+    token.__setHttpForTest(httpImpl);
+    await assert.rejects(() => token.getAccessToken(), check);
+  } finally {
+    resetAll();
+    restoreEnv(snap);
+  }
+}
+
+test("14. OAuth HTTP 분류: 401/429/timeout/dns/tls/parsing", async () => {
+  await rejectOauth(
+    async () => {
+      throw axiosLike({ status: 401 });
+    },
+    (err) => {
+      assert.ok(err instanceof diagnostic.KbDiagnosticError);
+      assert.equal(err.stage, "oauth");
+      assert.equal(err.upstreamStatus, 401);
+      assert.equal(err.errorType, "http");
+      return true;
+    },
+  );
+
+  await rejectOauth(
+    async () => {
+      throw axiosLike({ status: 429 });
+    },
+    (err) => {
+      assert.equal(err.stage, "oauth");
+      assert.equal(err.upstreamStatus, 429);
+      assert.equal(err.errorType, "http");
+      return true;
+    },
+  );
+
+  await rejectOauth(
+    async () => {
+      throw axiosLike({ code: "ECONNABORTED" });
+    },
+    (err) => {
+      assert.equal(err.stage, "oauth");
+      assert.equal(err.errorType, "timeout");
+      assert.equal(err.upstreamStatus, null);
+      return true;
+    },
+  );
+
+  await rejectOauth(
+    async () => {
+      throw axiosLike({ code: "ENOTFOUND" });
+    },
+    (err) => {
+      assert.equal(err.stage, "oauth");
+      assert.equal(err.errorType, "dns");
+      return true;
+    },
+  );
+
+  await rejectOauth(
+    async () => {
+      throw axiosLike({ code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE" });
+    },
+    (err) => {
+      assert.equal(err.stage, "oauth");
+      assert.equal(err.errorType, "tls");
+      return true;
+    },
+  );
+
+  await rejectOauth(
+    async () => ({ token_type: "Bearer", expires_in: 86400 }),
+    (err) => {
+      assert.equal(err.stage, "oauth");
+      assert.equal(err.errorType, "parsing");
+      assert.equal(err.upstreamStatus, 200);
+      return true;
+    },
+  );
+
+  await rejectOauth(
+    async () => ({ access_token: "fake-access-token-value", expires_in: "abc" }),
+    (err) => {
+      assert.equal(err.stage, "oauth");
+      assert.equal(err.errorType, "parsing");
+      assert.equal(err.upstreamStatus, 200);
+      return true;
+    },
+  );
+});
+
+test("14b. access_token 만 있고 expires_in 없으면 ttl 600s 로 성공", async () => {
+  const snap = snapshotEnv();
+  resetAll();
+  try {
+    setConfigured();
+    const before = Date.now();
+    token.__setHttpForTest(async () => ({
+      access_token: "fake-access-token-value",
+      token_type: "Bearer",
+    }));
+    const t = await token.getAccessToken();
+    const after = Date.now();
+    assert.equal(t, "fake-access-token-value");
+    const info = token.getTokenCacheInfo();
+    assert.equal(info.cached, true);
+    assert.ok(info.expiresAt >= before + 600 * 1000 - 50);
+    assert.ok(info.expiresAt <= after + 600 * 1000 + 50);
+  } finally {
+    resetAll();
+    restoreEnv(snap);
+  }
+});
+
+test("15. getQuote 토큰 401 은 stage=oauth 유지, TR HTTP 미호출", async () => {
+  const snap = snapshotEnv();
+  resetAll();
+  try {
+    setConfigured();
+    token.__setHttpForTest(async () => {
+      throw axiosLike({ status: 401 });
+    });
+    let brokerCalls = 0;
+    broker.__setHttpForTest(async () => {
+      brokerCalls += 1;
+      return okEnvelope({});
+    });
+    await assert.rejects(
+      () => broker.getQuote("005930"),
+      (err) => {
+        assert.ok(err instanceof diagnostic.KbDiagnosticError);
+        assert.equal(err.stage, "oauth");
+        assert.equal(err.errorType, "http");
+        assert.equal(err.upstreamStatus, 401);
+        return true;
+      },
+    );
+    assert.equal(brokerCalls, 0);
+  } finally {
+    resetAll();
+    restoreEnv(snap);
+  }
+});
+
+test("16. IVU10140 HTTP 400 / header 누락 parsing, SZQM0771 HTTP 503", async () => {
+  const snap = snapshotEnv();
+  resetAll();
+  try {
+    setConfigured();
+    installFakeToken();
+
+    broker.__setHttpForTest(async () => {
+      throw axiosLike({ status: 400 });
+    });
+    await assert.rejects(
+      () => broker.getQuote("005930"),
+      (err) => {
+        assert.equal(err.stage, "quote");
+        assert.equal(err.errorType, "http");
+        assert.equal(err.upstreamStatus, 400);
+        return true;
+      },
+    );
+
+    resetAll();
+    setConfigured();
+    installFakeToken();
+    broker.__setHttpForTest(async () => ({ dataBody: { now_prc: "1" } }));
+    await assert.rejects(
+      () => broker.getQuote("005930"),
+      (err) => {
+        assert.equal(err.stage, "quote");
+        assert.equal(err.errorType, "parsing");
+        assert.equal(err.kbResultCode, null);
+        assert.equal(err.upstreamStatus, 200);
+        return true;
+      },
+    );
+
+    resetAll();
+    setConfigured();
+    installFakeToken();
+    broker.__setHttpForTest(async () => ({
+      dataHeader: { processCode: "0000" },
+      dataBody: {},
+    }));
+    await assert.rejects(
+      () => broker.getQuote("005930"),
+      (err) => {
+        assert.equal(err.stage, "quote");
+        assert.equal(err.errorType, "parsing");
+        assert.equal(err.kbResultCode, null);
+        assert.equal(err.upstreamStatus, 200);
+        return true;
+      },
+    );
+
+    resetAll();
+    setConfigured();
+    installFakeToken();
+    broker.__setHttpForTest(async () => {
+      throw axiosLike({ status: 503 });
+    });
+    await assert.rejects(
+      () => broker.getMarketStatus(),
+      (err) => {
+        assert.equal(err.stage, "market-status");
+        assert.equal(err.errorType, "http");
+        assert.equal(err.upstreamStatus, 503);
+        return true;
+      },
+    );
+  } finally {
+    resetAll();
+    restoreEnv(snap);
+  }
+});
+
+test("17. sanitizeStage/sanitizeResultCode 와 클라이언트 JSON 안전성", () => {
+  assert.equal(diagnostic.sanitizeStage("nope"), "unknown");
+  assert.equal(diagnostic.sanitizeResultCode("일시적인 오류가 발생했습니다"), null);
+  assert.equal(diagnostic.sanitizeResultCode("a".repeat(33)), null);
+  assert.equal(diagnostic.KB_CLIENT_ERROR, "KB증권 조회에 실패했습니다.");
+
+  const clientJson = { error: diagnostic.KB_CLIENT_ERROR };
+  assert.deepEqual(Object.keys(clientJson), ["error"]);
+  const s = JSON.stringify(clientJson);
+  for (const key of ["stage", "upstreamStatus", "kbResultCode", "errorType", "durationMs", "retryCount"]) {
+    assert.equal(Object.prototype.hasOwnProperty.call(clientJson, key), false);
+    assert.ok(!s.includes(`"${key}"`));
+  }
+});
+
+test("18. toLogFields/logKbDiagnostic 은 허용 6필드만, 비밀값 미출력", () => {
+  const orig = console.error;
+  const logs = [];
+  console.error = (...args) => {
+    logs.push(args);
+  };
+  try {
+    const err = new diagnostic.KbDiagnosticError({
+      stage: "quote",
+      errorType: "http",
+      upstreamStatus: 400,
+      kbResultCode: null,
+      durationMs: 12,
+      retryCount: 0,
+    });
+    err.appKey = APP_KEY;
+    err.appSecret = APP_SECRET;
+    err.access_token = "fake-access-token-value";
+    err.Authorization = "Bearer fake-access-token-value";
+    err.Cookie = "session=abc";
+    err.requestBody = { appKey: APP_KEY, password: "x" };
+    err.responseBody = { access_token: "fake-access-token-value" };
+    err.config = { headers: { Authorization: "Bearer fake-access-token-value" } };
+
+    const fields = diagnostic.toLogFields(err);
+    assert.deepEqual(Object.keys(fields), [
+      "stage",
+      "upstreamStatus",
+      "kbResultCode",
+      "errorType",
+      "durationMs",
+      "retryCount",
+    ]);
+    const fieldJson = JSON.stringify(fields);
+    assertNoSecrets(fieldJson);
+    assert.ok(!fieldJson.includes("appKey"));
+    assert.ok(!fieldJson.includes("appSecret"));
+    assert.ok(!fieldJson.includes("access_token"));
+    assert.ok(!fieldJson.includes("Authorization"));
+    assert.ok(!fieldJson.includes("Cookie"));
+    assert.ok(!fieldJson.includes("requestBody"));
+    assert.ok(!fieldJson.includes("responseBody"));
+    assert.ok(!fieldJson.includes("config"));
+
+    diagnostic.logKbDiagnostic(err);
+    assert.equal(logs.length, 1);
+    const logged = stringifyLogArgs(logs[0]);
+    assertNoSecrets(logged);
+    assert.ok(!logged.includes("appKey"));
+    assert.ok(!logged.includes("appSecret"));
+    assert.ok(!logged.includes("access_token"));
+    assert.ok(!logged.includes("Authorization"));
+    assert.ok(!logged.includes("Cookie"));
+    assert.ok(!logged.includes("requestBody"));
+    assert.ok(!logged.includes("responseBody"));
+    assert.ok(!logged.includes("request body"));
+    assert.ok(!logged.includes("response body"));
+    assert.ok(!logged.includes("axios config"));
+    assert.ok(!logged.includes('"config"'));
+  } finally {
+    console.error = orig;
+  }
+});
+
+test("19. getAccessToken/getQuote throw 는 console.error 하지 않고 log 는 1회만", async () => {
+  const snap = snapshotEnv();
+  resetAll();
+  const orig = console.error;
+  const logs = [];
+  console.error = (...args) => {
+    logs.push(args);
+  };
+  try {
+    setConfigured();
+    token.__setHttpForTest(async () => {
+      throw axiosLike({ status: 401 });
+    });
+    let tokenErr = null;
+    try {
+      await token.getAccessToken();
+    } catch (e) {
+      tokenErr = e;
+    }
+    assert.ok(tokenErr instanceof diagnostic.KbDiagnosticError);
+    assert.equal(logs.length, 0, "getAccessToken 은 진단 로그를 찍지 않는다");
+
+    resetAll();
+    setConfigured();
+    installFakeToken();
+    broker.__setHttpForTest(async () => ({
+      dataHeader: { resultCode: "500", processCode: "9999" },
+      dataBody: {},
+    }));
+    let quoteErr = null;
+    try {
+      await broker.getQuote("005930");
+    } catch (e) {
+      quoteErr = e;
+    }
+    assert.ok(quoteErr instanceof diagnostic.KbDiagnosticError);
+    assert.equal(logs.length, 0, "getQuote 는 진단 로그를 찍지 않는다");
+
+    diagnostic.logKbDiagnostic(quoteErr);
+    assert.equal(logs.length, 1);
+    diagnostic.logKbDiagnostic(quoteErr);
+    assert.equal(logs.length, 1, "두 번째 logKbDiagnostic 은 추가 로그 없음");
+    assert.equal(quoteErr.__kbDiagnosticLogged, true);
+  } finally {
+    console.error = orig;
+    resetAll();
+    restoreEnv(snap);
+  }
+});
+
+test("20. tradingEnabled/autoTradingEnabled 는 env 가 정확히 true 가 아니면 false", () => {
+  const snap = snapshotEnv();
+  try {
+    setConfigured();
+    delete process.env.KBSEC_TRADING_ENABLED;
+    delete process.env.KBSEC_AUTO_TRADING_ENABLED;
+    let cfg = config.getKbConfig();
+    assert.equal(cfg.tradingEnabled, false);
+    assert.equal(cfg.autoTradingEnabled, false);
+
+    process.env.KBSEC_TRADING_ENABLED = "TRUE";
+    process.env.KBSEC_AUTO_TRADING_ENABLED = "1";
+    cfg = config.getKbConfig();
+    assert.equal(cfg.tradingEnabled, false);
+    assert.equal(cfg.autoTradingEnabled, false);
+
+    process.env.KBSEC_TRADING_ENABLED = "yes";
+    process.env.KBSEC_AUTO_TRADING_ENABLED = "yes";
+    cfg = config.getKbConfig();
+    assert.equal(cfg.tradingEnabled, false);
+    assert.equal(cfg.autoTradingEnabled, false);
+  } finally {
     restoreEnv(snap);
   }
 });

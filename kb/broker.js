@@ -25,6 +25,12 @@ const axios = require("axios");
 const { getKbConfig, ConfigError } = require("./config.js");
 const { buildRequest, unwrap, toInt, toDecimalString } = require("./envelope.js");
 const { getAccessToken } = require("./token.js");
+const {
+  KbDiagnosticError,
+  isDiagnosticError,
+  wrapAxiosAsDiagnostic,
+  sanitizeResultCode,
+} = require("./diagnostic.js");
 
 const HTTP_TIMEOUT_MS = 10 * 1000;
 
@@ -84,6 +90,12 @@ function firstNonEmpty(...vals) {
     if (s !== "") return s;
   }
   return "";
+}
+
+function stageForTr(trCode) {
+  if (trCode === TR.QUOTE.code) return "quote";       // IVU10140
+  if (trCode === TR.MARKET_STATUS.code) return "market-status"; // SZQM0771
+  return "unknown";
 }
 
 /* ── 값 변환 ───────────────────────────────────────────────────────── */
@@ -158,11 +170,28 @@ async function _httpPost(url, body, headers = {}, timeout = HTTP_TIMEOUT_MS) {
  * @returns {Promise<{header:any, body:any}>}
  */
 async function callTr(trCode, path, dataBody = {}) {
-  // 미설정이면 여기서 ConfigError 가 그대로 전파된다(네트워크 호출 없음).
-  const token = await getAccessToken();
+  const stage = stageForTr(trCode);
+  let token;
+  try {
+    token = await getAccessToken();
+  } catch (err) {
+    if (err instanceof ConfigError || (err && err.code === "KB_NOT_CONFIGURED")) {
+      throw err;
+    }
+    if (isDiagnosticError(err)) {
+      throw err;
+    }
+    throw new KbDiagnosticError({
+      stage: "oauth",
+      errorType: "unknown",
+      retryCount: 0,
+    });
+  }
+
   const cfg = getKbConfig();
   const url = `${cfg.baseUrl}${path}`;
   const payload = buildRequest(cfg, dataBody);
+  const startedAt = Date.now();
 
   let data;
   try {
@@ -176,25 +205,45 @@ async function callTr(trCode, path, dataBody = {}) {
       HTTP_TIMEOUT_MS,
     );
   } catch (err) {
-    // axios err.config/headers 에는 Authorization 등 비밀값이 섞인다 → 절대 전파 금지.
-    const status = err && err.response ? err.response.status : null;
-    const safe = new Error(
-      `KB API 요청 실패 (${trCode})${status ? ` (HTTP ${status})` : ""}`,
-    );
-    safe.code = "KB_REQUEST_FAILED";
-    safe.status = status;
-    safe.trCode = trCode;
-    if (err && err.response && err.response.data) {
-      safe.responseSafe = unwrap(err.response.data).rawSafe;
-    }
-    throw safe;
+    throw wrapAxiosAsDiagnostic({
+      stage,
+      err,
+      startedAt,
+      code: "KB_REQUEST_FAILED",
+    });
   }
 
   const { header, body } = unwrap(data);
-  const h = header && typeof header === "object" ? header : {};
+  const headerMissing =
+    header === null || header === undefined || typeof header !== "object";
+  if (
+    headerMissing ||
+    header.resultCode === undefined ||
+    header.resultCode === null
+  ) {
+    throw new KbDiagnosticError({
+      stage,
+      errorType: "parsing",
+      kbResultCode: null,
+      upstreamStatus: 200,
+      durationMs: Date.now() - startedAt,
+      retryCount: 0,
+    });
+  }
+
+  const h = header;
   const ok =
     String(h.resultCode) === OK_RESULT_CODE && String(h.processCode) === OK_PROCESS_CODE;
-  if (!ok) throw new KbApiError(h, trCode);
+  if (!ok) {
+    throw new KbDiagnosticError({
+      stage,
+      errorType: "kb-business",
+      kbResultCode: sanitizeResultCode(h.resultCode),
+      upstreamStatus: 200,
+      durationMs: Date.now() - startedAt,
+      retryCount: 0,
+    });
+  }
 
   return { header: h, body };
 }
