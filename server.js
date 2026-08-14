@@ -21,6 +21,7 @@ const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 const { analyzeCandles } = require("./analysis.js");
+const { buildPredictOptsFromCandles } = require("./lib/calendar/candle-meta");
 const { fetchNpsChanges, fetchNpsForStock } = require("./dart.js");
 const { judgeBatch, computeStats, computeWeights, scoreSignal } = require("./simulation.js");
 const aiPredictor = require("./predictor.js");
@@ -493,7 +494,7 @@ app.get("/api/predict/:code", async (req, res) => {
     }
     const analysis = analyzeCandles(candles);
     const close = Number(candles[0]?.close) || 0;
-    const prediction = aiPredictor.predict(code, analysis, close);
+    const prediction = aiPredictor.predict(code, analysis, close, buildPredictOptsFromCandles(candles));
     // 만기된 과거 예측 채점 + 가중치 자동 학습 (요청당 소량 처리)
     aiPredictor.processMatured((c, n) => fetchDailyCandles(c, n), { maxPerRun: 5 })
       .catch((e) => console.error("[ai-learn]", e.message));
@@ -3976,7 +3977,7 @@ if (require.main === module) {
             const candles = await fetchDailyCandles(code, 260);
             const newest = [...candles].sort((a, b) => String(b.date).localeCompare(String(a.date)));
             const analysis = analyzeCandles(newest);
-            aiPredictor.predict(code, analysis, Number(newest[0]?.close));
+            aiPredictor.predict(code, analysis, Number(newest[0]?.close), buildPredictOptsFromCandles(newest));
           } catch { /* 개별 실패 무시 */ }
         }
       } catch (e) {

@@ -3,23 +3,41 @@
  *
  * 온라인 로지스틱 회귀(SGD):
  *  1) /api/ai/predict 호출 시 기술 지표 피처로 상승 확률 계산 + 예측 기록
- *  2) 예측이 만기(기본 5거래일 ≈ 7일)되면 실제 종가로 정답(상승/하락)을 매김
+ *  2) 예측이 만기되면 targetTradingDate의 확정 종가로 정답(상승/하락)을 매김
  *  3) 오차만큼 가중치를 자동 업데이트 → 호출이 쌓일수록 예측 정확도 개선
  *
  * 상태 파일: data/ai-model.json (가중치·성적), data/ai-predictions.json (예측 로그)
+ * I/O는 StoragePort만 사용한다. 손상 JSON을 빈 배열로 덮어쓰지 않는다.
  * 주의: Render 무료 디스크는 재배포 시 초기화됨 — 모델은 런타임 동안 누적 학습.
  */
 
-const fs = require("fs");
+"use strict";
+
+const crypto = require("crypto");
 const path = require("path");
+const { createJsonFileStore, StoreLockError } = require("./lib/storage");
+const { formatKstDate, formatKstDateTimeIso } = require("./lib/calendar/kst");
+const {
+  parseTradingDate,
+  normalizeTradingDate,
+  resolveLegacyTarget,
+  createUnavailableCalendar,
+} = require("./lib/calendar/krx-calendar");
 
-const DATA_DIR = path.join(__dirname, "data");
-const MODEL_FILE = path.join(DATA_DIR, "ai-model.json");
-const PRED_FILE = path.join(DATA_DIR, "ai-predictions.json");
-
-const HORIZON_DAYS = 7; // 달력일 기준 만기 (≈ 5거래일)
+const HORIZON_DAYS = 7; // 달력일 기준 만기 (레거시 LEGACY_7_CALENDAR_DAYS)
 const LEARNING_RATE = 0.05;
-const MAX_PREDICTION_LOG = 2000;
+const MODEL_VERSION = "predictor-legacy-v1";
+const FEATURE_VERSION = "features-v1";
+const UNSPECIFIED_MODEL_VERSION = "unspecified";
+const UNSPECIFIED_FEATURE_VERSION = "unspecified";
+const LEGACY_HORIZON = "LEGACY_7_CALENDAR_DAYS";
+
+const INVALID_BASE_TRADING_DATE = "INVALID_BASE_TRADING_DATE";
+const INVALID_TARGET_TRADING_DATE = "INVALID_TARGET_TRADING_DATE";
+const INVALID_HORIZON = "INVALID_HORIZON";
+const INVALID_DATE_FORMAT = "INVALID_DATE_FORMAT";
+const CANDLE_NOT_FINAL = "CANDLE_NOT_FINAL";
+const CALENDAR_PENDING_CODE = "CALENDAR_PENDING";
 
 // 도메인 지식 기반 초기 가중치 (학습이 쌓이면 자동 보정됨)
 const DEFAULT_WEIGHTS = {
@@ -91,38 +109,6 @@ function clamp(v, min, max) {
 
 function sigmoid(z) {
   return 1 / (1 + Math.exp(-z));
-}
-
-function readJson(file, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJson(file, data) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(data, null, 2), "utf8");
-}
-
-function loadModel() {
-  const model = readJson(MODEL_FILE, null);
-  if (model && model.weights) return model;
-  return { weights: { ...DEFAULT_WEIGHTS }, trained: 0, wins: 0, losses: 0, updatedAt: null };
-}
-
-function saveModel(model) {
-  writeJson(MODEL_FILE, model);
-}
-
-function loadPredictions() {
-  const preds = readJson(PRED_FILE, []);
-  return Array.isArray(preds) ? preds : [];
-}
-
-function savePredictions(preds) {
-  writeJson(PRED_FILE, preds.slice(-MAX_PREDICTION_LOG));
 }
 
 /** analyzeCandles 결과 + 현재가로 정규화 피처 벡터 생성 */
@@ -208,211 +194,858 @@ function predictProb(features, weights) {
   return sigmoid(z);
 }
 
-/** 예측 생성 + 기록 (code당 하루 1건만 기록) */
-function predict(code, analysis, close) {
-  const model = loadModel();
-  const features = buildFeatures(analysis, close);
-  const probUp = predictProb(features, model.weights);
+function resolveNowValue(optsNow, nowFn) {
+  return optsNow !== undefined && optsNow !== null ? optsNow : nowFn();
+}
 
-  const contributions = Object.entries(features)
-    .filter(([k]) => k !== "bias")
-    .map(([k, x]) => ({ key: k, label: FEATURE_LABELS[k] || k, impact: Number(((model.weights[k] ?? 0) * x).toFixed(3)) }))
-    .filter((c) => Math.abs(c.impact) > 0.01)
-    .sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact))
-    .slice(0, 5);
+function recordHorizonType(p) {
+  return p.horizonType || LEGACY_HORIZON;
+}
 
-  const today = new Date().toISOString().slice(0, 10);
-  const preds = loadPredictions();
-  const exists = preds.some((p) => p.code === code && p.date === today);
-  if (!exists && close > 0) {
-    preds.push({
-      id: `${code}-${today}`,
-      code,
-      date: today,
-      entryPrice: close,
-      features,
-      probUp: Number(probUp.toFixed(4)),
-      status: "pending",
-    });
-    savePredictions(preds);
+function recordSymbol(p) {
+  return p.symbol || p.code;
+}
+
+function recordBaseDate(p) {
+  return p.baseTradingDate || p.date;
+}
+
+function recordHorizonDays(p) {
+  return p.horizonTradingDays == null ? null : p.horizonTradingDays;
+}
+
+function recordModelVersion(p) {
+  return p.modelVersion || UNSPECIFIED_MODEL_VERSION;
+}
+
+function recordFeatureVersion(p) {
+  return p.featureVersion || UNSPECIFIED_FEATURE_VERSION;
+}
+
+function isSettled(p) {
+  return p.evaluationStatus === "EVALUATED" || p.status === "resolved";
+}
+
+function missingDataEquals(a, b) {
+  const left = Array.isArray(a) ? a : [];
+  const right = Array.isArray(b) ? b : [];
+  if (left.length !== right.length) return false;
+  return left.every((v, i) => v === right[i]);
+}
+
+function mergeMissing(base, extra) {
+  const out = Array.isArray(base) ? [...base] : [];
+  for (const item of extra || []) {
+    if (!out.includes(item)) out.push(item);
+  }
+  return out;
+}
+
+/** 식별·피처 필드는 유지하고 캘린더 미확정 상태만 채운다. 실제로 바뀌면 true. */
+function annotateCalendarPending(p) {
+  const prevStatus = p.evaluationStatus;
+  const prevTarget = p.targetTradingDate;
+  const prevMissing = p.missingData;
+  p.evaluationStatus = "CALENDAR_PENDING";
+  p.targetTradingDate = null;
+  p.missingData = mergeMissing(p.missingData, ["krxTradingCalendar"]);
+  return prevStatus !== p.evaluationStatus
+    || prevTarget !== p.targetTradingDate
+    || !missingDataEquals(prevMissing, p.missingData);
+}
+
+function assignIfChanged(obj, key, value) {
+  if (obj[key] !== value) {
+    obj[key] = value;
+    return true;
+  }
+  return false;
+}
+
+function isDuplicate(preds, key) {
+  return preds.some((p) =>
+    recordSymbol(p) === key.symbol
+    && recordBaseDate(p) === key.baseTradingDate
+    && recordHorizonType(p) === key.horizonType
+    && recordHorizonDays(p) === key.horizonTradingDays
+    && recordModelVersion(p) === key.modelVersion
+    && recordFeatureVersion(p) === key.featureVersion
+  );
+}
+
+function emptyHorizonCounts() {
+  return { total: 0, pending: 0, evaluated: 0, calendarPending: 0 };
+}
+
+function calendarHasList(cal) {
+  return !!(cal && typeof cal.list === "function" && Array.isArray(cal.list()) && cal.list().length > 0);
+}
+
+function resolveCandleFinalityMeta(opts, candle, baseTradingDate, asOfDate) {
+  const candleTradingDate = opts.candleTradingDate || baseTradingDate || null;
+  if (opts.finalitySource && opts.candleFinality) {
+    return {
+      candleFinality: opts.candleFinality,
+      finalitySource: opts.finalitySource,
+      candleTradingDate,
+    };
   }
 
-  const resolved = model.wins + model.losses;
-  const direction = probUp >= 0.5 ? "UP" : "DOWN";
+  const preferHeuristic = opts.finalitySource === "TIME_HEURISTIC";
 
-  // 점수(현재 기술 상태)와 예측(7일 후 통계)이 반대로 보일 때의 해설 + 결합 판정
-  // 모델은 백테스트에서 평균 회귀(과열→되돌림, 과매도→반등)를 학습하므로
-  // 고점수+하락예측 / 저점수+상승예측은 모순이 아니라 통계적 판단임
-  const score = Number(analysis?.score);
-  const pu = Math.round(probUp * 1000) / 10;
-  let context = null;
-  let combined = null;
-  if (Number.isFinite(score)) {
-    if (score <= 45 && probUp >= 0.62) {
-      context = "기술 점수는 낮은 약세·과매도 국면이지만, 과거 통계상 이런 구간에서 7일 내 반등 확률이 높았습니다.";
-      combined = { badge: "반등 매수 후보", tone: "up", note: `약세 국면 + AI 상승 ${pu}%` };
-    } else if (score >= 75 && probUp <= 0.42) {
-      context = "기술 점수는 높은 강세·과열 국면이지만, 과거 통계상 단기 되돌림(차익실현) 확률이 높았습니다.";
-      combined = { badge: "과열 조정 주의", tone: "down", note: `강세 국면 + AI 하락 ${Math.round((1 - probUp) * 1000) / 10}%` };
-    } else if (score >= 65 && probUp >= 0.58) {
-      combined = { badge: "추세 지속 매수", tone: "up", note: `강세 국면 + AI 상승 ${pu}%` };
-    } else if (score <= 45 && probUp <= 0.42) {
-      combined = { badge: "약세 지속 주의", tone: "down", note: `약세 국면 + AI 하락 ${Math.round((1 - probUp) * 1000) / 10}%` };
-    }
+  if (candle && (candle.isFinal === true || candle.marketSession === "CLOSED")) {
+    return {
+      candleFinality: opts.candleFinality || "FINAL",
+      finalitySource: opts.finalitySource || "EXPLICIT_FINAL_FLAG",
+      candleTradingDate,
+    };
   }
-
+  if (candle && (candle.isFinal === false || candle.marketSession === "OPEN")) {
+    return {
+      candleFinality: opts.candleFinality || "NOT_FINAL",
+      finalitySource: preferHeuristic ? "TIME_HEURISTIC" : (opts.finalitySource || "EXPLICIT_FINAL_FLAG"),
+      candleTradingDate,
+    };
+  }
+  if (baseTradingDate && asOfDate && baseTradingDate < asOfDate) {
+    return {
+      candleFinality: opts.candleFinality || "FINAL",
+      finalitySource: opts.finalitySource || "HISTORICAL_DATE",
+      candleTradingDate,
+    };
+  }
   return {
-    probUp: pu,
-    probDown: Math.round((1 - probUp) * 1000) / 10,
-    direction,
-    confidence: Math.abs(probUp - 0.5) >= 0.2 ? "high" : Math.abs(probUp - 0.5) >= 0.1 ? "medium" : "low",
-    horizonDays: HORIZON_DAYS,
-    context,
-    combined,
-    topFactors: contributions,
-    model: {
-      trained: model.trained,
-      accuracy: resolved ? Math.round((model.wins / resolved) * 1000) / 10 : null,
-      resolved,
-    },
+    candleFinality: opts.candleFinality || "UNKNOWN",
+    finalitySource: opts.finalitySource || "UNKNOWN",
+    candleTradingDate,
   };
 }
 
-/**
- * 만기된 예측을 실제 캔들로 채점하고 SGD로 가중치 업데이트.
- * fetchCandles(code, count) → [{date:'YYYYMMDD'|'...', close}] (최신순 or 과거순 모두 허용)
- */
-async function processMatured(fetchCandles, { maxPerRun = 10 } = {}) {
-  const preds = loadPredictions();
-  const now = Date.now();
-  const pending = preds.filter(
-    (p) => p.status === "pending" && now - new Date(p.date).getTime() >= HORIZON_DAYS * 86400000,
-  ).slice(0, maxPerRun);
-  if (pending.length === 0) return { processed: 0 };
+function assessCandleFinality(candle, baseDate, asOfDate, cal) {
+  if (candle && (candle.isFinal === false || candle.marketSession === "OPEN")) {
+    return { ok: false, code: CANDLE_NOT_FINAL, missingData: ["isFinal"] };
+  }
+  if (candle && (candle.isFinal === true || candle.marketSession === "CLOSED")) {
+    return { ok: true, missingData: [] };
+  }
 
-  const model = loadModel();
-  let processed = 0;
+  if (!baseDate || !asOfDate) {
+    return { ok: false, code: CANDLE_NOT_FINAL, missingData: ["isFinal"] };
+  }
+  if (baseDate < asOfDate) {
+    if (calendarHasList(cal) && typeof cal.has === "function") {
+      cal.has(baseDate);
+    }
+    return { ok: true, missingData: ["isFinal"] };
+  }
+  if (baseDate === asOfDate) {
+    return { ok: false, code: CANDLE_NOT_FINAL, missingData: ["isFinal"] };
+  }
+  return { ok: false, code: CANDLE_NOT_FINAL, missingData: ["isFinal"] };
+}
 
-  for (const p of pending) {
-    try {
-      const candles = await fetchCandles(p.code, 30);
-      if (!Array.isArray(candles) || candles.length === 0) continue;
-      // 예측일 이후 첫 5거래일 뒤 종가 대신, 만기 시점의 최신 종가 사용 (최신순 정렬 가정)
-      const sorted = [...candles].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
-      const latestClose = Number(sorted[0]?.close);
-      if (!Number.isFinite(latestClose) || latestClose <= 0) continue;
+function assessTargetCandleFinality(candle, targetDate, asOfDate) {
+  if (!candle) return { ok: false, notFinal: false, missing: true };
+  if (candle.isFinal === false || candle.marketSession === "OPEN") {
+    return { ok: false, notFinal: true };
+  }
+  if (candle.isFinal === true || candle.marketSession === "CLOSED") {
+    return { ok: true, notFinal: false };
+  }
+  if (targetDate < asOfDate) {
+    return { ok: true, notFinal: false, missingData: ["isFinal"] };
+  }
+  if (targetDate === asOfDate) {
+    return { ok: false, notFinal: true, missingData: ["isFinal"] };
+  }
+  return { ok: false, notFinal: true, missingData: ["isFinal"] };
+}
 
-      const label = latestClose > p.entryPrice ? 1 : 0;
-      const prob = predictProb(p.features, model.weights);
-      const err = label - prob; // SGD 업데이트
-      for (const [key, x] of Object.entries(p.features)) {
+function createPredictor({ store, calendar, nowFn } = {}) {
+  if (!store) throw new TypeError("store is required");
+  const defaultCalendar = calendar || createUnavailableCalendar();
+  const now = nowFn || (() => new Date());
+  let modelUpdateChain = Promise.resolve();
+
+  function withModelMutex(fn) {
+    const run = modelUpdateChain.then(fn, fn);
+    modelUpdateChain = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  function ensureModel() {
+    const model = store.getModel();
+    if (!model || !model.weights) {
+      return {
+        weights: { ...DEFAULT_WEIGHTS },
+        trained: 0,
+        wins: 0,
+        losses: 0,
+        updatedAt: null,
+        appliedEvaluations: [],
+      };
+    }
+    if (!Array.isArray(model.appliedEvaluations)) model.appliedEvaluations = [];
+    return model;
+  }
+
+  function resolveTarget(horizonType, horizonTradingDays, baseTradingDate, cal) {
+    if (horizonType === LEGACY_HORIZON) {
+      const result = resolveLegacyTarget(baseTradingDate, cal);
+      if (!result || !result.ok) {
+        return {
+          targetTradingDate: null,
+          evaluationStatus: "CALENDAR_PENDING",
+          missingData: Array.isArray(result?.missingData) ? [...result.missingData] : ["krxTradingCalendar"],
+          recordError: result?.code && result.code !== CALENDAR_PENDING_CODE ? result.code : CALENDAR_PENDING_CODE,
+        };
+      }
+      return {
+        targetTradingDate: result.targetTradingDate,
+        evaluationStatus: result.evaluationStatus || "PENDING",
+        missingData: Array.isArray(result.missingData) ? [...result.missingData] : [],
+        recordError: null,
+      };
+    }
+    if (!Number.isInteger(horizonTradingDays) || horizonTradingDays < 1) {
+      return {
+        targetTradingDate: null,
+        evaluationStatus: "CALENDAR_PENDING",
+        missingData: [],
+        recordError: INVALID_HORIZON,
+      };
+    }
+    const result = cal.addTradingDays(baseTradingDate, horizonTradingDays);
+    if (!result || !result.ok) {
+      const code = result && result.code === INVALID_HORIZON ? INVALID_HORIZON : CALENDAR_PENDING_CODE;
+      return {
+        targetTradingDate: null,
+        evaluationStatus: "CALENDAR_PENDING",
+        missingData: Array.isArray(result?.missingData) ? [...result.missingData] : ["krxTradingCalendar"],
+        recordError: code,
+      };
+    }
+    return {
+      targetTradingDate: result.targetTradingDate,
+      evaluationStatus: result.evaluationStatus || "PENDING",
+      missingData: Array.isArray(result.missingData) ? [...result.missingData] : [],
+      recordError: null,
+    };
+  }
+
+  function findTargetCandle(candles, targetDate) {
+    for (const c of candles) {
+      try {
+        const date = normalizeTradingDate(c.date || c.tradingDate);
+        if (date === targetDate) return c;
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  function alreadyApplied(model, predictionId) {
+    if (!predictionId) return false;
+    return (model.appliedEvaluations || []).some((e) => e.predictionId === predictionId);
+  }
+
+  async function applyModelUpdate(p, model, updated) {
+    const predictionId = p.predictionId || p.id;
+    const operationId = p.evaluationOperationId;
+    const skipSgd = alreadyApplied(model, predictionId);
+
+    if (!skipSgd) {
+      const entry = Number(p.baseClose ?? p.entryPrice);
+      const features = p.features && typeof p.features === "object" ? p.features : null;
+      if (!features || !Number.isFinite(entry) || entry <= 0 || p.targetClose == null) {
+        return { evaluated: false };
+      }
+      const label = p.targetClose > entry ? 1 : 0;
+      const prob = predictProb(features, model.weights);
+      const err = label - prob;
+      for (const [key, x] of Object.entries(features)) {
         model.weights[key] = Number((((model.weights[key] ?? 0)) + LEARNING_RATE * err * x).toFixed(4));
       }
       model.trained += 1;
       const predictedUp = prob >= 0.5;
-      if ((predictedUp && label === 1) || (!predictedUp && label === 0)) model.wins += 1;
+      const correct = (predictedUp && label === 1) || (!predictedUp && label === 0);
+      if (correct) model.wins += 1;
       else model.losses += 1;
+      p.correct = correct;
+      model.appliedEvaluations = [
+        ...(model.appliedEvaluations || []),
+        { predictionId, operationId },
+      ];
+      model.updatedAt = formatKstDateTimeIso(now());
 
-      p.status = "resolved";
-      p.finalPrice = latestClose;
-      p.actual = label === 1 ? "UP" : "DOWN";
-      p.correct = (predictedUp && label === 1) || (!predictedUp && label === 0);
-      p.resolvedAt = new Date().toISOString();
-      processed += 1;
+      try {
+        await store.saveModel(model);
+      } catch {
+        return { evaluated: false, modelSaveFailed: true };
+      }
+    }
+
+    const evaluatedAt = formatKstDateTimeIso(now());
+    const prevStatus = p.evaluationStatus;
+    const prevResolved = p.status;
+    p.evaluationStatus = "EVALUATED";
+    p.status = "resolved";
+    p.evaluatedAt = evaluatedAt;
+    p.resolvedAt = evaluatedAt;
+    p.modelUpdateStatus = "APPLIED";
+    p.modelUpdatedAt = evaluatedAt;
+
+    try {
+      await store.commitPredictions(updated);
+      return { evaluated: true };
     } catch {
-      // 네트워크 오류 등은 다음 기회에 재시도
+      p.evaluationStatus = prevStatus === "EVALUATED" ? "MODEL_UPDATE_PENDING" : (prevStatus || "MODEL_UPDATE_PENDING");
+      p.status = prevResolved === "resolved" ? "pending" : (prevResolved || "pending");
+      p.evaluatedAt = null;
+      p.resolvedAt = null;
+      p.modelUpdateStatus = "PENDING";
+      return { evaluated: false, predictionCommitFailed: true };
     }
   }
 
-  if (processed > 0) {
-    model.updatedAt = new Date().toISOString();
-    saveModel(model);
-    savePredictions(preds);
-  }
-  return { processed };
-}
+  /** 예측 생성 + 기록. 6필드 키가 같으면 신규 저장하지 않음 */
+  function predict(code, analysis, close, opts = {}) {
+    const model = ensureModel();
+    const features = buildFeatures(analysis, close);
+    const probUp = predictProb(features, model.weights);
 
-/**
- * 과거 캔들 백테스트 학습 — 무료 호스팅은 재시작마다 디스크가 초기화되어
- * 온라인 학습 기록이 소실되므로, 부팅 시 과거 데이터를 걸어가며
- * "그날의 지표 → HORIZON_DAYS일 후 실제 등락" 샘플로 즉시 재학습한다.
- * 이후 6시간 주기 재실행으로 최신 데이터가 계속 반영된다(지속 학습).
- * fetchCandles(code, n) → 캔들 배열, analyzeFn(newestFirst) → analysis
- */
-async function trainFromHistory(codes, fetchCandles, analyzeFn, opts = {}) {
-  const { step = 5, minHistory = 80, maxSamplesPerCode = 30 } = opts;
-  const model = loadModel();
-  // 장기 가동 중 같은 과거 데이터로 중복 재학습 방지 (재시작 시엔 기록이 없어 자동 재학습)
-  if (model.lastHistoryTrain && Date.now() - new Date(model.lastHistoryTrain.at).getTime() < 24 * 3600000) {
-    return { skipped: true, reason: "24시간 내 학습 완료", last: model.lastHistoryTrain };
-  }
-  let samples = 0;
-  let wins = 0;
-  for (const code of codes) {
+    const contributions = Object.entries(features)
+      .filter(([k]) => k !== "bias")
+      .map(([k, x]) => ({ key: k, label: FEATURE_LABELS[k] || k, impact: Number(((model.weights[k] ?? 0) * x).toFixed(3)) }))
+      .filter((c) => Math.abs(c.impact) > 0.01)
+      .sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact))
+      .slice(0, 5);
+
+    const nowValue = resolveNowValue(opts.now, now);
+    let dataAsOf;
+    let createdAt;
     try {
-      const raw = await fetchCandles(code, 300);
-      if (!Array.isArray(raw) || raw.length < minHistory + HORIZON_DAYS) continue;
-      const newestFirst = [...raw].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
-      let count = 0;
-      for (let off = HORIZON_DAYS; off + minHistory < newestFirst.length && count < maxSamplesPerCode; off += step) {
-        const slice = newestFirst.slice(off); // 그 시점 기준 "최신" 캔들들
-        const close = Number(slice[0]?.close);
-        const future = Number(newestFirst[off - HORIZON_DAYS]?.close); // 약 HORIZON일 후 종가
-        if (!Number.isFinite(close) || !Number.isFinite(future) || close <= 0) continue;
-        const analysis = analyzeFn(slice);
-        if (!analysis || !Array.isArray(analysis.signals)) continue;
-        const features = buildFeatures(analysis, close);
-        const label = future > close ? 1 : 0;
-        const prob = predictProb(features, model.weights);
-        if ((prob >= 0.5) === (label === 1)) wins += 1;
-        const err = label - prob;
-        for (const [key, x] of Object.entries(features)) {
-          model.weights[key] = Number(((model.weights[key] ?? 0) + LEARNING_RATE * err * x).toFixed(4));
-        }
-        samples += 1;
-        count += 1;
+      dataAsOf = opts.dataAsOf || formatKstDateTimeIso(nowValue);
+      createdAt = formatKstDateTimeIso(nowValue);
+    } catch {
+      dataAsOf = opts.dataAsOf || null;
+      createdAt = null;
+    }
+
+    const asOfParsed = dataAsOf ? parseTradingDate(dataAsOf) : { ok: false };
+    const asOfDate = asOfParsed.ok ? asOfParsed.date : null;
+
+    const baseRaw = (opts.candle && (opts.candle.tradingDate || opts.candle.date))
+      || opts.tradingDate
+      || opts.baseTradingDate;
+    let baseParsed;
+    if (baseRaw !== undefined && baseRaw !== null) {
+      baseParsed = parseTradingDate(baseRaw);
+    } else {
+      try {
+        baseParsed = { ok: true, date: formatKstDate(nowValue), code: null };
+      } catch {
+        baseParsed = { ok: false, date: null, code: INVALID_DATE_FORMAT };
       }
-    } catch { /* 종목 단위 실패는 건너뜀 */ }
-  }
-  if (samples > 0) {
-    model.trained += samples;
-    model.wins += wins;
-    model.losses += samples - wins;
-    model.updatedAt = new Date().toISOString();
-    model.lastHistoryTrain = {
-      at: new Date().toISOString(),
-      samples,
-      hitRate: Math.round((wins / samples) * 1000) / 10,
-      codes: codes.length,
+    }
+
+    const horizonType = opts.horizonType || LEGACY_HORIZON;
+    const horizonTradingDays = horizonType === LEGACY_HORIZON
+      ? null
+      : (opts.horizonTradingDays ?? null);
+    const modelVersion = opts.modelVersion || MODEL_VERSION;
+    const featureVersion = opts.featureVersion || FEATURE_VERSION;
+    const cal = opts.calendar || defaultCalendar;
+    const direction = probUp >= 0.5 ? "UP" : "DOWN";
+    const upProbability = Number(probUp.toFixed(4));
+
+    let recordError = null;
+    let missingData = [];
+    let evaluationStatus = "PENDING";
+    let targetTradingDate = null;
+    let allowSave = true;
+
+    if (!baseParsed.ok) {
+      recordError = INVALID_DATE_FORMAT;
+      allowSave = false;
+    }
+
+    const baseTradingDate = baseParsed.ok ? baseParsed.date : null;
+    const finalityMeta = resolveCandleFinalityMeta(opts, opts.candle, baseTradingDate, asOfDate);
+    const candleFinality = finalityMeta.candleFinality;
+    const finalitySource = finalityMeta.finalitySource;
+    const candleTradingDate = finalityMeta.candleTradingDate;
+
+    if (allowSave && asOfDate && baseTradingDate && baseTradingDate > asOfDate) {
+      recordError = INVALID_BASE_TRADING_DATE;
+      allowSave = false;
+    }
+
+    if (allowSave && horizonType !== LEGACY_HORIZON
+      && (!Number.isInteger(horizonTradingDays) || horizonTradingDays < 1)) {
+      recordError = INVALID_HORIZON;
+      allowSave = false;
+    }
+
+    if (allowSave) {
+      const finality = assessCandleFinality(opts.candle, baseTradingDate, asOfDate, cal);
+      missingData = mergeMissing(missingData, finality.missingData);
+      if (!finality.ok) {
+        recordError = finality.code || CANDLE_NOT_FINAL;
+        allowSave = false;
+      }
+    }
+
+    if (candleFinality === "UNKNOWN" || candleFinality === "NOT_FINAL") {
+      allowSave = false;
+      if (!recordError) recordError = CANDLE_NOT_FINAL;
+    }
+
+    if (allowSave && baseTradingDate) {
+      const target = resolveTarget(horizonType, horizonTradingDays, baseTradingDate, cal);
+      missingData = mergeMissing(missingData, target.missingData);
+      targetTradingDate = target.targetTradingDate;
+      evaluationStatus = target.evaluationStatus;
+      if (target.recordError === INVALID_HORIZON) {
+        recordError = INVALID_HORIZON;
+        allowSave = false;
+      } else if (target.recordError === INVALID_DATE_FORMAT) {
+        recordError = INVALID_DATE_FORMAT;
+        allowSave = false;
+      } else if (targetTradingDate && baseTradingDate && targetTradingDate <= baseTradingDate) {
+        recordError = INVALID_TARGET_TRADING_DATE;
+        allowSave = false;
+      } else if (target.recordError === CALENDAR_PENDING_CODE) {
+        recordError = CALENDAR_PENDING_CODE;
+      }
+    }
+
+    const preds = store.listPredictions();
+    const dupKey = {
+      symbol: code,
+      baseTradingDate,
+      horizonType,
+      horizonTradingDays,
+      modelVersion,
+      featureVersion,
     };
-    saveModel(model);
+    const exists = baseTradingDate ? isDuplicate(preds, dupKey) : false;
+    if (!exists && allowSave && close > 0 && baseTradingDate) {
+      const predictionId = crypto.randomUUID();
+      try {
+        const saved = store.savePrediction({
+          id: predictionId,
+          code,
+          date: baseTradingDate,
+          entryPrice: close,
+          features,
+          probUp: upProbability,
+          status: "pending",
+          predictionId,
+          symbol: code,
+          createdAt,
+          baseTradingDate,
+          baseClose: close,
+          horizonType,
+          horizonTradingDays,
+          targetTradingDate,
+          predictedDirection: direction,
+          upProbability,
+          modelVersion,
+          featureVersion,
+          dataAsOf,
+          candleTradingDate,
+          candleFinality,
+          finalitySource,
+          targetClose: null,
+          actualReturnPct: null,
+          actualDirection: null,
+          evaluationStatus,
+          evaluatedAt: null,
+          missingData,
+          priceEvaluatedAt: null,
+          modelUpdateStatus: null,
+          modelUpdatedAt: null,
+          evaluationOperationId: null,
+        });
+        if (saved && typeof saved.catch === "function") {
+          saved.catch(() => {});
+        }
+      } catch (err) {
+        if (err instanceof StoreLockError || (err && err.code === "STORE_BUSY")) {
+          recordError = "STORE_BUSY";
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    const resolved = model.wins + model.losses;
+    const pu = Math.round(probUp * 1000) / 10;
+    const score = Number(analysis?.score);
+    let context = null;
+    let combined = null;
+    if (Number.isFinite(score)) {
+      if (score <= 45 && probUp >= 0.62) {
+        context = "기술 점수는 낮은 약세·과매도 국면이지만, 과거 통계상 이런 구간에서 7일 내 반등 확률이 높았습니다.";
+        combined = { badge: "반등 매수 후보", tone: "up", note: `약세 국면 + AI 상승 ${pu}%` };
+      } else if (score >= 75 && probUp <= 0.42) {
+        context = "기술 점수는 높은 강세·과열 국면이지만, 과거 통계상 단기 되돌림(차익실현) 확률이 높았습니다.";
+        combined = { badge: "과열 조정 주의", tone: "down", note: `강세 국면 + AI 하락 ${Math.round((1 - probUp) * 1000) / 10}%` };
+      } else if (score >= 65 && probUp >= 0.58) {
+        combined = { badge: "추세 지속 매수", tone: "up", note: `강세 국면 + AI 상승 ${pu}%` };
+      } else if (score <= 45 && probUp <= 0.42) {
+        combined = { badge: "약세 지속 주의", tone: "down", note: `약세 국면 + AI 하락 ${Math.round((1 - probUp) * 1000) / 10}%` };
+      }
+    }
+
+    const matched = exists
+      ? preds.find((p) =>
+        recordSymbol(p) === code
+        && recordBaseDate(p) === baseTradingDate
+        && recordHorizonType(p) === horizonType
+        && recordHorizonDays(p) === horizonTradingDays
+        && recordModelVersion(p) === modelVersion
+        && recordFeatureVersion(p) === featureVersion)
+      : null;
+
+    return {
+      probUp: pu,
+      probDown: Math.round((1 - probUp) * 1000) / 10,
+      direction,
+      confidence: Math.abs(probUp - 0.5) >= 0.2 ? "high" : Math.abs(probUp - 0.5) >= 0.1 ? "medium" : "low",
+      horizonDays: HORIZON_DAYS,
+      horizonType,
+      evaluationStatus: matched?.evaluationStatus || evaluationStatus,
+      context,
+      combined,
+      topFactors: contributions,
+      model: {
+        trained: model.trained,
+        accuracy: resolved ? Math.round((model.wins / resolved) * 1000) / 10 : null,
+        resolved,
+      },
+      recordError,
+      missingData,
+      dataAsOf,
+      candleTradingDate,
+      candleFinality,
+      finalitySource,
+    };
   }
-  return { samples, hitRate: samples ? Math.round((wins / samples) * 1000) / 10 : null };
+
+  /**
+   * 만기된 예측을 targetTradingDate의 확정 종가로만 채점하고 SGD로 가중치 업데이트.
+   * fetchCandles(code, count) → [{date:'YYYYMMDD'|'YYYY-MM-DD', close}]
+   * 평가일 최신 종가(sorted[0])는 사용하지 않는다.
+   * commitMaturedBatch를 쓰지 않는다. 가격 커밋 → 모델 → EVALUATED 순.
+   */
+  async function processMatured(fetchCandles, { maxPerRun = 10, asOf } = {}) {
+    return withModelMutex(async () => {
+      const preds = store.listPredictions();
+      const asOfRaw = asOf !== undefined && asOf !== null ? asOf : now();
+      const asOfParsed = parseTradingDate(asOfRaw);
+      let asOfDate;
+      if (asOfParsed.ok) asOfDate = asOfParsed.date;
+      else {
+        try { asOfDate = formatKstDate(asOfRaw); } catch { asOfDate = null; }
+      }
+
+      let processed = 0;
+      let calendarPending = 0;
+      let pending = 0;
+      let skippedEvaluated = 0;
+      let fetchCount = 0;
+      let modelSaveFailed = false;
+      let dirty = false;
+
+      const model = ensureModel();
+      const updated = preds.map((p) => ({ ...p }));
+
+      for (const p of updated) {
+        if (isSettled(p)) {
+          skippedEvaluated += 1;
+          continue;
+        }
+
+        if (p.evaluationStatus === "PRICE_EVALUATED" || p.evaluationStatus === "MODEL_UPDATE_PENDING") {
+          const applied = await applyModelUpdate(p, model, updated);
+          if (applied.evaluated) processed += 1;
+          if (applied.modelSaveFailed) {
+            modelSaveFailed = true;
+            return { processed, calendarPending, pending, skippedEvaluated, modelSaveFailed };
+          }
+          continue;
+        }
+
+        if (!p.targetTradingDate) {
+          if (recordHorizonType(p) === LEGACY_HORIZON) {
+            const base = recordBaseDate(p);
+            if (!base) {
+              if (annotateCalendarPending(p)) dirty = true;
+              calendarPending += 1;
+              continue;
+            }
+            const resolved = resolveLegacyTarget(base, defaultCalendar);
+            if (resolved && resolved.ok && resolved.targetTradingDate) {
+              p.targetTradingDate = resolved.targetTradingDate;
+              p.evaluationStatus = resolved.evaluationStatus || "PENDING";
+              p.missingData = Array.isArray(resolved.missingData) ? [...resolved.missingData] : [];
+              dirty = true;
+            } else {
+              if (annotateCalendarPending(p)) dirty = true;
+              calendarPending += 1;
+              continue;
+            }
+          } else {
+            if (annotateCalendarPending(p)) dirty = true;
+            calendarPending += 1;
+            continue;
+          }
+        }
+
+        if (calendarHasList(defaultCalendar) && typeof defaultCalendar.has === "function"
+          && !defaultCalendar.has(p.targetTradingDate)) {
+          if (annotateCalendarPending(p)) dirty = true;
+          calendarPending += 1;
+          continue;
+        }
+
+        let targetDate;
+        try {
+          targetDate = normalizeTradingDate(p.targetTradingDate);
+        } catch {
+          if (assignIfChanged(p, "evaluationStatus", "CALENDAR_PENDING")) dirty = true;
+          calendarPending += 1;
+          continue;
+        }
+
+        const baseRaw = recordBaseDate(p);
+        if (baseRaw) {
+          const baseParsed = parseTradingDate(baseRaw);
+          if (baseParsed.ok && targetDate <= baseParsed.date) {
+            if (assignIfChanged(p, "recordError", INVALID_TARGET_TRADING_DATE)) dirty = true;
+            pending += 1;
+            continue;
+          }
+        }
+
+        if (!asOfDate || asOfDate < targetDate) {
+          if (assignIfChanged(p, "evaluationStatus", "PENDING")) dirty = true;
+          pending += 1;
+          continue;
+        }
+
+        if (fetchCount >= maxPerRun) {
+          pending += 1;
+          continue;
+        }
+
+        fetchCount += 1;
+        try {
+          const code = recordSymbol(p);
+          const candles = await fetchCandles(code, 30);
+          if (!Array.isArray(candles) || candles.length === 0) {
+            if (assignIfChanged(p, "evaluationStatus", "PENDING")) dirty = true;
+            pending += 1;
+            continue;
+          }
+
+          const candle = findTargetCandle(candles, targetDate);
+          if (!candle) {
+            if (assignIfChanged(p, "evaluationStatus", "PENDING")) dirty = true;
+            pending += 1;
+            continue;
+          }
+
+          const finality = assessTargetCandleFinality(candle, targetDate, asOfDate);
+          if (!finality.ok) {
+            if (assignIfChanged(p, "evaluationStatus", "PENDING")) dirty = true;
+            pending += 1;
+            continue;
+          }
+
+          const targetClose = Number(candle.close);
+          if (!Number.isFinite(targetClose) || targetClose <= 0) {
+            if (assignIfChanged(p, "evaluationStatus", "PENDING")) dirty = true;
+            pending += 1;
+            continue;
+          }
+
+          const entry = Number(p.baseClose ?? p.entryPrice);
+          const features = p.features && typeof p.features === "object" ? p.features : null;
+          if (!features || !Number.isFinite(entry) || entry <= 0) {
+            if (assignIfChanged(p, "evaluationStatus", "PENDING")) dirty = true;
+            pending += 1;
+            continue;
+          }
+
+          const label = targetClose > entry ? 1 : 0;
+          const operationId = crypto.randomUUID();
+          const priceEvaluatedAt = formatKstDateTimeIso(now());
+          const prob = predictProb(features, model.weights);
+          const predictedUp = prob >= 0.5;
+          p.evaluationStatus = "MODEL_UPDATE_PENDING";
+          p.status = "pending";
+          p.targetClose = targetClose;
+          p.finalPrice = targetClose;
+          p.actualReturnPct = ((targetClose - entry) / entry) * 100;
+          p.actualDirection = label === 1 ? "UP" : "DOWN";
+          p.actual = label === 1 ? "UP" : "DOWN";
+          p.correct = (predictedUp && label === 1) || (!predictedUp && label === 0);
+          p.priceEvaluatedAt = priceEvaluatedAt;
+          p.evaluationOperationId = operationId;
+          p.modelUpdateStatus = "PENDING";
+          p.evaluatedAt = null;
+          p.resolvedAt = null;
+
+          try {
+            await store.commitPredictions(updated);
+          } catch {
+            pending += 1;
+            continue;
+          }
+
+          const applied = await applyModelUpdate(p, model, updated);
+          if (applied.evaluated) processed += 1;
+          if (applied.modelSaveFailed) {
+            modelSaveFailed = true;
+            return { processed, calendarPending, pending, skippedEvaluated, modelSaveFailed };
+          }
+        } catch {
+          if (assignIfChanged(p, "evaluationStatus", "PENDING")) dirty = true;
+          pending += 1;
+        }
+      }
+
+      if (dirty) {
+        try {
+          await store.commitPredictions(updated);
+        } catch {
+          /* 상태 주석 커밋 실패는 다음 실행에서 재시도 */
+        }
+      }
+
+      return { processed, calendarPending, pending, skippedEvaluated, modelSaveFailed };
+    });
+  }
+
+  /**
+   * 과거 캔들 백테스트 학습 — 무료 호스팅은 재시작마다 디스크가 초기화되어
+   * 온라인 학습 기록이 소실되므로, 부팅 시 과거 데이터를 걸어가며
+   * "그날의 지표 → HORIZON_DAYS일 후 실제 등락" 샘플로 즉시 재학습한다.
+   * 이후 6시간 주기 재실행으로 최신 데이터가 계속 반영된다(지속 학습).
+   * fetchCandles(code, n) → 캔들 배열, analyzeFn(newestFirst) → analysis
+   */
+  async function trainFromHistory(codes, fetchCandles, analyzeFn, opts = {}) {
+    const { step = 5, minHistory = 80, maxSamplesPerCode = 30 } = opts;
+    const model = ensureModel();
+    if (model.lastHistoryTrain && Date.now() - new Date(model.lastHistoryTrain.at).getTime() < 24 * 3600000) {
+      return { skipped: true, reason: "24시간 내 학습 완료", last: model.lastHistoryTrain };
+    }
+    let samples = 0;
+    let wins = 0;
+    for (const code of codes) {
+      try {
+        const raw = await fetchCandles(code, 300);
+        if (!Array.isArray(raw) || raw.length < minHistory + HORIZON_DAYS) continue;
+        const newestFirst = [...raw].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+        let count = 0;
+        for (let off = HORIZON_DAYS; off + minHistory < newestFirst.length && count < maxSamplesPerCode; off += step) {
+          const slice = newestFirst.slice(off);
+          const close = Number(slice[0]?.close);
+          const future = Number(newestFirst[off - HORIZON_DAYS]?.close);
+          if (!Number.isFinite(close) || !Number.isFinite(future) || close <= 0) continue;
+          const analysis = analyzeFn(slice);
+          if (!analysis || !Array.isArray(analysis.signals)) continue;
+          const features = buildFeatures(analysis, close);
+          const label = future > close ? 1 : 0;
+          const prob = predictProb(features, model.weights);
+          if ((prob >= 0.5) === (label === 1)) wins += 1;
+          const err = label - prob;
+          for (const [key, x] of Object.entries(features)) {
+            model.weights[key] = Number(((model.weights[key] ?? 0) + LEARNING_RATE * err * x).toFixed(4));
+          }
+          samples += 1;
+          count += 1;
+        }
+      } catch { /* 종목 단위 실패는 건너뜀 */ }
+    }
+    if (samples > 0) {
+      model.trained += samples;
+      model.wins += wins;
+      model.losses += samples - wins;
+      model.updatedAt = new Date().toISOString();
+      model.lastHistoryTrain = {
+        at: new Date().toISOString(),
+        samples,
+        hitRate: Math.round((wins / samples) * 1000) / 10,
+        codes: codes.length,
+      };
+      await store.saveModel(model);
+    }
+    return { samples, hitRate: samples ? Math.round((wins / samples) * 1000) / 10 : null };
+  }
+
+  function getModelStats() {
+    const model = ensureModel();
+    const preds = store.listPredictions();
+    const pending = preds.filter((p) => !isSettled(p)).length;
+    const recent = preds.filter((p) => isSettled(p)).slice(-20).map((p) => ({
+      code: p.code || p.symbol,
+      date: p.date || p.baseTradingDate,
+      probUp: p.probUp ?? p.upProbability,
+      actual: p.actual ?? p.actualDirection,
+      correct: p.correct,
+    }));
+    const resolved = model.wins + model.losses;
+    const horizonCounts = {};
+    for (const p of preds) {
+      const h = recordHorizonType(p);
+      if (!horizonCounts[h]) horizonCounts[h] = emptyHorizonCounts();
+      horizonCounts[h].total += 1;
+      if (isSettled(p)) horizonCounts[h].evaluated += 1;
+      else if (p.evaluationStatus === "CALENDAR_PENDING" || !p.targetTradingDate) horizonCounts[h].calendarPending += 1;
+      else horizonCounts[h].pending += 1;
+    }
+    return {
+      weights: model.weights,
+      trained: model.trained,
+      wins: model.wins,
+      losses: model.losses,
+      accuracy: resolved ? Math.round((model.wins / resolved) * 1000) / 10 : null,
+      pendingPredictions: pending,
+      recentResolved: recent,
+      lastHistoryTrain: model.lastHistoryTrain || null,
+      updatedAt: model.updatedAt,
+      horizonCounts,
+    };
+  }
+
+  return { predict, processMatured, getModelStats, trainFromHistory, buildFeatures };
 }
 
-function getModelStats() {
-  const model = loadModel();
-  const preds = loadPredictions();
-  const pending = preds.filter((p) => p.status === "pending").length;
-  const recent = preds.filter((p) => p.status === "resolved").slice(-20).map((p) => ({
-    code: p.code,
-    date: p.date,
-    probUp: p.probUp,
-    actual: p.actual,
-    correct: p.correct,
-  }));
-  const resolved = model.wins + model.losses;
-  return {
-    weights: model.weights,
-    trained: model.trained,
-    wins: model.wins,
-    losses: model.losses,
-    accuracy: resolved ? Math.round((model.wins / resolved) * 1000) / 10 : null,
-    pendingPredictions: pending,
-    recentResolved: recent,
-    lastHistoryTrain: model.lastHistoryTrain || null,
-    updatedAt: model.updatedAt,
-  };
-}
+const defaultStore = createJsonFileStore({
+  predictionsPath: path.join(__dirname, "data", "ai-predictions.json"),
+  modelPath: path.join(__dirname, "data", "ai-model.json"),
+});
 
-module.exports = { predict, processMatured, getModelStats, buildFeatures, trainFromHistory };
+const defaultPredictor = createPredictor({
+  store: defaultStore,
+  calendar: createUnavailableCalendar(),
+  nowFn: () => new Date(),
+});
+
+module.exports = {
+  createPredictor,
+  predict: (...args) => defaultPredictor.predict(...args),
+  processMatured: (...args) => defaultPredictor.processMatured(...args),
+  getModelStats: (...args) => defaultPredictor.getModelStats(...args),
+  buildFeatures,
+  trainFromHistory: (...args) => defaultPredictor.trainFromHistory(...args),
+  UNSPECIFIED_MODEL_VERSION,
+  UNSPECIFIED_FEATURE_VERSION,
+  MODEL_VERSION,
+  FEATURE_VERSION,
+};
