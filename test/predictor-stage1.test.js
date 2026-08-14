@@ -215,7 +215,8 @@ test("6. 캘린더 미확정 CALENDAR_PENDING", () => {
   });
   const p = store.listPredictions()[0];
   assert.equal(p.targetTradingDate, null);
-  assert.equal(p.evaluationStatus, "CALENDAR_PENDING");
+  assert.equal(p.evaluationStatus, null);
+  assert.equal(p.targetDateStatus, "CALENDAR_PENDING");
   assert.deepEqual(p.missingData, ["krxTradingCalendar"]);
 });
 
@@ -725,7 +726,8 @@ test("35. 레거시 캘린더 없음 CALENDAR_PENDING", () => {
   predictLegacy(predictor, "005930", createUnavailableCalendar());
   const p = store.listPredictions()[0];
   assert.equal(p.targetTradingDate, null);
-  assert.equal(p.evaluationStatus, "CALENDAR_PENDING");
+  assert.equal(p.evaluationStatus, null);
+  assert.equal(p.targetDateStatus, "CALENDAR_PENDING");
 });
 
 test("36. 레거시 목표일 종가 없으면 PENDING", async () => {

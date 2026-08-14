@@ -241,17 +241,66 @@ function mergeMissing(base, extra) {
   return out;
 }
 
+const FORBIDDEN_NEW_EVALUATION_STATUS = new Set([
+  "CALENDAR_PENDING",
+  "CALENDAR_RANGE_INSUFFICIENT",
+  "CALENDAR_SOURCE_CONFLICT",
+  "TARGET_DATE_CONFIRMED",
+]);
+
+function isLegacyRecord(p) {
+  return p == null || p.targetDateStatus == null || p.targetDateStatus === "";
+}
+
+function sanitizeNewEvaluationStatus(evaluationStatus, targetDateStatus, targetClose) {
+  if (FORBIDDEN_NEW_EVALUATION_STATUS.has(evaluationStatus)) return null;
+  if (targetDateStatus !== "CONFIRMED") return null;
+  if (
+    (evaluationStatus === "PENDING"
+      || evaluationStatus === "MODEL_UPDATE_PENDING"
+      || evaluationStatus === "EVALUATED")
+    && targetDateStatus !== "CONFIRMED"
+  ) {
+    return null;
+  }
+  if (
+    (evaluationStatus === "MODEL_UPDATE_PENDING" || evaluationStatus === "EVALUATED")
+    && targetClose == null
+  ) {
+    return null;
+  }
+  return evaluationStatus;
+}
+
+function enforceConfirmedIffTarget(targetTradingDate, targetDateStatus) {
+  if (targetTradingDate != null) return "CONFIRMED";
+  if (targetDateStatus === "CONFIRMED") return "CALENDAR_PENDING";
+  return targetDateStatus;
+}
+
 /** 식별·피처 필드는 유지하고 캘린더 미확정 상태만 채운다. 실제로 바뀌면 true. */
-function annotateCalendarPending(p) {
+function annotateCalendarPending(p, nextTargetDateStatus) {
+  const legacy = isLegacyRecord(p);
   const prevStatus = p.evaluationStatus;
   const prevTarget = p.targetTradingDate;
   const prevMissing = p.missingData;
-  p.evaluationStatus = "CALENDAR_PENDING";
+  const prevTargetDateStatus = p.targetDateStatus;
   p.targetTradingDate = null;
   p.missingData = mergeMissing(p.missingData, ["krxTradingCalendar"]);
+  if (legacy) {
+    p.evaluationStatus = "CALENDAR_PENDING";
+  } else {
+    p.evaluationStatus = null;
+    if (nextTargetDateStatus != null && nextTargetDateStatus !== "") {
+      p.targetDateStatus = nextTargetDateStatus;
+    } else if (prevTargetDateStatus === "CONFIRMED") {
+      p.targetDateStatus = "CALENDAR_PENDING";
+    }
+  }
   return prevStatus !== p.evaluationStatus
     || prevTarget !== p.targetTradingDate
-    || !missingDataEquals(prevMissing, p.missingData);
+    || !missingDataEquals(prevMissing, p.missingData)
+    || prevTargetDateStatus !== p.targetDateStatus;
 }
 
 function assignIfChanged(obj, key, value) {
@@ -260,6 +309,14 @@ function assignIfChanged(obj, key, value) {
     return true;
   }
   return false;
+}
+
+function assignEvaluationStatus(p, next) {
+  if (isLegacyRecord(p)) {
+    return assignIfChanged(p, "evaluationStatus", next);
+  }
+  const value = sanitizeNewEvaluationStatus(next, p.targetDateStatus, p.targetClose);
+  return assignIfChanged(p, "evaluationStatus", value);
 }
 
 function isDuplicate(preds, key) {
@@ -279,6 +336,29 @@ function emptyHorizonCounts() {
 
 function calendarHasList(cal) {
   return !!(cal && typeof cal.list === "function" && Array.isArray(cal.list()) && cal.list().length > 0);
+}
+
+function readTargetDateStatus(p) {
+  if (p == null || p.targetDateStatus == null || p.targetDateStatus === "") {
+    return "UNKNOWN_LEGACY";
+  }
+  return p.targetDateStatus;
+}
+
+function isCalendarProvider(cal) {
+  return !!(cal && typeof cal.getTradingDayStatus === "function");
+}
+
+function mapTargetDateStatus(result) {
+  if (result && result.targetTradingDate) return "CONFIRMED";
+  if (result && result.targetDateStatus) {
+    if (result.targetDateStatus === "CONFIRMED") return "CALENDAR_PENDING";
+    return result.targetDateStatus;
+  }
+  const code = result && result.code;
+  if (code === "CALENDAR_RANGE_INSUFFICIENT") return "CALENDAR_RANGE_INSUFFICIENT";
+  if (code === "CALENDAR_SOURCE_CONFLICT") return "CALENDAR_SOURCE_CONFLICT";
+  return "CALENDAR_PENDING";
 }
 
 function resolveCandleFinalityMeta(opts, candle, baseTradingDate, asOfDate) {
@@ -390,19 +470,25 @@ function createPredictor({ store, calendar, nowFn } = {}) {
   }
 
   function resolveTarget(horizonType, horizonTradingDays, baseTradingDate, cal) {
+    const useProvider = isCalendarProvider(cal);
+
     if (horizonType === LEGACY_HORIZON) {
-      const result = resolveLegacyTarget(baseTradingDate, cal);
+      const result = useProvider
+        ? cal.resolveLegacyTarget(baseTradingDate)
+        : resolveLegacyTarget(baseTradingDate, cal);
       if (!result || !result.ok) {
         return {
           targetTradingDate: null,
-          evaluationStatus: "CALENDAR_PENDING",
+          evaluationStatus: null,
+          targetDateStatus: mapTargetDateStatus(result),
           missingData: Array.isArray(result?.missingData) ? [...result.missingData] : ["krxTradingCalendar"],
           recordError: result?.code && result.code !== CALENDAR_PENDING_CODE ? result.code : CALENDAR_PENDING_CODE,
         };
       }
       return {
         targetTradingDate: result.targetTradingDate,
-        evaluationStatus: result.evaluationStatus || "PENDING",
+        evaluationStatus: "PENDING",
+        targetDateStatus: "CONFIRMED",
         missingData: Array.isArray(result.missingData) ? [...result.missingData] : [],
         recordError: null,
       };
@@ -410,7 +496,8 @@ function createPredictor({ store, calendar, nowFn } = {}) {
     if (!Number.isInteger(horizonTradingDays) || horizonTradingDays < 1) {
       return {
         targetTradingDate: null,
-        evaluationStatus: "CALENDAR_PENDING",
+        evaluationStatus: null,
+        targetDateStatus: "CALENDAR_PENDING",
         missingData: [],
         recordError: INVALID_HORIZON,
       };
@@ -420,14 +507,18 @@ function createPredictor({ store, calendar, nowFn } = {}) {
       const code = result && result.code === INVALID_HORIZON ? INVALID_HORIZON : CALENDAR_PENDING_CODE;
       return {
         targetTradingDate: null,
-        evaluationStatus: "CALENDAR_PENDING",
+        evaluationStatus: null,
+        targetDateStatus: mapTargetDateStatus(result),
         missingData: Array.isArray(result?.missingData) ? [...result.missingData] : ["krxTradingCalendar"],
-        recordError: code,
+        recordError: result && result.code === INVALID_HORIZON
+          ? INVALID_HORIZON
+          : (result?.code && result.code !== CALENDAR_PENDING_CODE ? result.code : code),
       };
     }
     return {
       targetTradingDate: result.targetTradingDate,
-      evaluationStatus: result.evaluationStatus || "PENDING",
+      evaluationStatus: "PENDING",
+      targetDateStatus: "CONFIRMED",
       missingData: Array.isArray(result.missingData) ? [...result.missingData] : [],
       recordError: null,
     };
@@ -451,6 +542,12 @@ function createPredictor({ store, calendar, nowFn } = {}) {
   }
 
   async function applyModelUpdate(p, model, updated) {
+    if (!isLegacyRecord(p)) {
+      if (p.targetDateStatus !== "CONFIRMED" || p.targetClose == null) {
+        return { evaluated: false };
+      }
+    }
+
     const predictionId = p.predictionId || p.id;
     const operationId = p.evaluationOperationId;
     const skipSgd = alreadyApplied(model, predictionId);
@@ -564,6 +661,7 @@ function createPredictor({ store, calendar, nowFn } = {}) {
     let missingData = [];
     let evaluationStatus = "PENDING";
     let targetTradingDate = null;
+    let targetDateStatus = "CALENDAR_PENDING";
     let allowSave = true;
 
     if (!baseParsed.ok) {
@@ -607,6 +705,8 @@ function createPredictor({ store, calendar, nowFn } = {}) {
       missingData = mergeMissing(missingData, target.missingData);
       targetTradingDate = target.targetTradingDate;
       evaluationStatus = target.evaluationStatus;
+      targetDateStatus = target.targetDateStatus
+        || (targetTradingDate ? "CONFIRMED" : "CALENDAR_PENDING");
       if (target.recordError === INVALID_HORIZON) {
         recordError = INVALID_HORIZON;
         allowSave = false;
@@ -632,6 +732,8 @@ function createPredictor({ store, calendar, nowFn } = {}) {
     };
     const exists = baseTradingDate ? isDuplicate(preds, dupKey) : false;
     if (!exists && allowSave && close > 0 && baseTradingDate) {
+      targetDateStatus = enforceConfirmedIffTarget(targetTradingDate, targetDateStatus);
+      evaluationStatus = sanitizeNewEvaluationStatus(evaluationStatus, targetDateStatus, null);
       const predictionId = crypto.randomUUID();
       try {
         const saved = store.savePrediction({
@@ -662,6 +764,7 @@ function createPredictor({ store, calendar, nowFn } = {}) {
           actualReturnPct: null,
           actualDirection: null,
           evaluationStatus,
+          targetDateStatus,
           evaluatedAt: null,
           missingData,
           priceEvaluatedAt: null,
@@ -717,7 +820,8 @@ function createPredictor({ store, calendar, nowFn } = {}) {
       confidence: Math.abs(probUp - 0.5) >= 0.2 ? "high" : Math.abs(probUp - 0.5) >= 0.1 ? "medium" : "low",
       horizonDays: HORIZON_DAYS,
       horizonType,
-      evaluationStatus: matched?.evaluationStatus || evaluationStatus,
+      evaluationStatus: matched ? matched.evaluationStatus : evaluationStatus,
+      targetDateStatus: matched ? readTargetDateStatus(matched) : targetDateStatus,
       context,
       combined,
       topFactors: contributions,
@@ -787,14 +891,19 @@ function createPredictor({ store, calendar, nowFn } = {}) {
               calendarPending += 1;
               continue;
             }
-            const resolved = resolveLegacyTarget(base, defaultCalendar);
+            const resolved = isCalendarProvider(defaultCalendar)
+              ? defaultCalendar.resolveLegacyTarget(base)
+              : resolveLegacyTarget(base, defaultCalendar);
             if (resolved && resolved.ok && resolved.targetTradingDate) {
               p.targetTradingDate = resolved.targetTradingDate;
-              p.evaluationStatus = resolved.evaluationStatus || "PENDING";
+              if (!isLegacyRecord(p)) {
+                p.targetDateStatus = "CONFIRMED";
+              }
+              if (assignEvaluationStatus(p, "PENDING")) dirty = true;
               p.missingData = Array.isArray(resolved.missingData) ? [...resolved.missingData] : [];
               dirty = true;
             } else {
-              if (annotateCalendarPending(p)) dirty = true;
+              if (annotateCalendarPending(p, mapTargetDateStatus(resolved))) dirty = true;
               calendarPending += 1;
               continue;
             }
@@ -816,7 +925,7 @@ function createPredictor({ store, calendar, nowFn } = {}) {
         try {
           targetDate = normalizeTradingDate(p.targetTradingDate);
         } catch {
-          if (assignIfChanged(p, "evaluationStatus", "CALENDAR_PENDING")) dirty = true;
+          if (annotateCalendarPending(p)) dirty = true;
           calendarPending += 1;
           continue;
         }
@@ -832,7 +941,7 @@ function createPredictor({ store, calendar, nowFn } = {}) {
         }
 
         if (!asOfDate || asOfDate < targetDate) {
-          if (assignIfChanged(p, "evaluationStatus", "PENDING")) dirty = true;
+          if (assignEvaluationStatus(p, "PENDING")) dirty = true;
           pending += 1;
           continue;
         }
@@ -847,28 +956,28 @@ function createPredictor({ store, calendar, nowFn } = {}) {
           const code = recordSymbol(p);
           const candles = await fetchCandles(code, 30);
           if (!Array.isArray(candles) || candles.length === 0) {
-            if (assignIfChanged(p, "evaluationStatus", "PENDING")) dirty = true;
+            if (assignEvaluationStatus(p, "PENDING")) dirty = true;
             pending += 1;
             continue;
           }
 
           const candle = findTargetCandle(candles, targetDate);
           if (!candle) {
-            if (assignIfChanged(p, "evaluationStatus", "PENDING")) dirty = true;
+            if (assignEvaluationStatus(p, "PENDING")) dirty = true;
             pending += 1;
             continue;
           }
 
           const finality = assessTargetCandleFinality(candle, targetDate, asOfDate);
           if (!finality.ok) {
-            if (assignIfChanged(p, "evaluationStatus", "PENDING")) dirty = true;
+            if (assignEvaluationStatus(p, "PENDING")) dirty = true;
             pending += 1;
             continue;
           }
 
           const targetClose = Number(candle.close);
           if (!Number.isFinite(targetClose) || targetClose <= 0) {
-            if (assignIfChanged(p, "evaluationStatus", "PENDING")) dirty = true;
+            if (assignEvaluationStatus(p, "PENDING")) dirty = true;
             pending += 1;
             continue;
           }
@@ -876,7 +985,7 @@ function createPredictor({ store, calendar, nowFn } = {}) {
           const entry = Number(p.baseClose ?? p.entryPrice);
           const features = p.features && typeof p.features === "object" ? p.features : null;
           if (!features || !Number.isFinite(entry) || entry <= 0) {
-            if (assignIfChanged(p, "evaluationStatus", "PENDING")) dirty = true;
+            if (assignEvaluationStatus(p, "PENDING")) dirty = true;
             pending += 1;
             continue;
           }
@@ -886,7 +995,6 @@ function createPredictor({ store, calendar, nowFn } = {}) {
           const priceEvaluatedAt = formatKstDateTimeIso(now());
           const prob = predictProb(features, model.weights);
           const predictedUp = prob >= 0.5;
-          p.evaluationStatus = "MODEL_UPDATE_PENDING";
           p.status = "pending";
           p.targetClose = targetClose;
           p.finalPrice = targetClose;
@@ -899,6 +1007,7 @@ function createPredictor({ store, calendar, nowFn } = {}) {
           p.modelUpdateStatus = "PENDING";
           p.evaluatedAt = null;
           p.resolvedAt = null;
+          assignEvaluationStatus(p, "MODEL_UPDATE_PENDING");
 
           try {
             await store.commitPredictions(updated);
@@ -914,7 +1023,7 @@ function createPredictor({ store, calendar, nowFn } = {}) {
             return { processed, calendarPending, pending, skippedEvaluated, modelSaveFailed };
           }
         } catch {
-          if (assignIfChanged(p, "evaluationStatus", "PENDING")) dirty = true;
+          if (assignEvaluationStatus(p, "PENDING")) dirty = true;
           pending += 1;
         }
       }
@@ -1006,7 +1115,11 @@ function createPredictor({ store, calendar, nowFn } = {}) {
       if (!horizonCounts[h]) horizonCounts[h] = emptyHorizonCounts();
       horizonCounts[h].total += 1;
       if (isSettled(p)) horizonCounts[h].evaluated += 1;
-      else if (p.evaluationStatus === "CALENDAR_PENDING" || !p.targetTradingDate) horizonCounts[h].calendarPending += 1;
+      else if (
+        p.evaluationStatus === "CALENDAR_PENDING"
+        || (p.evaluationStatus == null && !p.targetTradingDate)
+        || !p.targetTradingDate
+      ) horizonCounts[h].calendarPending += 1;
       else horizonCounts[h].pending += 1;
     }
     return {
@@ -1044,6 +1157,7 @@ module.exports = {
   getModelStats: (...args) => defaultPredictor.getModelStats(...args),
   buildFeatures,
   trainFromHistory: (...args) => defaultPredictor.trainFromHistory(...args),
+  readTargetDateStatus,
   UNSPECIFIED_MODEL_VERSION,
   UNSPECIFIED_FEATURE_VERSION,
   MODEL_VERSION,
