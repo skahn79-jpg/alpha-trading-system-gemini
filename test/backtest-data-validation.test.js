@@ -21,6 +21,7 @@ const {
   ERROR,
   STATUS,
   SYNTHETIC_MARKETS,
+  VALIDATION_MARKET_CONTRACT,
   validateHistoricalDataset,
   computeDatasetContentChecksum,
   computeDatasetMetadataHash,
@@ -1257,4 +1258,347 @@ test("GATE5F-68 calendarValidationStatus 정상값", () => {
   const calendar = buildSyntheticCalendar();
   const result = validateIntegrated(integratedEnvelope(calendar), calendar);
   assert.equal(result.calendarValidationStatus, STATUS.SYNTHETIC_CALENDAR_VERIFIED);
+});
+
+test("GATE5I-D01 기본 marketContract는 legacy 유지", () => {
+  const result = validateTest(validEnvelope());
+  assert.equal(result.schemaValid, true);
+});
+
+test("GATE5I-D02 legacy contract에서 SYNTHETIC_MARKET 허용", () => {
+  const result = validateHistoricalDataset(validEnvelope(), {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.LEGACY_SYNTHETIC,
+  });
+  assert.equal(result.schemaValid, true);
+});
+
+test("GATE5I-D03 normalized contract에서 SYNTHETIC_MARKET 차단", () => {
+  const result = validateHistoricalDataset(validEnvelope(), {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+  });
+  assert.equal(result.schemaValid, true);
+  assert.equal(hasCode(result, ERROR.LEGACY_MARKET_NOT_ALLOWED_IN_NORMALIZED_VALIDATION), true);
+});
+
+test("GATE5I-D04 normalized contract에서 SYNTHETIC_KOSPI 허용", () => {
+  const dataset = validEnvelope({
+    markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSPI],
+    candles: [
+      candle({ tradingDate: "2100-01-04", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+      candle({ tradingDate: "2100-01-05", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+      candle({ tradingDate: "2100-01-06", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+    ],
+  });
+  const result = validateHistoricalDataset(dataset, {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+  });
+  assert.equal(result.schemaValid, true);
+});
+
+test("GATE5I-D05 normalized contract에서 SYNTHETIC_KOSDAQ 허용", () => {
+  const dataset = validEnvelope({
+    markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ],
+    candles: [
+      candle({ tradingDate: "2100-01-04", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ }),
+      candle({ tradingDate: "2100-01-05", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ }),
+      candle({ tradingDate: "2100-01-06", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ }),
+    ],
+  });
+  const result = validateHistoricalDataset(dataset, {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+  });
+  assert.equal(result.schemaValid, true);
+});
+
+test("GATE5I-D06 normalized contract에서 KOSPI 차단", () => {
+  const dataset = validEnvelope({
+    markets: ["KOSPI"],
+    candles: [
+      candle({ tradingDate: "2100-01-04", market: "KOSPI" }),
+      candle({ tradingDate: "2100-01-05", market: "KOSPI" }),
+      candle({ tradingDate: "2100-01-06", market: "KOSPI" }),
+    ],
+  });
+  const result = validateHistoricalDataset(dataset, {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+  });
+  assert.equal(result.schemaValid, true);
+  assert.equal(hasCode(result, ERROR.PRODUCTION_MARKET_NOT_ALLOWED), true);
+});
+
+test("GATE5I-D07 normalized contract에서 KOSDAQ 차단", () => {
+  const dataset = validEnvelope({
+    markets: ["KOSDAQ"],
+    candles: [
+      candle({ tradingDate: "2100-01-04", market: "KOSDAQ" }),
+      candle({ tradingDate: "2100-01-05", market: "KOSDAQ" }),
+      candle({ tradingDate: "2100-01-06", market: "KOSDAQ" }),
+    ],
+  });
+  const result = validateHistoricalDataset(dataset, {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+  });
+  assert.equal(result.schemaValid, true);
+  assert.equal(hasCode(result, ERROR.PRODUCTION_MARKET_NOT_ALLOWED), true);
+});
+
+test("GATE5I-D08 marketContract=null은 legacy fallback", () => {
+  const result = validateHistoricalDataset(validEnvelope(), {
+    mode: LOAD_MODE.TEST,
+    marketContract: null,
+  });
+  assert.equal(result.schemaValid, true);
+});
+
+test("GATE5I-D09 marketContract=undefined는 legacy fallback", () => {
+  const result = validateHistoricalDataset(validEnvelope(), {
+    mode: LOAD_MODE.TEST,
+    marketContract: undefined,
+  });
+  assert.equal(result.schemaValid, true);
+});
+
+test("GATE5I-D10 marketContract empty string 거부", () => {
+  const result = validateHistoricalDataset(validEnvelope(), {
+    mode: LOAD_MODE.TEST,
+    marketContract: "",
+  });
+  assert.equal(result.schemaValid, true);
+  assert.equal(hasCode(result, ERROR.INVALID_MARKET_CONTRACT), true);
+});
+
+test("GATE5I-D11 marketContract unknown 거부", () => {
+  const result = validateHistoricalDataset(validEnvelope(), {
+    mode: LOAD_MODE.TEST,
+    marketContract: "UNKNOWN",
+  });
+  assert.equal(result.schemaValid, true);
+  assert.equal(hasCode(result, ERROR.INVALID_MARKET_CONTRACT), true);
+});
+
+test("GATE5I-D12 normalized + mixed markets 배열 차단", () => {
+  const dataset = validEnvelope({
+    markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSPI, SYNTHETIC_MARKETS.SYNTHETIC_MARKET],
+  });
+  const result = validateHistoricalDataset(dataset, {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+  });
+  assert.equal(result.schemaValid, true);
+  assert.equal(
+    hasCode(result, ERROR.LEGACY_MARKET_NOT_ALLOWED_IN_NORMALIZED_VALIDATION)
+      || hasCode(result, ERROR.MARKETS_NOT_SORTED),
+    true,
+  );
+});
+
+test("GATE5I-D13 normalized + candle market mismatch 차단", () => {
+  const dataset = validEnvelope({
+    markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSPI],
+    candles: [
+      candle({ tradingDate: "2100-01-04", market: SYNTHETIC_MARKETS.SYNTHETIC_MARKET }),
+      candle({ tradingDate: "2100-01-05", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+      candle({ tradingDate: "2100-01-06", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+    ],
+  });
+  const result = validateHistoricalDataset(dataset, {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+  });
+  assert.equal(result.schemaValid, false);
+  assert.equal(hasCode(result, ERROR.LEGACY_MARKET_NOT_ALLOWED_IN_NORMALIZED_VALIDATION), true);
+});
+
+test("GATE5I-D14 dataset-candle mismatch는 legacy에서도 차단", () => {
+  const dataset = validEnvelope({
+    markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSPI],
+    candles: [
+      candle({ tradingDate: "2100-01-04", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ }),
+      candle({ tradingDate: "2100-01-05", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+      candle({ tradingDate: "2100-01-06", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+    ],
+  });
+  const result = validateHistoricalDataset(dataset, {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.LEGACY_SYNTHETIC,
+  });
+  assert.equal(result.schemaValid, false);
+  assert.equal(hasCode(result, ERROR.SYMBOL_MARKET_MISMATCH), true);
+});
+
+test("GATE5I-D15 normalized + legacy market 단독 차단", () => {
+  const dataset = validEnvelope({
+    markets: [SYNTHETIC_MARKETS.SYNTHETIC_MARKET],
+  });
+  const result = validateHistoricalDataset(dataset, {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+  });
+  assert.equal(result.schemaValid, true);
+  assert.equal(hasCode(result, ERROR.LEGACY_MARKET_NOT_ALLOWED_IN_NORMALIZED_VALIDATION), true);
+});
+
+test("GATE5I-D16 normalized + production market candle 차단", () => {
+  const dataset = validEnvelope({
+    markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSPI],
+    candles: [
+      candle({ tradingDate: "2100-01-04", market: "KOSPI" }),
+      candle({ tradingDate: "2100-01-05", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+      candle({ tradingDate: "2100-01-06", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+    ],
+  });
+  const result = validateHistoricalDataset(dataset, {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+  });
+  assert.equal(result.schemaValid, false);
+  assert.equal(hasCode(result, ERROR.PRODUCTION_MARKET_NOT_ALLOWED), true);
+});
+
+test("GATE5I-D17 결과에 marketContract 필드 미노출", () => {
+  const result = validateHistoricalDataset(validEnvelope(), {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+  });
+  assert.equal(Object.hasOwn(result, "marketContract"), false);
+});
+
+test("GATE5I-D18 normalized 검증은 입력 불변", () => {
+  const dataset = validEnvelope({
+    markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSPI],
+    candles: [
+      candle({ tradingDate: "2100-01-04", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+      candle({ tradingDate: "2100-01-05", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+      candle({ tradingDate: "2100-01-06", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+    ],
+  });
+  const before = cloneJson(dataset);
+  validateHistoricalDataset(dataset, {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+  });
+  assert.equal(cloneJson(dataset), before);
+});
+
+test("GATE5I-D19 동일 입력 normalized 결과 결정적", () => {
+  const dataset = validEnvelope({
+    markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ],
+    candles: [
+      candle({ tradingDate: "2100-01-04", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ }),
+      candle({ tradingDate: "2100-01-05", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ }),
+      candle({ tradingDate: "2100-01-06", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ }),
+    ],
+  });
+  const a = validateHistoricalDataset(deepClone(dataset), {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+  });
+  const b = validateHistoricalDataset(deepClone(dataset), {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+  });
+  assert.equal(cloneJson(a), cloneJson(b));
+});
+
+test("GATE5I-D20 legacy contract는 fallback 금지(legacy 유지)", () => {
+  const legacy = validateHistoricalDataset(validEnvelope(), {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.LEGACY_SYNTHETIC,
+  });
+  const normalized = validateHistoricalDataset(validEnvelope(), {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+  });
+  assert.equal(legacy.schemaValid, true);
+  assert.equal(normalized.schemaValid, true);
+  assert.equal(hasCode(normalized, ERROR.LEGACY_MARKET_NOT_ALLOWED_IN_NORMALIZED_VALIDATION), true);
+});
+
+test("GATE5I-D21 invalid marketContract에서도 오류 결정적", () => {
+  const a = validateHistoricalDataset(validEnvelope(), {
+    mode: LOAD_MODE.TEST,
+    marketContract: "INVALID_CONTRACT",
+  });
+  const b = validateHistoricalDataset(validEnvelope(), {
+    mode: LOAD_MODE.TEST,
+    marketContract: "INVALID_CONTRACT",
+  });
+  assert.equal(a.schemaValid, true);
+  assert.equal(hasCode(a, ERROR.INVALID_MARKET_CONTRACT), true);
+  assert.equal(cloneJson(a), cloneJson(b));
+});
+
+test("GATE5I-D22 normalized + markets unknown 문자열 차단", () => {
+  const dataset = validEnvelope({
+    markets: ["SYNTHETIC_UNKNOWN"],
+    candles: [
+      candle({ tradingDate: "2100-01-04", market: "SYNTHETIC_UNKNOWN" }),
+      candle({ tradingDate: "2100-01-05", market: "SYNTHETIC_UNKNOWN" }),
+      candle({ tradingDate: "2100-01-06", market: "SYNTHETIC_UNKNOWN" }),
+    ],
+  });
+  const result = validateHistoricalDataset(dataset, {
+    mode: LOAD_MODE.TEST,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+  });
+  assert.equal(result.schemaValid, false);
+  assert.equal(hasCode(result, ERROR.SYMBOL_MARKET_MISMATCH), true);
+});
+
+test("GATE5I-D23 normalized + calendar 통합 검증 KOSPI 정상", () => {
+  const calendar = buildSyntheticCalendar({ market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI });
+  const dataset = integratedEnvelope(calendar, {
+    markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSPI],
+    candleMarket: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI,
+  });
+  const result = validateHistoricalDataset(dataset, {
+    mode: LOAD_MODE.SYNTHETIC_UNIT_TEST_ONLY,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+    calendar,
+    calendarValidation: calendarValidationRange(calendar),
+  });
+  assert.equal(result.schemaValid, true);
+  assert.equal(result.syntheticCalendarVerified, true);
+});
+
+test("GATE5I-D24 normalized + calendar 통합 검증 KOSDAQ 정상", () => {
+  const calendar = buildSyntheticCalendar({ market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ });
+  const dataset = integratedEnvelope(calendar, {
+    markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ],
+    candleMarket: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ,
+  });
+  const result = validateHistoricalDataset(dataset, {
+    mode: LOAD_MODE.SYNTHETIC_UNIT_TEST_ONLY,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+    calendar,
+    calendarValidation: calendarValidationRange(calendar),
+  });
+  assert.equal(result.schemaValid, true);
+  assert.equal(result.syntheticCalendarVerified, true);
+});
+
+test("GATE5I-D25 normalized + legacy candle 포함 시 calendar 단계 이전 차단", () => {
+  const calendar = buildSyntheticCalendar({ market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI });
+  const dataset = integratedEnvelope(calendar, {
+    markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSPI],
+    candles: [
+      integratedCandle(tradingDatesOf(calendar)[0], { market: SYNTHETIC_MARKETS.SYNTHETIC_MARKET }),
+      integratedCandle(tradingDatesOf(calendar)[1], { market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+      integratedCandle(tradingDatesOf(calendar)[2], { market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+    ],
+  });
+  const result = validateHistoricalDataset(dataset, {
+    mode: LOAD_MODE.SYNTHETIC_UNIT_TEST_ONLY,
+    marketContract: VALIDATION_MARKET_CONTRACT.NORMALIZED_SYNTHETIC,
+    calendar,
+    calendarValidation: calendarValidationRange(calendar),
+  });
+  assert.equal(result.schemaValid, false);
+  assert.equal(hasCode(result, ERROR.LEGACY_MARKET_NOT_ALLOWED_IN_NORMALIZED_VALIDATION), true);
 });
