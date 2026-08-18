@@ -1,0 +1,1333 @@
+"use strict";
+
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const pipeline = require("../lib/backtest/synthetic-pipeline");
+const {
+  PIPELINE_VERSION,
+  STAGE,
+  PIPELINE_STATUS,
+  STAGE_STATUS,
+  CALCULATION_MODE,
+  ERROR,
+  validateSyntheticPipelineInput,
+  runSyntheticSingleTradePipeline,
+  buildExecutionInput,
+  buildCostInput,
+  mergeSafeStageErrors,
+  createSyntheticPipelineResult,
+  makeSafePipelineError,
+  mapCandleForExecution,
+  mapCandleMarketForExecution,
+  isDataStagePassed,
+  isNoEntryExecution,
+  isOpenPositionExecution,
+  isFullTradeExecution,
+} = pipeline;
+
+const {
+  LOAD_MODE,
+  SOURCE_TYPE,
+  FIXTURE_TYPE,
+  VERIFICATION_STATUS,
+  PRICE_ADJUSTMENT_STATUS,
+  CORPORATE_ACTION_POLICY_STATUS,
+  FINALITY,
+  FINALITY_SOURCE,
+  CANDLE_ADJUSTMENT,
+  DATASET_TYPE,
+  SORT_ORDER,
+  CANONICALIZATION_VERSION,
+  SYNTHETIC_MARKETS,
+  computeDatasetContentChecksum,
+  computeDatasetMetadataHash,
+} = require("../lib/backtest/data-validation");
+
+const {
+  MODEL_VERSION,
+  CALCULATION_MODE: EXEC_CALC_MODE,
+  CALCULATION_STATUS,
+  ORDER_TYPE,
+  SIDE,
+  INTRABAR_CONFLICT_POLICY,
+  ENTRY_STATUS,
+  EXIT_STATUS,
+  ENTRY_REASON,
+  EXIT_REASON,
+  STATUS: EXEC_STATUS,
+} = require("../lib/backtest/execution-model");
+
+const {
+  POLICY_ENGINE_VERSION,
+  POLICY_STATUS,
+  MARKET,
+  CURRENCY,
+  BROKER_CHANNEL,
+  ROUNDING_MODE,
+  EXECUTION_STATUS,
+  ERROR: COST_ERROR,
+} = require("../lib/backtest/cost-policy");
+
+const PIPELINE_PATH = path.join(__dirname, "..", "lib", "backtest", "synthetic-pipeline.js");
+const DATA_VALIDATION_PATH = path.join(__dirname, "..", "lib", "backtest", "data-validation.js");
+const EXECUTION_PATH = path.join(__dirname, "..", "lib", "backtest", "execution-model.js");
+const COST_PATH = path.join(__dirname, "..", "lib", "backtest", "cost-policy.js");
+
+function hasCode(result, code) {
+  return (result.errorCodes && result.errorCodes.includes(code))
+    || (result.errors && result.errors.some((err) => err.code === code));
+}
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function addDaysYmd(ymd, days) {
+  const year = Number(ymd.slice(0, 4));
+  const month = Number(ymd.slice(5, 7));
+  const day = Number(ymd.slice(8, 10));
+  const dt = new Date(Date.UTC(year, month - 1, day + days));
+  return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
+}
+
+function isWeekendYmd(ymd) {
+  const dow = new Date(`${ymd}T00:00:00Z`).getUTCDay();
+  return dow === 0 || dow === 6;
+}
+
+function makeCalendarDay(tradingDate, overrides) {
+  const extras = overrides || {};
+  return {
+    tradingDate,
+    dayStatus: extras.dayStatus || (isWeekendYmd(tradingDate) ? "NON_TRADING_DAY" : "TRADING_DAY"),
+    sessionStatus: extras.sessionStatus || "FINAL",
+    statusSource: extras.statusSource || "SYNTHETIC_EXPLICIT",
+    market: extras.market || SYNTHETIC_MARKETS.SYNTHETIC_KOSPI,
+    calendarId: extras.calendarId || "synthetic-calendar-kospi-v1",
+  };
+}
+
+function buildCalendar(options) {
+  const opts = options || {};
+  const start = opts.start || "2101-03-01";
+  const dayCount = opts.dayCount || 14;
+  const market = opts.market || SYNTHETIC_MARKETS.SYNTHETIC_KOSPI;
+  const calendarId = opts.calendarId || "synthetic-calendar-kospi-v1";
+  const calendarVersion = opts.calendarVersion || "1.0.0";
+  const days = [];
+  for (let i = 0; i < dayCount; i += 1) {
+    days.push(makeCalendarDay(addDaysYmd(start, i), { market, calendarId }));
+  }
+  if (Array.isArray(opts.patchDays)) {
+    for (const patch of opts.patchDays) {
+      const row = days.find((d) => d.tradingDate === patch.tradingDate);
+      if (row) Object.assign(row, patch);
+    }
+  }
+  return {
+    calendarId,
+    calendarVersion,
+    calendarStatus: "TEST_VERIFIED",
+    fixtureType: "SYNTHETIC",
+    notProductionData: true,
+    productionEligible: false,
+    market,
+    timezone: "Asia/Seoul",
+    coverage: { from: start, to: addDaysYmd(start, dayCount - 1) },
+    generatedAt: "2100-01-01T00:00:00+09:00",
+    verifiedAt: "2100-01-01T00:00:00+09:00",
+    days,
+  };
+}
+
+function tradingDatesOf(calendar) {
+  return calendar.days
+    .filter((d) => d.dayStatus === "TRADING_DAY")
+    .map((d) => d.tradingDate);
+}
+
+function deepClone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function integratedCandle(tradingDate, overrides) {
+  const extras = overrides || {};
+  const market = extras.market || SYNTHETIC_MARKETS.SYNTHETIC_KOSPI;
+  return {
+    symbol: extras.symbol || "SYNTH001",
+    market,
+    tradingDate,
+    open: extras.open != null ? extras.open : 10000,
+    high: extras.high != null ? extras.high : 10100,
+    low: extras.low != null ? extras.low : 9900,
+    close: extras.close != null ? extras.close : 10050,
+    volume: extras.volume != null ? extras.volume : 1000,
+    isFinal: true,
+    candleFinality: FINALITY.FINAL,
+    finalitySource: FINALITY_SOURCE.EXPLICIT_FINAL_FLAG,
+    adjustmentStatus: CANDLE_ADJUSTMENT.UNKNOWN,
+    dataAsOf: `${tradingDate}T15:40:00+09:00`,
+    sourceDatasetId: "synthetic-dataset-v1",
+    ...extras,
+  };
+}
+
+function buildDataset(calendar, candleRows, overrides) {
+  const extras = overrides || {};
+  const candles = candleRows.map((row) => integratedCandle(row.tradingDate, row));
+  const dates = candles.map((c) => c.tradingDate).sort();
+  const envelope = {
+    datasetId: "synthetic-dataset-v1",
+    datasetVersion: "1.0.0",
+    datasetType: DATASET_TYPE.HISTORICAL_DAILY_OHLCV,
+    sourceType: SOURCE_TYPE.SYNTHETIC_FIXTURE,
+    symbols: ["SYNTH001"],
+    markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSPI],
+    coverage: { from: dates[0], to: dates[dates.length - 1] },
+    perSymbolCoverage: { SYNTH001: { from: dates[0], to: dates[dates.length - 1] } },
+    timezone: "Asia/Seoul",
+    sortOrder: SORT_ORDER.ASCENDING_BY_TRADING_DATE,
+    priceAdjustmentStatus: PRICE_ADJUSTMENT_STATUS.UNKNOWN,
+    corporateActionPolicyId: "synthetic-ca-v1",
+    corporateActionPolicyStatus: CORPORATE_ACTION_POLICY_STATUS.UNKNOWN,
+    universePolicyId: "synthetic-universe-v1",
+    survivorshipBiasControlled: true,
+    calendarVersion: calendar.calendarVersion,
+    calendarVerificationStatus: VERIFICATION_STATUS.TEST_VERIFIED,
+    canonicalizationVersion: CANONICALIZATION_VERSION,
+    contentChecksum: null,
+    metadataHash: null,
+    verificationStatus: VERIFICATION_STATUS.TEST_VERIFIED,
+    fixtureType: FIXTURE_TYPE.SYNTHETIC_BACKTEST_DATASET,
+    notProductionData: true,
+    productionEligible: false,
+    candles,
+    sourceRefs: [],
+    verifiedAt: null,
+    generatedAt: null,
+    loaderTimestamp: null,
+    ...extras,
+  };
+  envelope.contentChecksum = computeDatasetContentChecksum(envelope);
+  envelope.metadataHash = computeDatasetMetadataHash(envelope);
+  return envelope;
+}
+
+function makePolicy(overrides) {
+  const base = {
+    policyId: "synthetic-cost-kospi-v1",
+    policyVersion: "1.0.0",
+    policyStatus: POLICY_STATUS.TEST_VERIFIED,
+    fixtureType: "SYNTHETIC",
+    notProductionData: true,
+    productionEligible: false,
+    market: MARKET.SYNTHETIC_KOSPI,
+    currency: CURRENCY.KRW,
+    effectiveFrom: "2101-01-01",
+    effectiveTo: "2101-12-31",
+    brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+    commission: {
+      buyRatePpm: 100,
+      sellRatePpm: 100,
+      minimumBuyAmount: 0,
+      minimumSellAmount: 0,
+      roundingMode: ROUNDING_MODE.FLOOR,
+    },
+    sellTaxes: [
+      {
+        taxType: "SYNTHETIC_TRANSACTION_TAX",
+        ratePpm: 1000,
+        roundingMode: ROUNDING_MODE.FLOOR,
+      },
+    ],
+    sourceReference: "SYNTHETIC_TEST_POLICY",
+    verifiedAt: "2100-12-01T00:00:00.000Z",
+  };
+  if (!overrides) return base;
+  const out = { ...base, ...overrides };
+  if (overrides.commission) out.commission = { ...base.commission, ...overrides.commission };
+  if (overrides.sellTaxes) out.sellTaxes = overrides.sellTaxes;
+  return out;
+}
+
+function policyA() {
+  return makePolicy({
+    policyId: "synthetic-cost-kospi-a",
+    effectiveFrom: "2101-01-01",
+    effectiveTo: "2101-06-30",
+  });
+}
+
+function policyB() {
+  return makePolicy({
+    policyId: "synthetic-cost-kospi-b",
+    effectiveFrom: "2101-07-01",
+    effectiveTo: "2101-12-31",
+    commission: {
+      buyRatePpm: 200,
+      sellRatePpm: 200,
+      minimumBuyAmount: 0,
+      minimumSellAmount: 0,
+      roundingMode: ROUNDING_MODE.FLOOR,
+    },
+    sellTaxes: [
+      {
+        taxType: "SYNTHETIC_TRANSACTION_TAX",
+        ratePpm: 2000,
+        roundingMode: ROUNDING_MODE.FLOOR,
+      },
+    ],
+  });
+}
+
+function fullTradeCandles(calendar) {
+  const t = tradingDatesOf(calendar);
+  return [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10000, high: 10500, low: 9800, close: 10200 },
+    { tradingDate: t[2], open: 10800, high: 11200, low: 10700, close: 11100 },
+  ];
+}
+
+function validPipelineInput(overrides) {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const dataset = buildDataset(calendar, fullTradeCandles(calendar));
+  const base = {
+    pipelineVersion: PIPELINE_VERSION,
+    calculationMode: CALCULATION_MODE.SYNTHETIC_UNIT_TEST_ONLY,
+    dataset,
+    calendar,
+    calendarValidation: {
+      requiredFrom: calendar.coverage.from,
+      requiredTo: calendar.coverage.to,
+    },
+    execution: {
+      modelVersion: MODEL_VERSION,
+      side: SIDE.LONG,
+      entryIntent: {
+        orderType: ORDER_TYPE.MARKET_OPEN,
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: t[1],
+        limitPrice: null,
+      },
+      exitPolicy: {
+        stopLossPrice: 9500,
+        takeProfitPrice: 11000,
+        intrabarConflictPolicy: INTRABAR_CONFLICT_POLICY.STOP_FIRST,
+      },
+      quantity: 10,
+    },
+    cost: {
+      policyEngineVersion: POLICY_ENGINE_VERSION,
+      brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+      currency: CURRENCY.KRW,
+      policies: [makePolicy()],
+    },
+  };
+  if (!overrides) return base;
+  const out = deepClone(base);
+  return { ...out, ...overrides };
+}
+
+function assertOperationalBlocked(result) {
+  assert.equal(result.calendarVerified, false);
+  assert.equal(result.datasetVerified, false);
+  assert.equal(result.costPolicyVerified, false);
+  assert.equal(result.backtestExecutionEligible, false);
+  assert.equal(result.promotionEligible, false);
+  assert.equal(result.paperEligible, false);
+  assert.equal(result.liveEligible, false);
+  assert.equal(result.executionStatus, EXECUTION_STATUS.NOT_EXECUTED);
+  assert.equal(result.calculationStatus, CALCULATION_STATUS.SIMULATED_CALCULATION_ONLY);
+}
+
+function assertPerformanceNull(result) {
+  assert.equal(result.totalReturn, null);
+  assert.equal(result.cagr, null);
+  assert.equal(result.mdd, null);
+  assert.equal(result.winRate, null);
+  assert.equal(result.profitFactor, null);
+  assert.equal(result.sharpeRatio, null);
+  assert.equal(result.benchmarkReturn, null);
+  assert.equal(result.alpha, null);
+}
+
+// 1
+test("GATE5G-01 정상 합성 파이프라인 입력", () => {
+  const result = validateSyntheticPipelineInput(validPipelineInput());
+  assert.equal(result.ok, true);
+});
+
+// 2
+test("GATE5G-02 알 수 없는 최상위 필드", () => {
+  const result = validateSyntheticPipelineInput(validPipelineInput({ extraField: 1 }));
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.UNKNOWN_FIELD), true);
+});
+
+// 3
+test("GATE5G-03 필수 필드 누락", () => {
+  const input = validPipelineInput();
+  delete input.dataset;
+  const result = validateSyntheticPipelineInput(input);
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.MISSING_REQUIRED_FIELD), true);
+});
+
+// 4
+test("GATE5G-04 미지원 pipelineVersion", () => {
+  const result = validateSyntheticPipelineInput(validPipelineInput({
+    pipelineVersion: "synthetic-single-trade-v9.9",
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.UNSUPPORTED_PIPELINE_VERSION), true);
+});
+
+// 5
+test("GATE5G-05 미지원 calculationMode", () => {
+  const result = validateSyntheticPipelineInput(validPipelineInput({
+    calculationMode: "INVALID_MODE",
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.UNSUPPORTED_CALCULATION_MODE), true);
+});
+
+// 6
+test("GATE5G-06 PRODUCTION에서 합성 파이프라인 차단", () => {
+  const result = validateSyntheticPipelineInput(validPipelineInput({
+    calculationMode: CALCULATION_MODE.PRODUCTION,
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.SYNTHETIC_PIPELINE_BLOCKED_IN_PRODUCTION), true);
+});
+
+// 7
+test("GATE5G-07 다중 심볼 차단", () => {
+  const input = validPipelineInput();
+  input.dataset.symbols = ["SYNTH001", "SYNTH002"];
+  const result = validateSyntheticPipelineInput(input);
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.MULTI_SYMBOL_PIPELINE_NOT_SUPPORTED), true);
+});
+
+// 8
+test("GATE5G-08 다중 시장 차단", () => {
+  const input = validPipelineInput();
+  input.dataset.markets = [SYNTHETIC_MARKETS.SYNTHETIC_KOSPI, SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ];
+  const result = validateSyntheticPipelineInput(input);
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.MULTI_MARKET_PIPELINE_NOT_SUPPORTED), true);
+});
+
+// 9
+test("GATE5G-09 LONG 외 방향 차단", () => {
+  const input = validPipelineInput();
+  input.execution.side = "SHORT";
+  const result = validateSyntheticPipelineInput(input);
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.UNSUPPORTED_PIPELINE_SIDE), true);
+});
+
+// 10
+test("GATE5G-10 실제 시장명 혼용 차단", () => {
+  const input = validPipelineInput();
+  input.dataset.markets = ["KOSPI"];
+  const result = validateSyntheticPipelineInput(input);
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.MULTI_MARKET_PIPELINE_NOT_SUPPORTED), true);
+});
+
+// 11
+test("GATE5G-11 정상 데이터·캘린더 통과", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+  assert.equal(result.syntheticDataValidated, true);
+  assert.equal(result.syntheticCalendarVerified, true);
+  assert.equal(result.syntheticCandleDatesVerified, true);
+});
+
+// 12
+test("GATE5G-12 데이터 스키마 실패 시 execution 미실행", () => {
+  const input = validPipelineInput();
+  input.dataset.candles[0].volume = -1;
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_DATA_STAGE);
+  assert.equal(result.executionStageStatus, STAGE_STATUS.NOT_STARTED);
+  assert.equal(result.syntheticExecutionCalculated, false);
+});
+
+// 13
+test("GATE5G-13 캔들 OHLC 오류 시 execution 미실행", () => {
+  const input = validPipelineInput();
+  input.dataset.candles[1].high = 9000;
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_DATA_STAGE);
+  assert.equal(result.executionStageStatus, STAGE_STATUS.NOT_STARTED);
+});
+
+// 14
+test("GATE5G-14 체크섬 변조 시 execution 미실행", () => {
+  const input = validPipelineInput();
+  input.dataset.contentChecksum = "deadbeef";
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_DATA_STAGE);
+  assert.equal(hasCode(result, "CONTENT_CHECKSUM_MISMATCH"), true);
+});
+
+// 15
+test("GATE5G-15 캘린더 누락 시 execution 미실행", () => {
+  const input = validPipelineInput();
+  delete input.calendar;
+  const result = validateSyntheticPipelineInput(input);
+  assert.equal(result.ok, false);
+  const run = runSyntheticSingleTradePipeline(input);
+  assert.equal(run.pipelineStatus, PIPELINE_STATUS.BLOCKED_PIPELINE_SCHEMA);
+});
+
+// 16
+test("GATE5G-16 캘린더 coverage 오류", () => {
+  const input = validPipelineInput();
+  input.calendarValidation.requiredTo = "2100-01-01";
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_DATA_STAGE);
+});
+
+// 17
+test("GATE5G-17 NON_TRADING_DAY 캔들", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const weekend = calendar.days.find((d) => d.dayStatus === "NON_TRADING_DAY").tradingDate;
+  const rows = fullTradeCandles(calendar);
+  rows.push({ tradingDate: weekend, open: 10000, high: 10100, low: 9900, close: 10050 });
+  const input = validPipelineInput({
+    dataset: buildDataset(calendar, rows),
+    calendar,
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_DATA_STAGE);
+  assert.equal(hasCode(result, "CANDLE_ON_NON_TRADING_DAY"), true);
+});
+
+// 18
+test("GATE5G-18 PENDING 캘린더", () => {
+  const input = validPipelineInput();
+  const td = input.dataset.candles[0].tradingDate;
+  input.calendar.days.find((d) => d.tradingDate === td).dayStatus = "PENDING";
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_DATA_STAGE);
+  assert.equal(hasCode(result, "CALENDAR_PENDING"), true);
+});
+
+// 19
+test("GATE5G-19 calendarVersion 불일치", () => {
+  const input = validPipelineInput();
+  input.dataset.calendarVersion = "mismatch-version";
+  input.dataset.contentChecksum = computeDatasetContentChecksum(input.dataset);
+  input.dataset.metadataHash = computeDatasetMetadataHash(input.dataset);
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_DATA_STAGE);
+  assert.equal(hasCode(result, "CALENDAR_VERSION_MISMATCH"), true);
+});
+
+// 20
+test("GATE5G-20 데이터 오류가 안전하게 병합됨", () => {
+  const input = validPipelineInput();
+  input.dataset.candles[0].volume = -1;
+  const result = runSyntheticSingleTradePipeline(input);
+  const dumped = JSON.stringify(result.errors);
+  assert.equal(dumped.includes('"candles"'), false);
+  assert.equal(result.errors.every((e) => e.stage === STAGE.DATA || e.stage === STAGE.PIPELINE || e.code === ERROR.DATA_STAGE_FAILED), true);
+});
+
+// 21
+test("GATE5G-21 MARKET_OPEN 진입·청산 완료", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+  assert.equal(result.entryStatus, ENTRY_STATUS.FILLED);
+  assert.equal(result.exitStatus, EXIT_STATUS.FILLED);
+  assert.equal(result.entryPrice, 10000);
+  assert.equal(result.exitPrice, 11000);
+  assert.equal(result.entryReason, ENTRY_REASON.MARKET_OPEN_NEXT_ELIGIBLE_BAR);
+  assert.equal(result.exitReason, EXIT_REASON.TAKE_PROFIT_TOUCHED);
+});
+
+// 22
+test("GATE5G-22 LIMIT_BUY 시가 체결", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const rows = [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 9900, high: 10500, low: 9800, close: 10200 },
+    { tradingDate: t[2], open: 10800, high: 11200, low: 10700, close: 11100 },
+  ];
+  const input = validPipelineInput({
+    dataset: buildDataset(calendar, rows),
+    calendar,
+    execution: {
+      modelVersion: MODEL_VERSION,
+      side: SIDE.LONG,
+      entryIntent: {
+        orderType: ORDER_TYPE.LIMIT_BUY,
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: t[1],
+        limitPrice: 10000,
+      },
+      exitPolicy: {
+        stopLossPrice: 9500,
+        takeProfitPrice: 11000,
+        intrabarConflictPolicy: INTRABAR_CONFLICT_POLICY.STOP_FIRST,
+      },
+      quantity: 10,
+    },
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+  assert.equal(result.entryReason, ENTRY_REASON.LIMIT_BUY_GAP_IMPROVEMENT);
+});
+
+// 23
+test("GATE5G-23 LIMIT_BUY 장중 접촉", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const rows = [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10100, high: 10500, low: 9950, close: 10200 },
+    { tradingDate: t[2], open: 10800, high: 11200, low: 10700, close: 11100 },
+  ];
+  const input = validPipelineInput({
+    dataset: buildDataset(calendar, rows),
+    calendar,
+    execution: {
+      modelVersion: MODEL_VERSION,
+      side: SIDE.LONG,
+      entryIntent: {
+        orderType: ORDER_TYPE.LIMIT_BUY,
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: t[1],
+        limitPrice: 10000,
+      },
+      exitPolicy: {
+        stopLossPrice: 9500,
+        takeProfitPrice: 11000,
+        intrabarConflictPolicy: INTRABAR_CONFLICT_POLICY.STOP_FIRST,
+      },
+      quantity: 10,
+    },
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+  assert.equal(result.entryReason, ENTRY_REASON.LIMIT_BUY_TOUCHED);
+});
+
+// 24
+test("GATE5G-24 LIMIT_BUY 미체결", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const rows = [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10100, high: 10500, low: 10050, close: 10200 },
+  ];
+  const input = validPipelineInput({
+    dataset: buildDataset(calendar, rows),
+    calendar,
+    execution: {
+      modelVersion: MODEL_VERSION,
+      side: SIDE.LONG,
+      entryIntent: {
+        orderType: ORDER_TYPE.LIMIT_BUY,
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: t[1],
+        limitPrice: 10000,
+      },
+      exitPolicy: {
+        stopLossPrice: 9500,
+        takeProfitPrice: 11000,
+        intrabarConflictPolicy: INTRABAR_CONFLICT_POLICY.STOP_FIRST,
+      },
+      quantity: 10,
+    },
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_NO_ENTRY);
+  assert.equal(result.executionStageStatus, STAGE_STATUS.COMPLETED_NOT_FILLED);
+  assert.equal(result.costStageStatus, STAGE_STATUS.NOT_STARTED);
+});
+
+// 25
+test("GATE5G-25 적격 진입 봉 없음", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const rows = fullTradeCandles(calendar);
+  const input = validPipelineInput({
+    dataset: buildDataset(calendar, rows),
+    calendar,
+    execution: {
+      modelVersion: MODEL_VERSION,
+      side: SIDE.LONG,
+      entryIntent: {
+        orderType: ORDER_TYPE.MARKET_OPEN,
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: "2101-12-31",
+        limitPrice: null,
+      },
+      exitPolicy: {
+        stopLossPrice: 9500,
+        takeProfitPrice: 11000,
+        intrabarConflictPolicy: INTRABAR_CONFLICT_POLICY.STOP_FIRST,
+      },
+      quantity: 10,
+    },
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_NO_ENTRY);
+});
+
+// 26
+test("GATE5G-26 진입 완료·청산 미완료", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const rows = [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10000, high: 10100, low: 9900, close: 10050 },
+  ];
+  const input = validPipelineInput({
+    dataset: buildDataset(calendar, rows),
+    calendar,
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_OPEN_POSITION_NOT_EXECUTED);
+  assert.equal(result.exitAmount, null);
+  assert.equal(result.netProfit, null);
+});
+
+// 27
+test("GATE5G-27 손절가 갭 하락", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const rows = [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10000, high: 10100, low: 9900, close: 10050 },
+    { tradingDate: t[2], open: 9400, high: 9600, low: 9300, close: 9500 },
+  ];
+  const input = validPipelineInput({
+    dataset: buildDataset(calendar, rows),
+    calendar,
+    execution: {
+      modelVersion: MODEL_VERSION,
+      side: SIDE.LONG,
+      entryIntent: {
+        orderType: ORDER_TYPE.MARKET_OPEN,
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: t[1],
+        limitPrice: null,
+      },
+      exitPolicy: {
+        stopLossPrice: 9500,
+        takeProfitPrice: 12000,
+        intrabarConflictPolicy: INTRABAR_CONFLICT_POLICY.STOP_FIRST,
+      },
+      quantity: 10,
+    },
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+  assert.equal(result.exitReason, EXIT_REASON.STOP_LOSS_GAP);
+  assert.equal(result.exitPrice, 9400);
+});
+
+// 28
+test("GATE5G-28 목표가 갭 상승", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const rows = [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10000, high: 10100, low: 9900, close: 10050 },
+    { tradingDate: t[2], open: 11500, high: 11600, low: 11400, close: 11550 },
+  ];
+  const input = validPipelineInput({
+    dataset: buildDataset(calendar, rows),
+    calendar,
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+  assert.equal(result.exitReason, EXIT_REASON.TAKE_PROFIT_GAP_CAPPED);
+});
+
+// 29
+test("GATE5G-29 TP·SL 동일 봉 STOP_FIRST", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const rows = [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10000, high: 10100, low: 9900, close: 10050 },
+    { tradingDate: t[2], open: 10200, high: 11200, low: 9400, close: 10500 },
+  ];
+  const input = validPipelineInput({
+    dataset: buildDataset(calendar, rows),
+    calendar,
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+  assert.equal(result.exitReason, EXIT_REASON.AMBIGUOUS_INTRABAR_STOP_FIRST);
+  assert.equal(result.exitPrice, 9500);
+});
+
+// 30
+test("GATE5G-30 장중 LIMIT_BUY 진입·청산 순서 불명", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const rows = [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10100, high: 11200, low: 9400, close: 10200 },
+  ];
+  const input = validPipelineInput({
+    dataset: buildDataset(calendar, rows),
+    calendar,
+    execution: {
+      modelVersion: MODEL_VERSION,
+      side: SIDE.LONG,
+      entryIntent: {
+        orderType: ORDER_TYPE.LIMIT_BUY,
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: t[1],
+        limitPrice: 10000,
+      },
+      exitPolicy: {
+        stopLossPrice: 9500,
+        takeProfitPrice: 11000,
+        intrabarConflictPolicy: INTRABAR_CONFLICT_POLICY.STOP_FIRST,
+      },
+      quantity: 10,
+    },
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_EXECUTION_STAGE);
+  assert.equal(result.costStageStatus, STAGE_STATUS.NOT_STARTED);
+});
+
+// 31
+test("GATE5G-31 체결 실패 시 비용 미실행", () => {
+  const input = validPipelineInput();
+  input.execution.exitPolicy.stopLossPrice = "bad";
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_EXECUTION_STAGE);
+  assert.equal(result.costStageStatus, STAGE_STATUS.NOT_STARTED);
+  assert.equal(result.syntheticCostCalculated, false);
+});
+
+// 32
+test("GATE5G-32 체결 가격·날짜가 비용 입력의 유일 출처", () => {
+  const input = validPipelineInput();
+  const run = runSyntheticSingleTradePipeline(input);
+  const built = buildCostInput(input, {
+    ok: true,
+    entryStatus: ENTRY_STATUS.FILLED,
+    exitStatus: EXIT_STATUS.FILLED,
+    entryTradingDate: run.entryTradingDate,
+    exitTradingDate: run.exitTradingDate,
+    entryPrice: run.entryPrice,
+    exitPrice: run.exitPrice,
+  });
+  assert.equal(built.ok, true);
+  assert.equal(built.input.entryPrice, run.entryPrice);
+  assert.equal(built.input.exitPrice, run.exitPrice);
+  assert.equal(built.input.entryTradingDate, run.entryTradingDate);
+  assert.equal(built.input.exitTradingDate, run.exitTradingDate);
+});
+
+// 33
+test("GATE5G-33 정상 비용 계산", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.entryAmount, 100000);
+  assert.equal(result.exitAmount, 110000);
+  assert.equal(result.totalCost, 131);
+  assert.equal(result.netProfit, 9869);
+});
+
+// 34
+test("GATE5G-34 진입일 정책 A·청산일 정책 B", () => {
+  const calendar = buildCalendar({ start: "2101-06-28", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const juneEntryIdx = t.findIndex((d) => d <= "2101-06-30" && d > t[0]);
+  const julyExitIdx = t.findIndex((d) => d >= "2101-07-01");
+  assert.ok(juneEntryIdx > 0);
+  assert.ok(julyExitIdx > juneEntryIdx);
+  const rows = [];
+  for (let i = 0; i <= julyExitIdx; i += 1) {
+    if (i === 0) {
+      rows.push({ tradingDate: t[i], open: 9800, high: 9900, low: 9700, close: 9850 });
+    } else if (i === juneEntryIdx) {
+      rows.push({ tradingDate: t[i], open: 10000, high: 10500, low: 9800, close: 10200 });
+    } else if (i === julyExitIdx) {
+      rows.push({ tradingDate: t[i], open: 10800, high: 11200, low: 10700, close: 11100 });
+    } else {
+      rows.push({ tradingDate: t[i], open: 10100, high: 10200, low: 10000, close: 10150 });
+    }
+  }
+  const input = validPipelineInput({
+    dataset: buildDataset(calendar, rows),
+    calendar,
+    calendarValidation: {
+      requiredFrom: calendar.coverage.from,
+      requiredTo: calendar.coverage.to,
+    },
+    execution: {
+      modelVersion: MODEL_VERSION,
+      side: SIDE.LONG,
+      entryIntent: {
+        orderType: ORDER_TYPE.MARKET_OPEN,
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: t[juneEntryIdx],
+        limitPrice: null,
+      },
+      exitPolicy: {
+        stopLossPrice: 9500,
+        takeProfitPrice: 11000,
+        intrabarConflictPolicy: INTRABAR_CONFLICT_POLICY.STOP_FIRST,
+      },
+      quantity: 10,
+    },
+    cost: {
+      policyEngineVersion: POLICY_ENGINE_VERSION,
+      brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+      currency: CURRENCY.KRW,
+      policies: [policyA(), policyB()],
+    },
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+  assert.equal(result.entryCommission, 10);
+  assert.equal(result.exitCommission, 22);
+  assert.equal(result.sellTaxTotal, 220);
+});
+
+// 35
+test("GATE5G-35 매수 수수료", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.entryCommission, 10);
+});
+
+// 36
+test("GATE5G-36 매도 수수료", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.exitCommission, 11);
+});
+
+// 37
+test("GATE5G-37 매도 세금", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.sellTaxTotal, 110);
+});
+
+// 38
+test("GATE5G-38 총비용", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.totalCost, result.entryCommission + result.exitCommission + result.sellTaxTotal);
+});
+
+// 39
+test("GATE5G-39 grossProfit", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.grossProfit, 10000);
+});
+
+// 40
+test("GATE5G-40 netProfit", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.netProfit, 9869);
+});
+
+// 41
+test("GATE5G-41 비용정책 미발견", () => {
+  const input = validPipelineInput();
+  input.cost.policies = [];
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_COST_STAGE);
+  assert.equal(hasCode(result, COST_ERROR.COST_POLICY_NOT_FOUND), true);
+});
+
+// 42
+test("GATE5G-42 비용정책 공백", () => {
+  const input = validPipelineInput();
+  input.cost.policies = [
+    makePolicy({ effectiveFrom: "2101-01-01", effectiveTo: "2101-03-01" }),
+    makePolicy({
+      policyId: "synthetic-cost-kospi-gap",
+      effectiveFrom: "2101-05-01",
+      effectiveTo: "2101-12-31",
+    }),
+  ];
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_COST_STAGE);
+  assert.equal(hasCode(result, COST_ERROR.COST_POLICY_GAP), true);
+});
+
+// 43
+test("GATE5G-43 비용정책 중첩", () => {
+  const input = validPipelineInput();
+  input.cost.policies = [
+    makePolicy({ effectiveFrom: "2101-01-01", effectiveTo: "2101-12-31" }),
+    makePolicy({
+      policyId: "synthetic-cost-kospi-overlap",
+      effectiveFrom: "2101-06-01",
+      effectiveTo: "2101-12-31",
+    }),
+  ];
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_COST_STAGE);
+  assert.equal(hasCode(result, COST_ERROR.COST_POLICY_OVERLAP), true);
+});
+
+// 44
+test("GATE5G-44 비용 overflow", () => {
+  const input = validPipelineInput();
+  input.execution.quantity = Number.MAX_SAFE_INTEGER;
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_COST_STAGE);
+  assert.equal(hasCode(result, COST_ERROR.ARITHMETIC_OVERFLOW), true);
+});
+
+// 45
+test("GATE5G-45 비용 실패가 안전하게 병합됨", () => {
+  const input = validPipelineInput();
+  input.cost.policies = [];
+  const result = runSyntheticSingleTradePipeline(input);
+  const dumped = JSON.stringify(result.errors);
+  assert.equal(dumped.includes('"policies"'), false);
+  assert.equal(result.errors.some((e) => e.stage === STAGE.COST), true);
+});
+
+// 46
+test("GATE5G-46 비용 입력에서 체결 결과 덮어쓰기 불가", () => {
+  const built = buildCostInput(validPipelineInput(), {
+    ok: true,
+    entryStatus: ENTRY_STATUS.FILLED,
+    exitStatus: EXIT_STATUS.NOT_TRIGGERED,
+    entryTradingDate: "2101-03-02",
+    entryPrice: 10000,
+  });
+  assert.equal(built.ok, false);
+  assert.equal(hasCode(built, ERROR.EXECUTION_RESULT_INCOMPLETE), true);
+});
+
+// 47
+test("GATE5G-47 정상 완료 pipelineStatus", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+});
+
+// 48
+test("GATE5G-48 dataStageStatus", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.dataStageStatus, STAGE_STATUS.PASSED_SYNTHETIC_ONLY);
+});
+
+// 49
+test("GATE5G-49 executionStageStatus", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.executionStageStatus, STAGE_STATUS.PASSED_SYNTHETIC_ONLY);
+});
+
+// 50
+test("GATE5G-50 costStageStatus", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.costStageStatus, STAGE_STATUS.PASSED_SYNTHETIC_ONLY);
+});
+
+// 51
+test("GATE5G-51 executionStatus=NOT_EXECUTED", () => {
+  assertOperationalBlocked(runSyntheticSingleTradePipeline(validPipelineInput()));
+});
+
+// 52
+test("GATE5G-52 calculationStatus=SIMULATED_CALCULATION_ONLY", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.calculationStatus, CALCULATION_STATUS.SIMULATED_CALCULATION_ONLY);
+});
+
+// 53
+test("GATE5G-53 calendarVerified=false", () => {
+  assert.equal(runSyntheticSingleTradePipeline(validPipelineInput()).calendarVerified, false);
+});
+
+// 54
+test("GATE5G-54 datasetVerified=false", () => {
+  assert.equal(runSyntheticSingleTradePipeline(validPipelineInput()).datasetVerified, false);
+});
+
+// 55
+test("GATE5G-55 costPolicyVerified=false", () => {
+  assert.equal(runSyntheticSingleTradePipeline(validPipelineInput()).costPolicyVerified, false);
+});
+
+// 56
+test("GATE5G-56 backtestExecutionEligible=false", () => {
+  assert.equal(runSyntheticSingleTradePipeline(validPipelineInput()).backtestExecutionEligible, false);
+});
+
+// 57
+test("GATE5G-57 promotionEligible=false", () => {
+  assert.equal(runSyntheticSingleTradePipeline(validPipelineInput()).promotionEligible, false);
+});
+
+// 58
+test("GATE5G-58 paperEligible=false", () => {
+  assert.equal(runSyntheticSingleTradePipeline(validPipelineInput()).paperEligible, false);
+});
+
+// 59
+test("GATE5G-59 liveEligible=false", () => {
+  assert.equal(runSyntheticSingleTradePipeline(validPipelineInput()).liveEligible, false);
+});
+
+// 60
+test("GATE5G-60 모든 승격 플래그 동시 주입 차단", () => {
+  const input = validPipelineInput({
+    calendarVerified: true,
+    datasetVerified: true,
+    costPolicyVerified: true,
+    backtestExecutionEligible: true,
+    promotionEligible: true,
+    paperEligible: true,
+    liveEligible: true,
+  });
+  const validated = validateSyntheticPipelineInput(input);
+  assert.equal(validated.ok, false);
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assertOperationalBlocked(result);
+});
+
+// 61
+test("GATE5G-61 totalReturn null", () => {
+  assertPerformanceNull(runSyntheticSingleTradePipeline(validPipelineInput()));
+});
+
+// 62
+test("GATE5G-62 CAGR null", () => {
+  assert.equal(runSyntheticSingleTradePipeline(validPipelineInput()).cagr, null);
+});
+
+// 63
+test("GATE5G-63 MDD null", () => {
+  assert.equal(runSyntheticSingleTradePipeline(validPipelineInput()).mdd, null);
+});
+
+// 64
+test("GATE5G-64 winRate null", () => {
+  assert.equal(runSyntheticSingleTradePipeline(validPipelineInput()).winRate, null);
+});
+
+// 65
+test("GATE5G-65 profitFactor null", () => {
+  assert.equal(runSyntheticSingleTradePipeline(validPipelineInput()).profitFactor, null);
+});
+
+// 66
+test("GATE5G-66 오류에 원본 입력 없음", () => {
+  const input = validPipelineInput();
+  input.dataset.candles[0].volume = -1;
+  const result = runSyntheticSingleTradePipeline(input);
+  const dumped = JSON.stringify(result.errors);
+  assert.equal(dumped.includes('"dataset"'), false);
+  assert.equal(dumped.includes('"calendar"'), false);
+  assert.equal(dumped.includes('"policies"'), false);
+});
+
+// 67
+test("GATE5G-67 모든 입력 객체 불변", () => {
+  const input = validPipelineInput();
+  const snap = JSON.stringify(input);
+  runSyntheticSingleTradePipeline(input);
+  assert.equal(JSON.stringify(input), snap);
+});
+
+// 68
+test("GATE5G-68 동일 입력은 동일 결과", () => {
+  const input = validPipelineInput();
+  const a = runSyntheticSingleTradePipeline(input);
+  const b = runSyntheticSingleTradePipeline(input);
+  assert.deepEqual(a, b);
+});
+
+// 69
+test("GATE5G-69 네트워크·주문 모듈 참조 없음", () => {
+  const src = fs.readFileSync(PIPELINE_PATH, "utf8");
+  assert.equal(src.includes("require(\"http\")"), false);
+  assert.equal(src.includes("require(\"https\")"), false);
+  assert.equal(src.includes("require(\"axios\")"), false);
+  assert.equal(src.includes("require(\"../server\")"), false);
+  assert.equal(src.includes("fetch("), false);
+});
+
+// 70
+test("GATE5G-70 기존 모듈 파일 변경 없음", () => {
+  assert.equal(fs.existsSync(DATA_VALIDATION_PATH), true);
+  assert.equal(fs.existsSync(EXECUTION_PATH), true);
+  assert.equal(fs.existsSync(COST_PATH), true);
+  assert.equal(fs.existsSync(PIPELINE_PATH), true);
+});
+
+// helper: validateSyntheticPipelineInput 경계
+test("GATE5G-71 validateSyntheticPipelineInput 경계: null", () => {
+  const result = validateSyntheticPipelineInput(null);
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.INVALID_INPUT), true);
+});
+
+// helper: validateSyntheticPipelineInput 실패
+test("GATE5G-72 validateSyntheticPipelineInput 실패: cost 미지정 필드", () => {
+  const input = validPipelineInput();
+  input.cost.extra = 1;
+  const result = validateSyntheticPipelineInput(input);
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.UNKNOWN_FIELD), true);
+});
+
+// helper: buildExecutionInput 정상
+test("GATE5G-73 buildExecutionInput 정상", () => {
+  const input = validPipelineInput();
+  const dataResult = {
+    schemaValid: true,
+    syntheticCalendarProvided: true,
+    syntheticCalendarVerified: true,
+    syntheticCandleDatesVerified: true,
+    errorCodes: [],
+  };
+  const execInput = buildExecutionInput(input, dataResult);
+  assert.equal(execInput.calculationMode, CALCULATION_MODE.SYNTHETIC_UNIT_TEST_ONLY);
+  assert.equal(execInput.candles[0].market, "SYNTHETIC_MARKET");
+  assert.equal(input.dataset.candles[0].market, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI);
+});
+
+// helper: buildExecutionInput 경계
+test("GATE5G-74 buildExecutionInput 경계: fixtureMetadata 고정", () => {
+  const execInput = buildExecutionInput(validPipelineInput(), { schemaValid: true });
+  assert.equal(execInput.fixtureMetadata.notProductionData, true);
+  assert.equal(execInput.fixtureMetadata.productionEligible, false);
+});
+
+// helper: buildExecutionInput 실패 불변
+test("GATE5G-75 buildExecutionInput 실패: 원본 캔들 market 유지", () => {
+  const input = validPipelineInput();
+  buildExecutionInput(input, { schemaValid: true });
+  assert.equal(input.dataset.candles.every((c) => c.market === SYNTHETIC_MARKETS.SYNTHETIC_KOSPI), true);
+});
+
+// helper: buildCostInput 정상
+test("GATE5G-76 buildCostInput 정상", () => {
+  const built = buildCostInput(validPipelineInput(), {
+    ok: true,
+    entryStatus: ENTRY_STATUS.FILLED,
+    exitStatus: EXIT_STATUS.FILLED,
+    entryTradingDate: "2101-03-02",
+    exitTradingDate: "2101-03-03",
+    entryPrice: 10000,
+    exitPrice: 11000,
+  });
+  assert.equal(built.ok, true);
+  assert.equal(built.input.market, MARKET.SYNTHETIC_KOSPI);
+  assert.equal(built.input.quantity, 10);
+});
+
+// helper: buildCostInput 경계
+test("GATE5G-77 buildCostInput 경계: null exitPrice", () => {
+  const built = buildCostInput(validPipelineInput(), {
+    ok: true,
+    entryStatus: ENTRY_STATUS.FILLED,
+    exitStatus: EXIT_STATUS.FILLED,
+    entryTradingDate: "2101-03-02",
+    exitTradingDate: "2101-03-03",
+    entryPrice: 10000,
+    exitPrice: null,
+  });
+  assert.equal(built.ok, false);
+  assert.equal(hasCode(built, ERROR.COST_INPUT_DERIVATION_FAILED), true);
+});
+
+// helper: buildCostInput 실패
+test("GATE5G-78 buildCostInput 실패: 미완료 체결", () => {
+  const built = buildCostInput(validPipelineInput(), {
+    ok: true,
+    entryStatus: ENTRY_STATUS.FILLED,
+    exitStatus: EXIT_STATUS.NOT_TRIGGERED,
+    entryTradingDate: "2101-03-02",
+    entryPrice: 10000,
+  });
+  assert.equal(built.ok, false);
+  assert.equal(hasCode(built, ERROR.EXECUTION_RESULT_INCOMPLETE), true);
+});
+
+// helper: mergeSafeStageErrors
+test("GATE5G-79 mergeSafeStageErrors stage 부여", () => {
+  const merged = mergeSafeStageErrors(STAGE.DATA, [{ code: "INVALID_VOLUME" }]);
+  assert.equal(merged[0].stage, STAGE.DATA);
+  assert.equal(merged[0].code, "INVALID_VOLUME");
+});
+
+// helper: createSyntheticPipelineResult
+test("GATE5G-80 createSyntheticPipelineResult 기본값", () => {
+  const result = createSyntheticPipelineResult({});
+  assert.equal(result.pipelineVersion, PIPELINE_VERSION);
+  assertOperationalBlocked(result);
+  assertPerformanceNull(result);
+});
+
+// helper: makeSafePipelineError
+test("GATE5G-81 makeSafePipelineError 화이트리스트", () => {
+  const err = makeSafePipelineError({
+    code: ERROR.UNKNOWN_FIELD,
+    field: "dataset",
+    dataset: { candles: [] },
+    calendar: {},
+    policies: [],
+  });
+  assert.equal(err.code, ERROR.UNKNOWN_FIELD);
+  assert.equal(Object.hasOwn(err, "dataset"), false);
+  assert.equal(Object.hasOwn(err, "calendar"), false);
+});
+
+// helper: mapCandleMarketForExecution
+test("GATE5G-82 mapCandleMarketForExecution KOSPI→MARKET", () => {
+  assert.equal(mapCandleMarketForExecution(SYNTHETIC_MARKETS.SYNTHETIC_KOSPI), "SYNTHETIC_MARKET");
+});
+
+// helper: isDataStagePassed
+test("GATE5G-83 isDataStagePassed 정상", () => {
+  assert.equal(isDataStagePassed({
+    schemaValid: true,
+    syntheticCalendarProvided: true,
+    syntheticCalendarVerified: true,
+    syntheticCandleDatesVerified: true,
+    errorCodes: [],
+  }), true);
+});
+
+// helper: isNoEntryExecution
+test("GATE5G-84 isNoEntryExecution LIMIT_NOT_TOUCHED", () => {
+  assert.equal(isNoEntryExecution({
+    ok: true,
+    status: EXEC_STATUS.NOT_FILLED,
+    warnings: [{ code: "LIMIT_NOT_TOUCHED" }],
+  }), true);
+});
+
+// helper: isOpenPositionExecution
+test("GATE5G-85 isOpenPositionExecution", () => {
+  assert.equal(isOpenPositionExecution({
+    ok: true,
+    entryStatus: ENTRY_STATUS.FILLED,
+    exitStatus: EXIT_STATUS.NOT_TRIGGERED,
+  }), true);
+});
+
+// helper: isFullTradeExecution
+test("GATE5G-86 isFullTradeExecution", () => {
+  assert.equal(isFullTradeExecution({
+    ok: true,
+    entryStatus: ENTRY_STATUS.FILLED,
+    exitStatus: EXIT_STATUS.FILLED,
+  }), true);
+});
