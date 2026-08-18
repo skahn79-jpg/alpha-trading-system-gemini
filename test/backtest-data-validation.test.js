@@ -2,6 +2,8 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const {
   LOAD_MODE,
@@ -17,10 +19,15 @@ const {
   SORT_ORDER,
   CANONICALIZATION_VERSION,
   ERROR,
+  STATUS,
+  SYNTHETIC_MARKETS,
   validateHistoricalDataset,
   computeDatasetContentChecksum,
   computeDatasetMetadataHash,
 } = require("../lib/backtest/data-validation");
+
+const DATA_VALIDATION_PATH = path.join(__dirname, "..", "lib", "backtest", "data-validation.js");
+const CALENDAR_VALIDATION_PATH = path.join(__dirname, "..", "lib", "backtest", "calendar-validation.js");
 
 function candle(overrides) {
   const tradingDate = overrides && overrides.tradingDate ? overrides.tradingDate : "2100-01-04";
@@ -446,4 +453,808 @@ test("오류 결과에 전체 페이로드가 없는지 확인", () => {
   const dumped = JSON.stringify(result);
   assert.equal(/"candles"\s*:/.test(dumped), false);
   assert.equal(dumped.includes('"open":100'), false);
+});
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function addDaysYmd(ymd, days) {
+  const year = Number(ymd.slice(0, 4));
+  const month = Number(ymd.slice(5, 7));
+  const day = Number(ymd.slice(8, 10));
+  const dt = new Date(Date.UTC(year, month - 1, day + days));
+  return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
+}
+
+function isWeekendYmd(ymd) {
+  const dow = new Date(`${ymd}T00:00:00Z`).getUTCDay();
+  return dow === 0 || dow === 6;
+}
+
+function makeCalendarDay(tradingDate, overrides) {
+  const extras = overrides || {};
+  return {
+    tradingDate,
+    dayStatus: extras.dayStatus || (isWeekendYmd(tradingDate) ? "NON_TRADING_DAY" : "TRADING_DAY"),
+    sessionStatus: extras.sessionStatus || "FINAL",
+    statusSource: extras.statusSource || "SYNTHETIC_EXPLICIT",
+    market: extras.market || SYNTHETIC_MARKETS.SYNTHETIC_KOSPI,
+    calendarId: extras.calendarId || "synthetic-calendar-unit",
+  };
+}
+
+function buildSyntheticCalendar(options) {
+  const opts = options || {};
+  const start = opts.start || "2100-01-04";
+  const dayCount = opts.dayCount || 14;
+  const market = opts.market || SYNTHETIC_MARKETS.SYNTHETIC_KOSPI;
+  const calendarId = opts.calendarId || "synthetic-calendar-unit";
+  const calendarVersion = opts.calendarVersion || "synthetic-calendar-v1";
+  const days = [];
+  for (let i = 0; i < dayCount; i += 1) {
+    days.push(makeCalendarDay(addDaysYmd(start, i), { market, calendarId }));
+  }
+  if (Array.isArray(opts.patchDays)) {
+    for (const patch of opts.patchDays) {
+      const row = days.find((d) => d.tradingDate === patch.tradingDate);
+      if (row) Object.assign(row, patch);
+    }
+  }
+  return {
+    calendarId,
+    calendarVersion,
+    calendarStatus: "TEST_VERIFIED",
+    fixtureType: "SYNTHETIC",
+    notProductionData: true,
+    productionEligible: false,
+    market,
+    timezone: "Asia/Seoul",
+    coverage: { from: start, to: addDaysYmd(start, dayCount - 1) },
+    generatedAt: "2100-01-01T00:00:00+09:00",
+    verifiedAt: "2100-01-01T00:00:00+09:00",
+    days,
+  };
+}
+
+function tradingDatesOf(calendar) {
+  return calendar.days
+    .filter((d) => d.dayStatus === "TRADING_DAY")
+    .map((d) => d.tradingDate);
+}
+
+function cloneJson(value) {
+  return JSON.stringify(value);
+}
+
+function deepClone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function integratedCandle(tradingDate, overrides) {
+  const extras = overrides || {};
+  const market = extras.market || SYNTHETIC_MARKETS.SYNTHETIC_KOSPI;
+  return candle({
+    symbol: extras.symbol || "SYNTH001",
+    market,
+    tradingDate,
+    sourceDatasetId: extras.sourceDatasetId || "synthetic-daily-v1",
+    ...extras,
+  });
+}
+
+function integratedEnvelope(calendar, overrides) {
+  const extras = Object.assign({}, overrides || {});
+  const requestedDates = extras.tradingDates;
+  const candleMarket = extras.candleMarket;
+  const symbol = extras.symbol || "SYNTH001";
+  const providedCandles = extras.candles;
+  delete extras.tradingDates;
+  delete extras.candleMarket;
+  delete extras.symbol;
+  delete extras.candles;
+
+  const dates = Array.isArray(requestedDates)
+    ? [...requestedDates].sort()
+    : tradingDatesOf(calendar).slice(0, 3);
+  const market = candleMarket || calendar.market;
+  const candles = Array.isArray(providedCandles)
+    ? providedCandles
+    : dates.map((d) => integratedCandle(d, { market, symbol }));
+  const from = dates[0];
+  const to = dates[dates.length - 1];
+  return validEnvelope({
+    datasetId: "synthetic-daily-v1",
+    symbols: [symbol],
+    markets: [calendar.market],
+    coverage: { from, to },
+    perSymbolCoverage: { [symbol]: { from, to } },
+    calendarVersion: calendar.calendarVersion,
+    candles,
+    ...extras,
+  });
+}
+
+function calendarValidationRange(calendar, overrides) {
+  const extras = overrides || {};
+  return {
+    requiredFrom: extras.requiredFrom || calendar.coverage.from,
+    requiredTo: extras.requiredTo || calendar.coverage.to,
+  };
+}
+
+function validateIntegrated(dataset, calendar, extraOpts) {
+  return validateHistoricalDataset(dataset, {
+    mode: LOAD_MODE.SYNTHETIC_UNIT_TEST_ONLY,
+    calendar,
+    calendarValidation: calendarValidationRange(calendar),
+    ...extraOpts,
+  });
+}
+
+function assertOperationalBlocked(result) {
+  assert.equal(result.calendarVerified, false);
+  assert.equal(result.calendarDataEligible, false);
+  assert.equal(result.datasetVerified, false);
+  assert.equal(result.backtestDataEligible, false);
+  assert.equal(result.backtestExecutionEligible, false);
+  assert.equal(result.promotionEligible, false);
+  assert.equal(result.paperEligible, false);
+  assert.equal(result.liveEligible, false);
+}
+
+test("GATE5F-01 캘린더 미제공 기존 정상 결과", () => {
+  const result = validateTest(validEnvelope());
+  assert.equal(result.schemaValid, true);
+  assert.equal(result.syntheticCalendarProvided, false);
+  assert.equal(result.syntheticCalendarVerified, false);
+  assert.equal(result.syntheticCandleDatesVerified, false);
+  assertOperationalBlocked(result);
+});
+
+test("GATE5F-02 캘린더 미제공 CALENDAR_UNAVAILABLE 유지", () => {
+  const result = validateTest(validEnvelope());
+  assert.equal(result.missingData.includes("CALENDAR_UNAVAILABLE"), true);
+});
+
+test("GATE5F-03 캘린더 미제공 datasetVerified=false", () => {
+  assert.equal(validateTest(validEnvelope()).datasetVerified, false);
+});
+
+test("GATE5F-04 캘린더 미제공 backtestDataEligible=false", () => {
+  assert.equal(validateTest(validEnvelope()).backtestDataEligible, false);
+});
+
+test("GATE5F-05 캘린더 미제공 기존 TEST 모드 유지", () => {
+  const result = validateHistoricalDataset(validEnvelope(), { mode: LOAD_MODE.TEST });
+  assert.equal(result.schemaValid, true);
+  assert.equal(result.syntheticCalendarProvided, false);
+});
+
+test("GATE5F-06 정상 합성 데이터셋과 캘린더 schemaValid", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(result.schemaValid, true);
+});
+
+test("GATE5F-07 syntheticCalendarProvided=true", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(result.syntheticCalendarProvided, true);
+});
+
+test("GATE5F-08 syntheticCalendarVerified=true", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(result.syntheticCalendarVerified, true);
+});
+
+test("GATE5F-09 syntheticCandleDatesVerified=true", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(result.syntheticCandleDatesVerified, true);
+});
+
+test("GATE5F-10 calendarVerified=false", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(result.calendarVerified, false);
+});
+
+test("GATE5F-11 calendarDataEligible=false", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(result.calendarDataEligible, false);
+});
+
+test("GATE5F-12 datasetVerified=false", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(result.datasetVerified, false);
+});
+
+test("GATE5F-13 backtestDataEligible=false", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(result.backtestDataEligible, false);
+});
+
+test("GATE5F-14 backtestExecutionEligible=false", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(result.backtestExecutionEligible, false);
+});
+
+test("GATE5F-15 promotion·Paper·Live=false", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(result.promotionEligible, false);
+  assert.equal(result.paperEligible, false);
+  assert.equal(result.liveEligible, false);
+});
+
+test("GATE5F-16 CALENDAR_UNAVAILABLE 제거", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(result.missingData.includes("CALENDAR_UNAVAILABLE"), false);
+});
+
+test("GATE5F-17 CALENDAR_VALIDATION_NOT_IMPLEMENTED 제거", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(result.missingData.includes("CALENDAR_VALIDATION_NOT_IMPLEMENTED"), false);
+});
+
+test("GATE5F-18 PRODUCTION_CALENDAR_NOT_CONFIGURED 추가", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(result.missingData.includes("PRODUCTION_CALENDAR_NOT_CONFIGURED"), true);
+});
+
+test("GATE5F-19 calendarId·calendarVersion 반환", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(result.calendarId, calendar.calendarId);
+  assert.equal(result.calendarVersion, calendar.calendarVersion);
+});
+
+test("GATE5F-20 calendar·days 원문 미반환", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(Object.hasOwn(result, "calendar"), false);
+  assert.equal(Object.hasOwn(result, "days"), false);
+  const dumped = JSON.stringify(result);
+  assert.equal(/"days"\s*:/.test(dumped), false);
+  assert.equal(dumped.includes('"statusSource":"SYNTHETIC_EXPLICIT"'), false);
+});
+
+test("GATE5F-21 알 수 없는 캘린더 필드", () => {
+  const calendar = buildSyntheticCalendar();
+  calendar.holidayName = "SYNTHETIC_HOLIDAY";
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(hasCode(result, ERROR.UNKNOWN_FIELD), true);
+  assert.equal(result.syntheticCalendarVerified, false);
+  assert.equal(result.status, STATUS.BLOCKED_SYNTHETIC_CALENDAR_VALIDATION);
+});
+
+test("GATE5F-22 coverage 내부 날짜 누락", () => {
+  const calendar = buildSyntheticCalendar();
+  calendar.days.splice(2, 1);
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(hasCode(result, ERROR.CALENDAR_DATE_MISSING), true);
+  assert.equal(result.syntheticCalendarVerified, false);
+});
+
+test("GATE5F-23 역순 날짜", () => {
+  const calendar = buildSyntheticCalendar();
+  const dataset = integratedEnvelope(calendar);
+  const reversed = deepClone(calendar);
+  const first = reversed.days[0];
+  reversed.days[0] = reversed.days[1];
+  reversed.days[1] = first;
+  const result = validateIntegrated(dataset, reversed);
+  assert.equal(hasCode(result, ERROR.NON_MONOTONIC_CALENDAR_DATE), true);
+});
+
+test("GATE5F-24 중복 날짜", () => {
+  const calendar = buildSyntheticCalendar();
+  const dataset = integratedEnvelope(calendar);
+  const duplicated = deepClone(calendar);
+  duplicated.days[2] = { ...duplicated.days[1] };
+  const result = validateIntegrated(dataset, duplicated);
+  assert.equal(hasCode(result, ERROR.DUPLICATE_CALENDAR_DATE), true);
+});
+
+test("GATE5F-25 PENDING day", () => {
+  const calendar = buildSyntheticCalendar();
+  const dataset = integratedEnvelope(calendar);
+  const mutated = deepClone(calendar);
+  mutated.days.find((d) => d.tradingDate === dataset.candles[0].tradingDate).dayStatus = "PENDING";
+  const result = validateIntegrated(dataset, mutated);
+  assert.equal(hasCode(result, ERROR.CALENDAR_PENDING), true);
+  assert.equal(result.syntheticCandleDatesVerified, false);
+});
+
+test("GATE5F-26 CONFLICT day", () => {
+  const calendar = buildSyntheticCalendar();
+  const dataset = integratedEnvelope(calendar);
+  const mutated = deepClone(calendar);
+  mutated.days.find((d) => d.tradingDate === dataset.candles[0].tradingDate).dayStatus = "CONFLICT";
+  const result = validateIntegrated(dataset, mutated);
+  assert.equal(hasCode(result, ERROR.CALENDAR_SOURCE_CONFLICT), true);
+});
+
+test("GATE5F-27 PENDING session", () => {
+  const calendar = buildSyntheticCalendar();
+  const trading = tradingDatesOf(calendar)[0];
+  calendar.days.find((d) => d.tradingDate === trading).sessionStatus = "PENDING";
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(hasCode(result, ERROR.SESSION_SCHEDULE_PENDING), true);
+});
+
+test("GATE5F-28 실제 시장명과 합성 캘린더 혼용", () => {
+  const calendar = buildSyntheticCalendar();
+  const dates = tradingDatesOf(calendar).slice(0, 3);
+  const dataset = validEnvelope({
+    datasetId: "local-verified-daily-v1",
+    sourceType: SOURCE_TYPE.LOCAL_VERIFIED_FILE,
+    symbols: ["AAA001"],
+    markets: ["KOSPI"],
+    coverage: { from: dates[0], to: dates[2] },
+    perSymbolCoverage: { AAA001: { from: dates[0], to: dates[2] } },
+    calendarVersion: calendar.calendarVersion,
+    verificationStatus: VERIFICATION_STATUS.VERIFIED,
+    notProductionData: false,
+    productionEligible: true,
+    fixtureType: undefined,
+    candles: dates.map((d) => candle({
+      symbol: "AAA001",
+      market: "KOSPI",
+      tradingDate: d,
+      sourceDatasetId: "local-verified-daily-v1",
+      adjustmentStatus: CANDLE_ADJUSTMENT.VERIFIED,
+    })),
+  });
+  delete dataset.fixtureType;
+  const result = validateIntegrated(dataset, calendar);
+  assert.equal(hasCode(result, ERROR.CALENDAR_MARKET_MISMATCH), true);
+});
+
+test("GATE5F-29 PRODUCTION 모드 합성 캘린더 차단", () => {
+  const calendar = buildSyntheticCalendar();
+  const dates = tradingDatesOf(calendar).slice(0, 3);
+  const dataset = validEnvelope({
+    datasetId: "local-verified-daily-v1",
+    sourceType: SOURCE_TYPE.LOCAL_VERIFIED_FILE,
+    symbols: ["AAA001"],
+    markets: [calendar.market],
+    coverage: { from: dates[0], to: dates[2] },
+    perSymbolCoverage: { AAA001: { from: dates[0], to: dates[2] } },
+    calendarVersion: calendar.calendarVersion,
+    verificationStatus: VERIFICATION_STATUS.VERIFIED,
+    notProductionData: false,
+    productionEligible: true,
+    candles: dates.map((d) => candle({
+      symbol: "AAA001",
+      market: calendar.market,
+      tradingDate: d,
+      sourceDatasetId: "local-verified-daily-v1",
+      adjustmentStatus: CANDLE_ADJUSTMENT.VERIFIED,
+    })),
+  });
+  delete dataset.fixtureType;
+  const result = validateHistoricalDataset(dataset, {
+    mode: LOAD_MODE.PRODUCTION,
+    calendar,
+    calendarValidation: calendarValidationRange(calendar),
+  });
+  assert.equal(hasCode(result, ERROR.SYNTHETIC_CALENDAR_BLOCKED_IN_PRODUCTION), true);
+  assert.equal(result.syntheticCalendarVerified, false);
+});
+
+test("GATE5F-30 캘린더 실패 후 캔들 날짜 대조 미실행", () => {
+  const calendar = buildSyntheticCalendar();
+  calendar.holidayName = "SYNTHETIC_HOLIDAY";
+  const weekend = calendar.days.find((d) => d.dayStatus === "NON_TRADING_DAY");
+  const dataset = integratedEnvelope(calendar, { tradingDates: [weekend.tradingDate] });
+  const result = validateIntegrated(dataset, calendar);
+  assert.equal(hasCode(result, ERROR.UNKNOWN_FIELD), true);
+  assert.equal(hasCode(result, ERROR.CANDLE_ON_NON_TRADING_DAY), false);
+});
+
+test("GATE5F-31 dataset·calendar 시장 불일치", () => {
+  const calendar = buildSyntheticCalendar({ market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI });
+  const dataset = integratedEnvelope(calendar, {
+    markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ],
+    candleMarket: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ,
+  });
+  const result = validateIntegrated(dataset, calendar);
+  assert.equal(hasCode(result, ERROR.CALENDAR_MARKET_MISMATCH), true);
+});
+
+test("GATE5F-32 candle·calendar 시장 불일치", () => {
+  const calendar = buildSyntheticCalendar();
+  const dates = tradingDatesOf(calendar).slice(0, 3);
+  const dataset = integratedEnvelope(calendar, {
+    symbols: ["SYNTH001", "SYNTH002"],
+    markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI],
+    coverage: { from: dates[0], to: dates[2] },
+    perSymbolCoverage: {
+      SYNTH001: { from: dates[0], to: dates[0] },
+      SYNTH002: { from: dates[1], to: dates[2] },
+    },
+    candles: [
+      integratedCandle(dates[0], { symbol: "SYNTH001", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ }),
+      integratedCandle(dates[1], { symbol: "SYNTH002", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+      integratedCandle(dates[2], { symbol: "SYNTH002", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+    ],
+  });
+  const result = validateIntegrated(dataset, calendar);
+  assert.equal(hasCode(result, ERROR.CALENDAR_MARKET_MISMATCH), true);
+});
+
+test("GATE5F-33 calendarVersion 불일치", () => {
+  const calendar = buildSyntheticCalendar({ calendarVersion: "synthetic-calendar-v1" });
+  const dataset = integratedEnvelope(calendar, { calendarVersion: "synthetic-calendar-v2" });
+  const result = validateIntegrated(dataset, calendar);
+  assert.equal(hasCode(result, ERROR.CALENDAR_VERSION_MISMATCH), true);
+});
+
+test("GATE5F-34 requiredFrom coverage 밖", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar, {
+    calendarValidation: {
+      requiredFrom: addDaysYmd(calendar.coverage.from, -1),
+      requiredTo: calendar.coverage.to,
+    },
+  });
+  assert.equal(hasCode(result, ERROR.CALENDAR_RANGE_INSUFFICIENT), true);
+  assert.equal(hasCode(result, ERROR.CANDLE_ON_NON_TRADING_DAY), false);
+});
+
+test("GATE5F-35 requiredTo coverage 밖", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar, {
+    calendarValidation: {
+      requiredFrom: calendar.coverage.from,
+      requiredTo: addDaysYmd(calendar.coverage.to, 1),
+    },
+  });
+  assert.equal(hasCode(result, ERROR.CALENDAR_RANGE_INSUFFICIENT), true);
+});
+
+test("GATE5F-36 requiredFrom > requiredTo", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar, {
+    calendarValidation: {
+      requiredFrom: calendar.coverage.to,
+      requiredTo: calendar.coverage.from,
+    },
+  });
+  assert.equal(hasCode(result, ERROR.INVALID_COVERAGE_RANGE), true);
+});
+
+test("GATE5F-37 다중 시장에 단일 캘린더", () => {
+  const calendar = buildSyntheticCalendar();
+  const dates = tradingDatesOf(calendar).slice(0, 2);
+  const dataset = validEnvelope({
+    symbols: ["SYNTH001", "SYNTH002"],
+    markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI],
+    coverage: { from: dates[0], to: dates[1] },
+    perSymbolCoverage: {
+      SYNTH001: { from: dates[0], to: dates[0] },
+      SYNTH002: { from: dates[1], to: dates[1] },
+    },
+    calendarVersion: calendar.calendarVersion,
+    candles: [
+      integratedCandle(dates[0], { symbol: "SYNTH001", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+      integratedCandle(dates[1], { symbol: "SYNTH002", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ }),
+    ],
+  });
+  const result = validateIntegrated(dataset, calendar);
+  assert.equal(hasCode(result, ERROR.MULTI_MARKET_CALENDAR_REQUIRED), true);
+});
+
+test("GATE5F-38 캘린더에 없는 캔들 날짜", () => {
+  const calendar = buildSyntheticCalendar({ dayCount: 10 });
+  const missingDate = addDaysYmd(calendar.coverage.to, 3);
+  const dates = [...tradingDatesOf(calendar).slice(0, 2), missingDate];
+  const dataset = integratedEnvelope(calendar, { tradingDates: dates });
+  const result = validateIntegrated(dataset, calendar);
+  assert.equal(
+    hasCode(result, ERROR.CALENDAR_DATE_MISSING) || hasCode(result, ERROR.CALENDAR_DATE_OUTSIDE_COVERAGE),
+    true,
+  );
+});
+
+test("GATE5F-39 NON_TRADING_DAY 캔들", () => {
+  const calendar = buildSyntheticCalendar();
+  const weekend = calendar.days.find((d) => d.dayStatus === "NON_TRADING_DAY").tradingDate;
+  const dates = [weekend, ...tradingDatesOf(calendar).slice(0, 2)];
+  const dataset = integratedEnvelope(calendar, { tradingDates: dates });
+  const result = validateIntegrated(dataset, calendar);
+  assert.equal(hasCode(result, ERROR.CANDLE_ON_NON_TRADING_DAY), true);
+});
+
+test("GATE5F-40 FINAL이 아닌 날짜", () => {
+  const calendar = buildSyntheticCalendar();
+  const trading = tradingDatesOf(calendar)[1];
+  calendar.days.find((d) => d.tradingDate === trading).sessionStatus = "PENDING";
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(hasCode(result, ERROR.SESSION_SCHEDULE_PENDING), true);
+});
+
+test("GATE5F-41 동일 날짜 다른 시장", () => {
+  const calendar = buildSyntheticCalendar();
+  const date = tradingDatesOf(calendar)[0];
+  const dataset = validEnvelope({
+    symbols: ["SYNTH001", "SYNTH002"],
+    markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI],
+    coverage: { from: date, to: date },
+    perSymbolCoverage: {
+      SYNTH001: { from: date, to: date },
+      SYNTH002: { from: date, to: date },
+    },
+    calendarVersion: calendar.calendarVersion,
+    candles: [
+      integratedCandle(date, { symbol: "SYNTH001", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI }),
+      integratedCandle(date, { symbol: "SYNTH002", market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ }),
+    ],
+  });
+  const result = validateIntegrated(dataset, calendar);
+  assert.equal(
+    hasCode(result, ERROR.MULTI_MARKET_CALENDAR_REQUIRED)
+      || hasCode(result, ERROR.CALENDAR_MARKET_MISMATCH),
+    true,
+  );
+});
+
+test("GATE5F-42 calendarVerified=true 무시", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar, { calendarVerified: true });
+  assert.equal(result.calendarVerified, false);
+});
+
+test("GATE5F-43 calendarDataEligible=true 무시", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar, { calendarDataEligible: true });
+  assert.equal(result.calendarDataEligible, false);
+});
+
+test("GATE5F-44 datasetVerified=true 무시", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar, { datasetVerified: true });
+  assert.equal(result.datasetVerified, false);
+});
+
+test("GATE5F-45 backtestDataEligible=true 무시", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar, { backtestDataEligible: true });
+  assert.equal(result.backtestDataEligible, false);
+});
+
+test("GATE5F-46 backtestExecutionEligible=true 무시", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar, {
+    backtestExecutionEligible: true,
+  });
+  assert.equal(result.backtestExecutionEligible, false);
+});
+
+test("GATE5F-47 promotionEligible=true 무시", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar, { promotionEligible: true });
+  assert.equal(result.promotionEligible, false);
+});
+
+test("GATE5F-48 paperEligible=true 무시", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar, { paperEligible: true });
+  assert.equal(result.paperEligible, false);
+});
+
+test("GATE5F-49 liveEligible=true 무시", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar, { liveEligible: true });
+  assert.equal(result.liveEligible, false);
+});
+
+test("GATE5F-50 모든 승격 플래그 동시 주입 차단", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar, {
+    calendarVerified: true,
+    calendarDataEligible: true,
+    datasetVerified: true,
+    backtestDataEligible: true,
+    backtestExecutionEligible: true,
+    promotionEligible: true,
+    paperEligible: true,
+    liveEligible: true,
+  });
+  assertOperationalBlocked(result);
+  assert.equal(result.syntheticCalendarVerified, true);
+  assert.equal(result.syntheticCandleDatesVerified, true);
+});
+
+test("GATE5F-51 dataset 입력 불변", () => {
+  const calendar = buildSyntheticCalendar();
+  const dataset = integratedEnvelope(calendar);
+  const before = cloneJson(dataset);
+  validateIntegrated(dataset, calendar);
+  assert.equal(cloneJson(dataset), before);
+});
+
+test("GATE5F-52 calendar 입력 불변", () => {
+  const calendar = buildSyntheticCalendar();
+  const before = cloneJson(calendar);
+  validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(cloneJson(calendar), before);
+});
+
+test("GATE5F-53 opts 입력 불변", () => {
+  const calendar = buildSyntheticCalendar();
+  const opts = {
+    mode: LOAD_MODE.SYNTHETIC_UNIT_TEST_ONLY,
+    calendar,
+    calendarValidation: calendarValidationRange(calendar),
+  };
+  const before = cloneJson(opts);
+  validateHistoricalDataset(integratedEnvelope(calendar), opts);
+  assert.equal(cloneJson(opts), before);
+});
+
+test("GATE5F-54 동일 입력은 동일 결과", () => {
+  const calendar = buildSyntheticCalendar();
+  const dataset = integratedEnvelope(calendar);
+  const a = validateIntegrated(deepClone(dataset), deepClone(calendar));
+  const b = validateIntegrated(deepClone(dataset), deepClone(calendar));
+  assert.equal(cloneJson(a), cloneJson(b));
+});
+
+test("GATE5F-55 오류에 dataset 없음", () => {
+  const calendar = buildSyntheticCalendar();
+  calendar.holidayName = "X";
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  const dumped = JSON.stringify(result);
+  assert.equal(Object.hasOwn(result, "dataset"), false);
+  assert.equal(/"candles"\s*:/.test(dumped), false);
+  for (const err of result.errors) {
+    assert.equal(Object.hasOwn(err, "dataset"), false);
+  }
+});
+
+test("GATE5F-56 오류에 candles 없음", () => {
+  const calendar = buildSyntheticCalendar();
+  const weekend = calendar.days.find((d) => d.dayStatus === "NON_TRADING_DAY").tradingDate;
+  const result = validateIntegrated(
+    integratedEnvelope(calendar, { tradingDates: [weekend] }),
+    calendar,
+  );
+  const dumped = JSON.stringify(result);
+  assert.equal(/"candles"\s*:/.test(dumped), false);
+  for (const err of result.errors) {
+    assert.equal(Object.hasOwn(err, "candles"), false);
+  }
+});
+
+test("GATE5F-57 오류에 calendar 없음", () => {
+  const calendar = buildSyntheticCalendar();
+  calendar.holidayName = "X";
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  const dumped = JSON.stringify(result);
+  assert.equal(Object.hasOwn(result, "calendar"), false);
+  assert.equal(/"calendar"\s*:/.test(dumped), false);
+  for (const err of result.errors) {
+    assert.equal(Object.hasOwn(err, "calendar"), false);
+    assert.equal(Object.hasOwn(err, "days"), false);
+  }
+});
+
+test("GATE5F-58 오류에 days 없음", () => {
+  const calendar = buildSyntheticCalendar();
+  calendar.days.splice(1, 1);
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  const dumped = JSON.stringify(result);
+  assert.equal(/"days"\s*:/.test(dumped), false);
+  for (const err of result.errors) {
+    assert.equal(Object.hasOwn(err, "days"), false);
+  }
+});
+
+test("GATE5F-59 네트워크·주문 참조 없음", () => {
+  const source = fs.readFileSync(DATA_VALIDATION_PATH, "utf8");
+  assert.equal(/axios/i.test(source), false);
+  assert.equal(/\bfetch\s*\(/i.test(source), false);
+  assert.equal(/https?:\/\//i.test(source), false);
+  assert.equal(/\bbroker\b/i.test(source), false);
+  assert.equal(/\border\b/i.test(source), false);
+});
+
+test("GATE5F-60 순환 의존성 없음", () => {
+  const calendarSource = fs.readFileSync(CALENDAR_VALIDATION_PATH, "utf8");
+  assert.equal(calendarSource.includes("data-validation"), false);
+  assert.equal(/require\(["']\.\/data-validation["']\)/.test(calendarSource), false);
+  const dataSource = fs.readFileSync(DATA_VALIDATION_PATH, "utf8");
+  assert.equal(dataSource.includes('require("./calendar-validation")'), true);
+});
+
+test("GATE5F-61 정상 경로 경계: coverage.from 일치", () => {
+  const calendar = buildSyntheticCalendar({ start: "2100-03-01", dayCount: 10 });
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar, {
+    calendarValidation: {
+      requiredFrom: calendar.coverage.from,
+      requiredTo: calendar.coverage.to,
+    },
+  });
+  assert.equal(result.syntheticCalendarVerified, true);
+  assert.equal(result.syntheticCandleDatesVerified, true);
+});
+
+test("GATE5F-62 정상 경로 경계: requiredFrom=requiredTo 거래일", () => {
+  const calendar = buildSyntheticCalendar();
+  const day = tradingDatesOf(calendar)[0];
+  const dataset = integratedEnvelope(calendar, { tradingDates: [day] });
+  const result = validateIntegrated(dataset, calendar, {
+    calendarValidation: { requiredFrom: day, requiredTo: day },
+  });
+  assert.equal(result.syntheticCandleDatesVerified, true);
+});
+
+test("GATE5F-63 정상 경로: SYNTHETIC_KOSDAQ", () => {
+  const calendar = buildSyntheticCalendar({ market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ });
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(result.syntheticCalendarVerified, true);
+  assert.equal(result.syntheticCandleDatesVerified, true);
+  assert.equal(result.calendarVerified, false);
+});
+
+test("GATE5F-64 실패 경로: 데이터셋 오류 후 캘린더 미실행", () => {
+  const calendar = buildSyntheticCalendar();
+  calendar.holidayName = "X";
+  const dataset = integratedEnvelope(calendar, { extraField: true });
+  const result = validateIntegrated(dataset, calendar);
+  assert.equal(hasCode(result, ERROR.UNKNOWN_FIELD), true);
+  assert.equal(result.errors.some((e) => e.field === "holidayName"), false);
+  assert.equal(result.syntheticCalendarVerified, false);
+});
+
+test("GATE5F-65 실패 경로: 캘린더 실패 시 PRODUCTION_CALENDAR_NOT_CONFIGURED 없음", () => {
+  const calendar = buildSyntheticCalendar();
+  calendar.holidayName = "X";
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(result.missingData.includes("PRODUCTION_CALENDAR_NOT_CONFIGURED"), false);
+  assert.equal(result.status, STATUS.BLOCKED_SYNTHETIC_CALENDAR_VALIDATION);
+});
+
+test("GATE5F-66 경계: requiredTo=coverage.to 통과", () => {
+  const calendar = buildSyntheticCalendar({ start: "2100-04-01", dayCount: 12 });
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar, {
+    calendarValidation: {
+      requiredFrom: calendar.coverage.from,
+      requiredTo: calendar.coverage.to,
+    },
+  });
+  assert.equal(result.syntheticCalendarVerified, true);
+});
+
+test("GATE5F-67 오류 화이트리스트 외 필드 제거", () => {
+  const calendar = buildSyntheticCalendar();
+  calendar.holidayName = "X";
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  const allowed = new Set([
+    "code", "severity", "field", "recordIndex", "symbol", "tradingDate",
+    "datasetId", "datasetVersion", "contentChecksum", "metadataHash",
+    "calendarId", "calendarVersion", "market", "dayStatus", "sessionStatus",
+  ]);
+  for (const err of result.errors) {
+    for (const key of Object.keys(err)) {
+      assert.equal(allowed.has(key), true, key);
+    }
+  }
+});
+
+test("GATE5F-68 calendarValidationStatus 정상값", () => {
+  const calendar = buildSyntheticCalendar();
+  const result = validateIntegrated(integratedEnvelope(calendar), calendar);
+  assert.equal(result.calendarValidationStatus, STATUS.SYNTHETIC_CALENDAR_VERIFIED);
 });
