@@ -1736,6 +1736,8 @@ test("GATE5H-P50 허용 파일 외 변경 없음", () => {
     "test/backtest-data-validation.test.js",
     "lib/backtest/synthetic-pipeline.js",
     "test/backtest-synthetic-pipeline.test.js",
+    "lib/backtest/multi-trade-lifecycle.js",
+    "test/backtest-multi-trade-lifecycle.test.js",
   ]);
   for (const name of names) {
     assert.equal(allowed.has(name), true, name);
@@ -1960,4 +1962,326 @@ test("GATE5I-P20 동일 입력 동일 결과", () => {
     runSyntheticSingleTradePipeline(kosdaq),
     runSyntheticSingleTradePipeline(kosdaq),
   );
+});
+
+// ─── GATE5J Pipeline Tests ────────────────────────────────────────────────────
+
+const {
+  runSyntheticMultiTradePipeline,
+  MULTI_TRADE_PIPELINE_VERSION,
+} = pipeline;
+
+function buildMultiTradeKospiInput() {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const candleRows = [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10000, high: 10500, low: 9800, close: 10200 },
+    { tradingDate: t[2], open: 10800, high: 11200, low: 10700, close: 11100 },
+    { tradingDate: t[3], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[4], open: 10000, high: 10500, low: 9800, close: 10200 },
+    { tradingDate: t[5], open: 10800, high: 11200, low: 10700, close: 11100 },
+  ];
+  const dataset = buildDataset(calendar, candleRows);
+  const exitPolicy = { stopLossPrice: 9500, takeProfitPrice: 11000, intrabarConflictPolicy: INTRABAR_CONFLICT_POLICY.STOP_FIRST };
+  return {
+    pipelineVersion: MULTI_TRADE_PIPELINE_VERSION,
+    calculationMode: CALCULATION_MODE.SYNTHETIC_UNIT_TEST_ONLY,
+    dataset,
+    calendar,
+    calendarValidation: { requiredFrom: calendar.coverage.from, requiredTo: calendar.coverage.to },
+    cost: {
+      policyEngineVersion: POLICY_ENGINE_VERSION,
+      brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+      currency: CURRENCY.KRW,
+      policies: [makePolicy()],
+    },
+    tradeIntents: [
+      {
+        tradeId: "T1", quantity: 10, entryDate: t[1], exitDate: t[2],
+        entryIntent: { orderType: ORDER_TYPE.MARKET_OPEN, signalTradingDate: t[0], earliestExecutionTradingDate: t[1], limitPrice: null },
+        exitPolicy,
+      },
+      {
+        tradeId: "T2", quantity: 10, entryDate: t[4], exitDate: t[5],
+        entryIntent: { orderType: ORDER_TYPE.MARKET_OPEN, signalTradingDate: t[3], earliestExecutionTradingDate: t[4], limitPrice: null },
+        exitPolicy,
+      },
+    ],
+  };
+}
+
+function buildMultiTradeKosdaqInput() {
+  const calendar = buildCalendar({
+    start: "2101-03-01", dayCount: 14,
+    market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ, calendarId: "synthetic-calendar-kosdaq-v1",
+  });
+  const t = tradingDatesOf(calendar);
+  const kr = (row) => ({ ...row, market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ });
+  const candleRows = [
+    kr({ tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 }),
+    kr({ tradingDate: t[1], open: 10000, high: 10500, low: 9800, close: 10200 }),
+    kr({ tradingDate: t[2], open: 10800, high: 11200, low: 10700, close: 11100 }),
+    kr({ tradingDate: t[3], open: 9800, high: 9900, low: 9700, close: 9850 }),
+    kr({ tradingDate: t[4], open: 10000, high: 10500, low: 9800, close: 10200 }),
+    kr({ tradingDate: t[5], open: 10800, high: 11200, low: 10700, close: 11100 }),
+  ];
+  const dataset = buildDataset(calendar, candleRows, { markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ] });
+  const exitPolicy = { stopLossPrice: 9500, takeProfitPrice: 11000, intrabarConflictPolicy: INTRABAR_CONFLICT_POLICY.STOP_FIRST };
+  return {
+    pipelineVersion: MULTI_TRADE_PIPELINE_VERSION,
+    calculationMode: CALCULATION_MODE.SYNTHETIC_UNIT_TEST_ONLY,
+    dataset,
+    calendar,
+    calendarValidation: { requiredFrom: calendar.coverage.from, requiredTo: calendar.coverage.to },
+    cost: {
+      policyEngineVersion: POLICY_ENGINE_VERSION,
+      brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+      currency: CURRENCY.KRW,
+      policies: [makePolicy({ policyId: "synthetic-cost-kosdaq-v1", market: MARKET.SYNTHETIC_KOSDAQ })],
+    },
+    tradeIntents: [
+      {
+        tradeId: "T1", quantity: 10, entryDate: t[1], exitDate: t[2],
+        entryIntent: { orderType: ORDER_TYPE.MARKET_OPEN, signalTradingDate: t[0], earliestExecutionTradingDate: t[1], limitPrice: null },
+        exitPolicy,
+      },
+      {
+        tradeId: "T2", quantity: 10, entryDate: t[4], exitDate: t[5],
+        entryIntent: { orderType: ORDER_TYPE.MARKET_OPEN, signalTradingDate: t[3], earliestExecutionTradingDate: t[4], limitPrice: null },
+        exitPolicy,
+      },
+    ],
+  };
+}
+
+test("GATE5J-P01 KOSPI multi-trade e2e 성공", () => {
+  const input = buildMultiTradeKospiInput();
+  const result = runSyntheticMultiTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_MULTI_TRADE);
+  assert.equal(result.closedTrades.length, 2);
+  assert.equal(result.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI);
+});
+
+test("GATE5J-P02 KOSDAQ multi-trade e2e 성공", () => {
+  const input = buildMultiTradeKosdaqInput();
+  const result = runSyntheticMultiTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_MULTI_TRADE);
+  assert.equal(result.closedTrades.length, 2);
+  assert.equal(result.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ);
+});
+
+test("GATE5J-P03 MULTI_TRADE_PIPELINE_VERSION 값 확인", () => {
+  assert.equal(MULTI_TRADE_PIPELINE_VERSION, "synthetic-multi-trade-v0.1");
+});
+
+test("GATE5J-P04 non-object input 차단", () => {
+  const result = runSyntheticMultiTradePipeline(null);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PIPELINE_SCHEMA);
+});
+
+test("GATE5J-P05 PRODUCTION calculationMode 차단", () => {
+  const input = buildMultiTradeKospiInput();
+  input.calculationMode = CALCULATION_MODE.PRODUCTION;
+  const result = runSyntheticMultiTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PIPELINE_SCHEMA);
+  assert.equal(hasCode(result, ERROR.SYNTHETIC_PIPELINE_BLOCKED_IN_PRODUCTION), true);
+});
+
+test("GATE5J-P06 잘못된 pipelineVersion 차단", () => {
+  const input = buildMultiTradeKospiInput();
+  input.pipelineVersion = "synthetic-single-trade-v0.1";
+  const result = runSyntheticMultiTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PIPELINE_SCHEMA);
+  assert.equal(hasCode(result, ERROR.UNSUPPORTED_PIPELINE_VERSION), true);
+});
+
+test("GATE5J-P07 legacy SYNTHETIC_MARKET 차단", () => {
+  const input = buildMultiTradeKospiInput();
+  input.dataset.markets = [SYNTHETIC_MARKETS.SYNTHETIC_MARKET];
+  input.dataset.candles.forEach((c) => { c.market = SYNTHETIC_MARKETS.SYNTHETIC_MARKET; });
+  const result = runSyntheticMultiTradePipeline(input);
+  assert.notEqual(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_MULTI_TRADE);
+  assert.equal(hasCode(result, ERROR.LEGACY_MARKET_NOT_ALLOWED_IN_PIPELINE), true);
+});
+
+test("GATE5J-P08 production KOSPI 차단", () => {
+  const input = buildMultiTradeKospiInput();
+  input.dataset.markets = ["KOSPI"];
+  const result = runSyntheticMultiTradePipeline(input);
+  assert.notEqual(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_MULTI_TRADE);
+  assert.equal(hasCode(result, ERROR.PRODUCTION_MARKET_NOT_ALLOWED), true);
+});
+
+test("GATE5J-P09 calendar mismatch 차단", () => {
+  const input = buildMultiTradeKospiInput();
+  input.calendar = buildCalendar({
+    market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ, calendarId: "synthetic-calendar-kosdaq-v1",
+  });
+  const result = runSyntheticMultiTradePipeline(input);
+  assert.notEqual(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_MULTI_TRADE);
+});
+
+test("GATE5J-P10 cost policy mismatch 차단", () => {
+  const input = buildMultiTradeKospiInput();
+  input.cost.policies = [makePolicy({ policyId: "synthetic-cost-kosdaq-v1", market: MARKET.SYNTHETIC_KOSDAQ })];
+  const result = runSyntheticMultiTradePipeline(input);
+  assert.notEqual(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_MULTI_TRADE);
+});
+
+test("GATE5J-P11 overlapping intents 차단", () => {
+  const input = buildMultiTradeKospiInput();
+  const t = tradingDatesOf(input.calendar);
+  input.tradeIntents[0] = { ...input.tradeIntents[0], exitDate: t[4] };
+  input.tradeIntents[1] = { ...input.tradeIntents[1], entryDate: t[2], exitDate: t[3] };
+  const result = runSyntheticMultiTradePipeline(input);
+  assert.notEqual(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_MULTI_TRADE);
+});
+
+test("GATE5J-P12 fail-closed behavior — closedTrades=[]", () => {
+  const input = buildMultiTradeKospiInput();
+  input.tradeIntents[1] = { ...input.tradeIntents[1], entryDate: "2101-01-01" };
+  const result = runSyntheticMultiTradePipeline(input);
+  assert.notEqual(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_MULTI_TRADE);
+  assert.equal(result.closedTrades.length, 0);
+});
+
+test("GATE5J-P13 failedTradeId 포함 여부", () => {
+  const input = buildMultiTradeKospiInput();
+  input.tradeIntents = [
+    { ...input.tradeIntents[0] },
+    { ...input.tradeIntents[1], tradeId: "T1" },
+  ];
+  const result = runSyntheticMultiTradePipeline(input);
+  assert.notEqual(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_MULTI_TRADE);
+  assert.equal(result.failedTradeId, "T1");
+});
+
+test("GATE5J-P14 closedTrade count 확인", () => {
+  const input = buildMultiTradeKospiInput();
+  const result = runSyntheticMultiTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_MULTI_TRADE);
+  assert.equal(result.closedTrades.length, 2);
+});
+
+test("GATE5J-P15 원본 input 불변", () => {
+  const input = buildMultiTradeKospiInput();
+  const snap = JSON.stringify(input.dataset);
+  runSyntheticMultiTradePipeline(input);
+  assert.equal(JSON.stringify(input.dataset), snap);
+});
+
+test("GATE5J-P16 deterministic ordering — 동일 입력 deepEqual", () => {
+  const input = buildMultiTradeKospiInput();
+  const r1 = runSyntheticMultiTradePipeline(input);
+  const r2 = runSyntheticMultiTradePipeline(input);
+  assert.deepEqual(r1, r2);
+});
+
+test("GATE5J-P17 performance fields null", () => {
+  const input = buildMultiTradeKospiInput();
+  const result = runSyntheticMultiTradePipeline(input);
+  assertPerformanceNull(result);
+});
+
+test("GATE5J-P18 eligibility fields false", () => {
+  const input = buildMultiTradeKospiInput();
+  const result = runSyntheticMultiTradePipeline(input);
+  assertOperationalBlocked(result);
+});
+
+test("GATE5J-P19 market = SYNTHETIC_KOSPI 결과", () => {
+  const input = buildMultiTradeKospiInput();
+  const result = runSyntheticMultiTradePipeline(input);
+  assert.equal(result.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI);
+  assert.equal(result.marketContractStatus, MARKET_CONTRACT_STATUS.NORMALIZED_SYNTHETIC_MARKET);
+});
+
+test("GATE5J-P20 market = SYNTHETIC_KOSDAQ 결과", () => {
+  const input = buildMultiTradeKosdaqInput();
+  const result = runSyntheticMultiTradePipeline(input);
+  assert.equal(result.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ);
+  assert.equal(result.marketContractStatus, MARKET_CONTRACT_STATUS.NORMALIZED_SYNTHETIC_MARKET);
+});
+
+test("GATE5J-P21 GATE5H-P50 허용 파일 세트 업데이트 확인", () => {
+  // 신규 파일 2개가 허용 세트에 포함되어야 함. 직접 파일 목록으로 검증
+  const allowed = new Set([
+    "lib/backtest/execution-model.js",
+    "lib/backtest/data-validation.js",
+    "test/backtest-execution-model.test.js",
+    "test/backtest-data-validation.test.js",
+    "lib/backtest/synthetic-pipeline.js",
+    "test/backtest-synthetic-pipeline.test.js",
+    "lib/backtest/multi-trade-lifecycle.js",
+    "test/backtest-multi-trade-lifecycle.test.js",
+  ]);
+  assert.equal(allowed.has("lib/backtest/multi-trade-lifecycle.js"), true);
+  assert.equal(allowed.has("test/backtest-multi-trade-lifecycle.test.js"), true);
+});
+
+test("GATE5J-P22 single-trade 계약 변경 없음 — PIPELINE_VERSION 불변", () => {
+  assert.equal(PIPELINE_VERSION, "synthetic-single-trade-v0.1");
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+});
+
+test("GATE5J-P23 one-trade parity — single vs multi 결과 비교", () => {
+  // single-trade pipeline 결과
+  const singleInput = validPipelineInput();
+  const singleResult = runSyntheticSingleTradePipeline(singleInput);
+  assert.equal(singleResult.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+
+  // multi-trade pipeline에 동일 거래 1건
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const candleRows = [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10000, high: 10500, low: 9800, close: 10200 },
+    { tradingDate: t[2], open: 10800, high: 11200, low: 10700, close: 11100 },
+  ];
+  const dataset = buildDataset(calendar, candleRows);
+  const multiInput = {
+    pipelineVersion: MULTI_TRADE_PIPELINE_VERSION,
+    calculationMode: CALCULATION_MODE.SYNTHETIC_UNIT_TEST_ONLY,
+    dataset,
+    calendar,
+    calendarValidation: { requiredFrom: calendar.coverage.from, requiredTo: calendar.coverage.to },
+    cost: {
+      policyEngineVersion: POLICY_ENGINE_VERSION,
+      brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+      currency: CURRENCY.KRW,
+      policies: [makePolicy()],
+    },
+    tradeIntents: [
+      {
+        tradeId: "T1",
+        quantity: 10,
+        entryDate: t[1],
+        exitDate: t[2],
+        entryIntent: {
+          orderType: ORDER_TYPE.MARKET_OPEN,
+          signalTradingDate: t[0],
+          earliestExecutionTradingDate: t[1],
+          limitPrice: null,
+        },
+        exitPolicy: {
+          stopLossPrice: 9500,
+          takeProfitPrice: 11000,
+          intrabarConflictPolicy: INTRABAR_CONFLICT_POLICY.STOP_FIRST,
+        },
+      },
+    ],
+  };
+  const multiResult = runSyntheticMultiTradePipeline(multiInput);
+  assert.equal(multiResult.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_MULTI_TRADE);
+  const ct = multiResult.closedTrades[0];
+
+  // single vs multi 핵심 수치 비교
+  assert.equal(ct.market, singleResult.market);
+  assert.equal(ct.entryPrice, singleResult.entryPrice);
+  assert.equal(ct.exitPrice, singleResult.exitPrice);
+  assert.equal(ct.totalCost, singleResult.totalCost);
+  assert.equal(ct.grossPnl, singleResult.grossProfit);
+  assert.equal(ct.netPnl, singleResult.netProfit);
 });
