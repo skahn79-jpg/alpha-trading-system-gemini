@@ -21,7 +21,6 @@ const {
   createSyntheticPipelineResult,
   makeSafePipelineError,
   mapCandleForExecution,
-  mapCandleMarketForExecution,
   isDataStagePassed,
   isNoEntryExecution,
   isOpenPositionExecution,
@@ -58,6 +57,9 @@ const {
   ENTRY_REASON,
   EXIT_REASON,
   STATUS: EXEC_STATUS,
+  evaluateDailyBarExecution,
+  ERROR: EXEC_ERROR,
+  MARKET_CONTRACT_STATUS,
 } = require("../lib/backtest/execution-model");
 
 const {
@@ -333,6 +335,62 @@ function validPipelineInput(overrides) {
   return { ...out, ...overrides };
 }
 
+function validKosdaqPipelineInput(overrides) {
+  const calendar = buildCalendar({
+    start: "2101-03-01",
+    dayCount: 14,
+    market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ,
+    calendarId: "synthetic-calendar-kosdaq-v1",
+  });
+  const t = tradingDatesOf(calendar);
+  const dataset = buildDataset(
+    calendar,
+    fullTradeCandles(calendar).map((row) => ({
+      ...row,
+      market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ,
+    })),
+    { markets: [SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ] },
+  );
+  const base = {
+    pipelineVersion: PIPELINE_VERSION,
+    calculationMode: CALCULATION_MODE.SYNTHETIC_UNIT_TEST_ONLY,
+    dataset,
+    calendar,
+    calendarValidation: {
+      requiredFrom: calendar.coverage.from,
+      requiredTo: calendar.coverage.to,
+    },
+    execution: {
+      modelVersion: MODEL_VERSION,
+      side: SIDE.LONG,
+      entryIntent: {
+        orderType: ORDER_TYPE.MARKET_OPEN,
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: t[1],
+        limitPrice: null,
+      },
+      exitPolicy: {
+        stopLossPrice: 9500,
+        takeProfitPrice: 11000,
+        intrabarConflictPolicy: INTRABAR_CONFLICT_POLICY.STOP_FIRST,
+      },
+      quantity: 10,
+    },
+    cost: {
+      policyEngineVersion: POLICY_ENGINE_VERSION,
+      brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+      currency: CURRENCY.KRW,
+      policies: [makePolicy({
+        policyId: "synthetic-cost-kosdaq-v1",
+        market: MARKET.SYNTHETIC_KOSDAQ,
+      })],
+    },
+  };
+  if (!overrides) return base;
+  const out = deepClone(base);
+  return { ...out, ...overrides };
+}
+
 function assertOperationalBlocked(result) {
   assert.equal(result.calendarVerified, false);
   assert.equal(result.datasetVerified, false);
@@ -438,7 +496,7 @@ test("GATE5G-10 실제 시장명 혼용 차단", () => {
   input.dataset.markets = ["KOSPI"];
   const result = validateSyntheticPipelineInput(input);
   assert.equal(result.ok, false);
-  assert.equal(hasCode(result, ERROR.MULTI_MARKET_PIPELINE_NOT_SUPPORTED), true);
+  assert.equal(hasCode(result, ERROR.PRODUCTION_MARKET_NOT_ALLOWED), true);
 });
 
 // 11
@@ -1198,7 +1256,8 @@ test("GATE5G-73 buildExecutionInput 정상", () => {
   };
   const execInput = buildExecutionInput(input, dataResult);
   assert.equal(execInput.calculationMode, CALCULATION_MODE.SYNTHETIC_UNIT_TEST_ONLY);
-  assert.equal(execInput.candles[0].market, "SYNTHETIC_MARKET");
+  assert.equal(execInput.candles[0].market, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI);
+  assert.equal(execInput.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI);
   assert.equal(input.dataset.candles[0].market, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI);
 });
 
@@ -1291,7 +1350,9 @@ test("GATE5G-81 makeSafePipelineError 화이트리스트", () => {
 
 // helper: mapCandleMarketForExecution
 test("GATE5G-82 mapCandleMarketForExecution KOSPI→MARKET", () => {
-  assert.equal(mapCandleMarketForExecution(SYNTHETIC_MARKETS.SYNTHETIC_KOSPI), "SYNTHETIC_MARKET");
+  assert.equal(Object.hasOwn(pipeline, "mapCandleMarketForExecution"), false);
+  const execInput = buildExecutionInput(validPipelineInput(), { schemaValid: true });
+  assert.equal(execInput.candles[0].market, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI);
 });
 
 // helper: isDataStagePassed
@@ -1330,4 +1391,351 @@ test("GATE5G-86 isFullTradeExecution", () => {
     entryStatus: ENTRY_STATUS.FILLED,
     exitStatus: EXIT_STATUS.FILLED,
   }), true);
+});
+
+test("GATE5H-P17 KOSPI 정상 단일 거래", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+  assert.equal(result.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI);
+  assert.equal(result.marketContractStatus, MARKET_CONTRACT_STATUS.NORMALIZED_SYNTHETIC_MARKET);
+});
+
+test("GATE5H-P18 KOSDAQ 정상 단일 거래", () => {
+  const result = runSyntheticSingleTradePipeline(validKosdaqPipelineInput());
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+  assert.equal(result.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ);
+  assert.equal(result.marketContractStatus, MARKET_CONTRACT_STATUS.NORMALIZED_SYNTHETIC_MARKET);
+});
+
+test("GATE5H-P19 KOSPI dataset→calendar 일치", () => {
+  const input = validPipelineInput();
+  assert.equal(input.dataset.markets[0], SYNTHETIC_MARKETS.SYNTHETIC_KOSPI);
+  assert.equal(input.calendar.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI);
+  assert.equal(input.dataset.markets[0], input.calendar.market);
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+});
+
+test("GATE5H-P20 KOSPI dataset→execution 일치", () => {
+  const input = validPipelineInput();
+  const execInput = buildExecutionInput(input, { schemaValid: true });
+  assert.equal(execInput.market, input.dataset.markets[0]);
+  assert.equal(execInput.candles.every((c) => c.market === input.dataset.markets[0]), true);
+  assert.equal(execInput.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI);
+});
+
+test("GATE5H-P21 KOSPI execution→cost 일치", () => {
+  const input = validPipelineInput();
+  const built = buildCostInput(input, {
+    ok: true,
+    entryStatus: ENTRY_STATUS.FILLED,
+    exitStatus: EXIT_STATUS.FILLED,
+    entryTradingDate: "2101-03-02",
+    exitTradingDate: "2101-03-03",
+    entryPrice: 10000,
+    exitPrice: 11000,
+  });
+  assert.equal(built.ok, true);
+  assert.equal(built.input.market, input.dataset.markets[0]);
+  assert.equal(built.input.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI);
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+});
+
+test("GATE5H-P22 KOSPI result market 유지", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI);
+  assert.notEqual(result.market, SYNTHETIC_MARKETS.SYNTHETIC_MARKET);
+});
+
+test("GATE5H-P23 KOSDAQ dataset→calendar 일치", () => {
+  const input = validKosdaqPipelineInput();
+  assert.equal(input.dataset.markets[0], SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ);
+  assert.equal(input.calendar.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ);
+  assert.equal(input.dataset.markets[0], input.calendar.market);
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+});
+
+test("GATE5H-P24 KOSDAQ dataset→execution 일치", () => {
+  const input = validKosdaqPipelineInput();
+  const execInput = buildExecutionInput(input, { schemaValid: true });
+  assert.equal(execInput.market, input.dataset.markets[0]);
+  assert.equal(execInput.candles.every((c) => c.market === input.dataset.markets[0]), true);
+  assert.equal(execInput.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ);
+});
+
+test("GATE5H-P25 KOSDAQ execution→cost 일치", () => {
+  const input = validKosdaqPipelineInput();
+  const built = buildCostInput(input, {
+    ok: true,
+    entryStatus: ENTRY_STATUS.FILLED,
+    exitStatus: EXIT_STATUS.FILLED,
+    entryTradingDate: "2101-03-02",
+    exitTradingDate: "2101-03-03",
+    entryPrice: 10000,
+    exitPrice: 11000,
+  });
+  assert.equal(built.ok, true);
+  assert.equal(built.input.market, input.dataset.markets[0]);
+  assert.equal(built.input.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ);
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+});
+
+test("GATE5H-P26 KOSDAQ result market 유지", () => {
+  const result = runSyntheticSingleTradePipeline(validKosdaqPipelineInput());
+  assert.equal(result.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ);
+  assert.notEqual(result.market, SYNTHETIC_MARKETS.SYNTHETIC_MARKET);
+});
+
+test("GATE5H-P27 파이프라인에서 SYNTHETIC_MARKET 매핑 없음", () => {
+  assert.equal(Object.hasOwn(pipeline, "mapCandleMarketForExecution"), false);
+  const input = validPipelineInput();
+  const execInput = buildExecutionInput(input, { schemaValid: true });
+  assert.equal(execInput.candles[0].market, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI);
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.notEqual(result.market, SYNTHETIC_MARKETS.SYNTHETIC_MARKET);
+});
+
+test("GATE5H-P28 레거시 SYNTHETIC_MARKET 파이프라인 차단", () => {
+  const input = validPipelineInput();
+  input.dataset.markets = [SYNTHETIC_MARKETS.SYNTHETIC_MARKET];
+  input.dataset.candles.forEach((c) => {
+    c.market = SYNTHETIC_MARKETS.SYNTHETIC_MARKET;
+  });
+  const result = validateSyntheticPipelineInput(input);
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.LEGACY_MARKET_NOT_ALLOWED_IN_PIPELINE), true);
+});
+
+test("GATE5H-P29 실제 KOSPI 파이프라인 차단", () => {
+  const input = validPipelineInput();
+  input.dataset.markets = ["KOSPI"];
+  const result = validateSyntheticPipelineInput(input);
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.PRODUCTION_MARKET_NOT_ALLOWED), true);
+});
+
+test("GATE5H-P30 실제 KOSDAQ 파이프라인 차단", () => {
+  const input = validPipelineInput();
+  input.dataset.markets = ["KOSDAQ"];
+  const result = validateSyntheticPipelineInput(input);
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.PRODUCTION_MARKET_NOT_ALLOWED), true);
+});
+
+test("GATE5H-P31 KOSPI 데이터 + KOSDAQ 캘린더", () => {
+  const input = validPipelineInput();
+  input.calendar = buildCalendar({
+    market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ,
+    calendarId: "synthetic-calendar-kosdaq-v1",
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_DATA_STAGE);
+  assert.equal(hasCode(result, "CALENDAR_MARKET_MISMATCH"), true);
+  assert.equal(result.executionStageStatus, STAGE_STATUS.NOT_STARTED);
+  assert.equal(result.costStageStatus, STAGE_STATUS.NOT_STARTED);
+  assert.notEqual(result.market, SYNTHETIC_MARKETS.SYNTHETIC_MARKET);
+  assert.notEqual(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+});
+
+test("GATE5H-P32 KOSPI 데이터 + KOSDAQ 비용정책", () => {
+  const input = validPipelineInput();
+  input.cost.policies = [makePolicy({
+    policyId: "synthetic-cost-kosdaq-v1",
+    market: MARKET.SYNTHETIC_KOSDAQ,
+  })];
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_COST_STAGE);
+  assert.equal(hasCode(result, COST_ERROR.COST_POLICY_MARKET_MISMATCH), true);
+  assert.notEqual(result.market, SYNTHETIC_MARKETS.SYNTHETIC_MARKET);
+});
+
+test("GATE5H-P33 KOSPI 캔들 + KOSDAQ execution", () => {
+  const input = validPipelineInput();
+  input.dataset.markets = [SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ];
+  const execInput = buildExecutionInput(input, { schemaValid: true });
+  assert.equal(execInput.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ);
+  assert.equal(execInput.candles[0].market, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI);
+  const execResult = evaluateDailyBarExecution(execInput);
+  assert.equal(execResult.ok, false);
+  assert.equal(hasCode(execResult, EXEC_ERROR.EXECUTION_MARKET_MISMATCH), true);
+});
+
+test("GATE5H-P34 KOSDAQ 데이터 + KOSPI 캘린더", () => {
+  const input = validKosdaqPipelineInput();
+  input.calendar = buildCalendar({
+    market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI,
+    calendarId: "synthetic-calendar-kospi-v1",
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_DATA_STAGE);
+  assert.equal(hasCode(result, "CALENDAR_MARKET_MISMATCH"), true);
+  assert.equal(result.executionStageStatus, STAGE_STATUS.NOT_STARTED);
+  assert.equal(result.costStageStatus, STAGE_STATUS.NOT_STARTED);
+  assert.notEqual(result.market, SYNTHETIC_MARKETS.SYNTHETIC_MARKET);
+});
+
+test("GATE5H-P35 KOSDAQ 데이터 + KOSPI 비용정책", () => {
+  const input = validKosdaqPipelineInput();
+  input.cost.policies = [makePolicy({
+    policyId: "synthetic-cost-kospi-v1",
+    market: MARKET.SYNTHETIC_KOSPI,
+  })];
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_COST_STAGE);
+  assert.equal(hasCode(result, COST_ERROR.COST_POLICY_MARKET_MISMATCH), true);
+  assert.notEqual(result.market, SYNTHETIC_MARKETS.SYNTHETIC_MARKET);
+});
+
+test("GATE5H-P36 KOSDAQ 캔들 + KOSPI execution", () => {
+  const input = validKosdaqPipelineInput();
+  input.dataset.markets = [SYNTHETIC_MARKETS.SYNTHETIC_KOSPI];
+  const execInput = buildExecutionInput(input, { schemaValid: true });
+  assert.equal(execInput.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI);
+  assert.equal(execInput.candles[0].market, SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ);
+  const execResult = evaluateDailyBarExecution(execInput);
+  assert.equal(execResult.ok, false);
+  assert.equal(hasCode(execResult, EXEC_ERROR.EXECUTION_MARKET_MISMATCH), true);
+});
+
+test("GATE5H-P37 혼합 시장 캔들 배열", () => {
+  const input = validPipelineInput();
+  input.dataset.candles[1].market = SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ;
+  input.dataset.contentChecksum = computeDatasetContentChecksum(input.dataset);
+  input.dataset.metadataHash = computeDatasetMetadataHash(input.dataset);
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(
+    result.pipelineStatus === PIPELINE_STATUS.BLOCKED_DATA_STAGE
+      || hasCode(result, ERROR.PIPELINE_MARKET_INVARIANT_VIOLATION),
+    true,
+  );
+  assert.equal(result.costStageStatus, STAGE_STATUS.NOT_STARTED);
+  assert.notEqual(result.market, SYNTHETIC_MARKETS.SYNTHETIC_MARKET);
+  assert.notEqual(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+});
+
+test("GATE5H-P38 복수 시장 데이터셋", () => {
+  const input = validPipelineInput();
+  input.dataset.markets = [
+    SYNTHETIC_MARKETS.SYNTHETIC_KOSPI,
+    SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ,
+  ];
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PIPELINE_SCHEMA);
+  assert.equal(hasCode(result, ERROR.MULTI_MARKET_PIPELINE_NOT_SUPPORTED), true);
+});
+
+test("GATE5H-P39 시장 불일치 후 fallback 없음", () => {
+  const input = validPipelineInput();
+  input.calendar = buildCalendar({
+    market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ,
+    calendarId: "synthetic-calendar-kosdaq-v1",
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.notEqual(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+  assert.notEqual(result.market, SYNTHETIC_MARKETS.SYNTHETIC_MARKET);
+  const dumped = JSON.stringify(result);
+  assert.equal(dumped.includes(PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE), false);
+});
+
+test("GATE5H-P40 시장 불일치 후 비용 단계 미실행", () => {
+  const input = validPipelineInput();
+  input.calendar = buildCalendar({
+    market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ,
+    calendarId: "synthetic-calendar-kosdaq-v1",
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.costStageStatus, STAGE_STATUS.NOT_STARTED);
+});
+
+test("GATE5H-P41 원본 dataset 불변", () => {
+  const input = validPipelineInput();
+  const snap = JSON.stringify(input.dataset);
+  runSyntheticSingleTradePipeline(input);
+  assert.equal(JSON.stringify(input.dataset), snap);
+});
+
+test("GATE5H-P42 원본 calendar 불변", () => {
+  const input = validPipelineInput();
+  const snap = JSON.stringify(input.calendar);
+  runSyntheticSingleTradePipeline(input);
+  assert.equal(JSON.stringify(input.calendar), snap);
+});
+
+test("GATE5H-P43 원본 cost policies 불변", () => {
+  const input = validPipelineInput();
+  const snap = JSON.stringify(input.cost.policies);
+  runSyntheticSingleTradePipeline(input);
+  assert.equal(JSON.stringify(input.cost.policies), snap);
+});
+
+test("GATE5H-P44 KOSDAQ 경로 원본 불변", () => {
+  const input = validKosdaqPipelineInput();
+  const snap = JSON.stringify(input);
+  runSyntheticSingleTradePipeline(input);
+  assert.equal(JSON.stringify(input), snap);
+});
+
+test("GATE5H-P45 execution 입력 캔들 복사 후 원본 market 유지", () => {
+  const input = validPipelineInput();
+  const originalMarket = input.dataset.candles[0].market;
+  const execInput = buildExecutionInput(input, { schemaValid: true });
+  execInput.candles[0].market = SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ;
+  assert.equal(input.dataset.candles[0].market, originalMarket);
+  assert.equal(input.dataset.candles[0].market, SYNTHETIC_MARKETS.SYNTHETIC_KOSPI);
+});
+
+test("GATE5H-P46 동일 입력 동일 결과", () => {
+  const kospi = validPipelineInput();
+  assert.deepEqual(
+    runSyntheticSingleTradePipeline(kospi),
+    runSyntheticSingleTradePipeline(kospi),
+  );
+  const kosdaq = validKosdaqPipelineInput();
+  assert.deepEqual(
+    runSyntheticSingleTradePipeline(kosdaq),
+    runSyntheticSingleTradePipeline(kosdaq),
+  );
+});
+
+test("GATE5H-P47 운영 적격성 false", () => {
+  assertOperationalBlocked(runSyntheticSingleTradePipeline(validPipelineInput()));
+  assertOperationalBlocked(runSyntheticSingleTradePipeline(validKosdaqPipelineInput()));
+});
+
+test("GATE5H-P48 성과 null", () => {
+  assertPerformanceNull(runSyntheticSingleTradePipeline(validPipelineInput()));
+  assertPerformanceNull(runSyntheticSingleTradePipeline(validKosdaqPipelineInput()));
+});
+
+test("GATE5H-P49 네트워크·주문 참조 없음", () => {
+  const src = fs.readFileSync(PIPELINE_PATH, "utf8");
+  assert.equal(src.includes("require(\"http\")"), false);
+  assert.equal(src.includes("require(\"https\")"), false);
+  assert.equal(src.includes("axios"), false);
+  assert.equal(src.includes("fetch("), false);
+  assert.equal(src.includes("placeOrder"), false);
+  assert.equal(src.includes("submitOrder"), false);
+});
+
+test("GATE5H-P50 허용 파일 외 변경 없음", () => {
+  const { execFileSync } = require("node:child_process");
+  const names = execFileSync("git", ["diff", "--name-only", "HEAD"], {
+    encoding: "utf8",
+    cwd: path.join(__dirname, ".."),
+  })
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+  const allowed = new Set([
+    "lib/backtest/execution-model.js",
+    "test/backtest-execution-model.test.js",
+    "lib/backtest/synthetic-pipeline.js",
+    "test/backtest-synthetic-pipeline.test.js",
+  ]);
+  for (const name of names) {
+    assert.equal(allowed.has(name), true, name);
+  }
 });

@@ -33,6 +33,8 @@ const {
   ORDER_TYPE,
   SIDE,
   MISSING_DATA,
+  MARKET,
+  MARKET_CONTRACT_STATUS,
 } = exec;
 
 function hasCode(result, code) {
@@ -115,6 +117,14 @@ function assertNeverEligible(result) {
   assert.equal(result.paperEligible, false);
   assert.equal(result.liveEligible, false);
   assert.equal(result.executionStatus, STATUS.NOT_EXECUTED);
+}
+
+function candlesForMarket(market) {
+  return [
+    candle("2101-01-04", 100, 105, 95, 102, { market }),
+    candle("2101-01-05", 102, 108, 100, 104, { market }),
+    candle("2101-01-06", 104, 110, 101, 106, { market }),
+  ];
 }
 
 // 1
@@ -1000,4 +1010,269 @@ test("존재하지 않는 날짜 거부", () => {
   }));
   assert.equal(result.ok, false);
   assert.equal(hasCode(result, ERROR.INVALID_TRADING_DATE), true);
+});
+
+test("GATE5H-E01 SYNTHETIC_KOSPI MARKET_OPEN", () => {
+  const result = evaluateDailyBarExecution(validInput({
+    market: MARKET.SYNTHETIC_KOSPI,
+    candles: candlesForMarket(MARKET.SYNTHETIC_KOSPI),
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.entryStatus, ENTRY_STATUS.FILLED);
+  assert.equal(result.entryReason, ENTRY_REASON.MARKET_OPEN_NEXT_ELIGIBLE_BAR);
+  assert.equal(result.market, MARKET.SYNTHETIC_KOSPI);
+});
+
+test("GATE5H-E02 SYNTHETIC_KOSDAQ MARKET_OPEN", () => {
+  const result = evaluateDailyBarExecution(validInput({
+    market: MARKET.SYNTHETIC_KOSDAQ,
+    candles: candlesForMarket(MARKET.SYNTHETIC_KOSDAQ),
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.entryStatus, ENTRY_STATUS.FILLED);
+  assert.equal(result.entryReason, ENTRY_REASON.MARKET_OPEN_NEXT_ELIGIBLE_BAR);
+  assert.equal(result.market, MARKET.SYNTHETIC_KOSDAQ);
+});
+
+test("GATE5H-E03 SYNTHETIC_KOSPI LIMIT_BUY", () => {
+  const kospi = MARKET.SYNTHETIC_KOSPI;
+  const result = evaluateDailyBarExecution(validInput({
+    market: kospi,
+    entryIntent: {
+      orderType: ORDER_TYPE.LIMIT_BUY,
+      limitPrice: 100,
+    },
+    candles: [
+      candle("2101-01-04", 99, 101, 98, 100, { market: kospi }),
+      candle("2101-01-05", 100, 102, 99, 101, { market: kospi }),
+      candle("2101-01-06", 101, 103, 100, 102, { market: kospi }),
+    ],
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.entryStatus, ENTRY_STATUS.FILLED);
+  assert.equal(result.entryReason, ENTRY_REASON.LIMIT_BUY_GAP_IMPROVEMENT);
+  assert.equal(result.entryPrice, 99);
+  assert.equal(result.market, kospi);
+});
+
+test("GATE5H-E04 SYNTHETIC_KOSDAQ LIMIT_BUY", () => {
+  const kosdaq = MARKET.SYNTHETIC_KOSDAQ;
+  const result = evaluateDailyBarExecution(validInput({
+    market: kosdaq,
+    entryIntent: {
+      orderType: ORDER_TYPE.LIMIT_BUY,
+      limitPrice: 100,
+    },
+    candles: [
+      candle("2101-01-04", 99, 101, 98, 100, { market: kosdaq }),
+      candle("2101-01-05", 100, 102, 99, 101, { market: kosdaq }),
+      candle("2101-01-06", 101, 103, 100, 102, { market: kosdaq }),
+    ],
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.entryStatus, ENTRY_STATUS.FILLED);
+  assert.equal(result.entryReason, ENTRY_REASON.LIMIT_BUY_GAP_IMPROVEMENT);
+  assert.equal(result.entryPrice, 99);
+  assert.equal(result.market, kosdaq);
+});
+
+test("GATE5H-E05 결과 market KOSPI 보존", () => {
+  const result = evaluateDailyBarExecution(validInput({
+    candles: candlesForMarket(MARKET.SYNTHETIC_KOSPI),
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.market, MARKET.SYNTHETIC_KOSPI);
+  assert.notEqual(result.market, MARKET.SYNTHETIC_MARKET);
+});
+
+test("GATE5H-E06 결과 market KOSDAQ 보존", () => {
+  const result = evaluateDailyBarExecution(validInput({
+    candles: candlesForMarket(MARKET.SYNTHETIC_KOSDAQ),
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.market, MARKET.SYNTHETIC_KOSDAQ);
+  assert.notEqual(result.market, MARKET.SYNTHETIC_MARKET);
+});
+
+test("GATE5H-E07 KOSPI marketContractStatus 정상", () => {
+  const result = evaluateDailyBarExecution(validInput({
+    market: MARKET.SYNTHETIC_KOSPI,
+    candles: candlesForMarket(MARKET.SYNTHETIC_KOSPI),
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.marketContractStatus, MARKET_CONTRACT_STATUS.NORMALIZED_SYNTHETIC_MARKET);
+});
+
+test("GATE5H-E08 KOSDAQ marketContractStatus 정상", () => {
+  const result = evaluateDailyBarExecution(validInput({
+    market: MARKET.SYNTHETIC_KOSDAQ,
+    candles: candlesForMarket(MARKET.SYNTHETIC_KOSDAQ),
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.marketContractStatus, MARKET_CONTRACT_STATUS.NORMALIZED_SYNTHETIC_MARKET);
+});
+
+test("GATE5H-E09 레거시 SYNTHETIC_MARKET 직접 실행 유지", () => {
+  const result = evaluateDailyBarExecution(validInput());
+  assert.equal(result.ok, true);
+  assert.equal(result.market, MARKET.SYNTHETIC_MARKET);
+});
+
+test("GATE5H-E10 레거시 상태 표시", () => {
+  const result = evaluateDailyBarExecution(validInput());
+  assert.equal(result.ok, true);
+  assert.equal(result.marketContractStatus, MARKET_CONTRACT_STATUS.LEGACY_SYNTHETIC_MARKET);
+});
+
+test("GATE5H-E11 실제 KOSPI 차단", () => {
+  const result = evaluateDailyBarExecution(validInput({
+    market: "KOSPI",
+    candles: candlesForMarket("KOSPI"),
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.PRODUCTION_MARKET_NOT_ALLOWED), true);
+  assert.equal(result.market, null);
+});
+
+test("GATE5H-E12 실제 KOSDAQ 차단", () => {
+  const result = evaluateDailyBarExecution(validInput({
+    market: "KOSDAQ",
+    candles: candlesForMarket("KOSDAQ"),
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.PRODUCTION_MARKET_NOT_ALLOWED), true);
+  assert.equal(result.market, null);
+});
+
+test("GATE5H-E13 미지원 시장 차단", () => {
+  const result = evaluateDailyBarExecution(validInput({
+    market: "NASDAQ",
+    candles: candlesForMarket("NASDAQ"),
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.INVALID_MARKET), true);
+});
+
+test("GATE5H-E14 혼합 캔들 시장", () => {
+  const result = evaluateDailyBarExecution(validInput({
+    candles: [
+      candle("2101-01-04", 100, 105, 95, 102, { market: MARKET.SYNTHETIC_KOSPI }),
+      candle("2101-01-05", 102, 108, 100, 104, { market: MARKET.SYNTHETIC_KOSDAQ }),
+      candle("2101-01-06", 104, 110, 101, 106, { market: MARKET.SYNTHETIC_KOSPI }),
+    ],
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.MIXED_EXECUTION_MARKETS), true);
+  assert.equal(result.market, null);
+});
+
+test("GATE5H-E15 명시 시장·캔들 시장 불일치", () => {
+  const result = evaluateDailyBarExecution(validInput({
+    market: MARKET.SYNTHETIC_KOSPI,
+    candles: candlesForMarket(MARKET.SYNTHETIC_KOSDAQ),
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.EXECUTION_MARKET_MISMATCH), true);
+});
+
+test("GATE5H-E16 시장 필드 문자열 외 값 거부", () => {
+  const result = evaluateDailyBarExecution(validInput({ market: 12 }));
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.INVALID_MARKET), true);
+});
+
+test("GATE5H-E17 validateExecutionCandle 정상 SYNTHETIC_KOSPI", () => {
+  const result = validateExecutionCandle(
+    candle("2101-01-04", 100, 105, 95, 102, { market: MARKET.SYNTHETIC_KOSPI }),
+    0,
+  );
+  assert.equal(result.ok, true);
+});
+
+test("GATE5H-E18 validateExecutionCandle 경계 SYNTHETIC_MARKET", () => {
+  const result = validateExecutionCandle(candle("2101-01-04", 100, 105, 95, 102), 0);
+  assert.equal(result.ok, true);
+});
+
+test("GATE5H-E19 validateExecutionCandle 실패 실제 KOSPI", () => {
+  const result = validateExecutionCandle(
+    candle("2101-01-04", 100, 105, 95, 102, { market: "KOSPI" }),
+    0,
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((e) => e.code === ERROR.PRODUCTION_MARKET_NOT_ALLOWED), true);
+});
+
+test("GATE5H-E20 evaluateDailyBarExecution 정상 명시 시장 일치", () => {
+  const result = evaluateDailyBarExecution(validInput({
+    market: MARKET.SYNTHETIC_KOSPI,
+    candles: candlesForMarket(MARKET.SYNTHETIC_KOSPI),
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.market, MARKET.SYNTHETIC_KOSPI);
+  assert.equal(result.marketContractStatus, MARKET_CONTRACT_STATUS.NORMALIZED_SYNTHETIC_MARKET);
+});
+
+test("GATE5H-E21 evaluateDailyBarExecution 경계 상위 시장 생략 후 도출", () => {
+  const result = evaluateDailyBarExecution(validInput({
+    candles: candlesForMarket(MARKET.SYNTHETIC_KOSDAQ),
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.market, MARKET.SYNTHETIC_KOSDAQ);
+});
+
+test("GATE5H-E22 evaluateDailyBarExecution 실패 혼합 시장", () => {
+  const result = evaluateDailyBarExecution(validInput({
+    candles: [
+      candle("2101-01-04", 100, 105, 95, 102, { market: MARKET.SYNTHETIC_KOSPI }),
+      candle("2101-01-05", 102, 108, 100, 104, { market: MARKET.SYNTHETIC_MARKET }),
+      candle("2101-01-06", 104, 110, 101, 106, { market: MARKET.SYNTHETIC_KOSPI }),
+    ],
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.MIXED_EXECUTION_MARKETS), true);
+});
+
+test("GATE5H-E23 NOT_FILLED 경로 시장 보존", () => {
+  const result = evaluateDailyBarExecution(validInput({
+    market: MARKET.SYNTHETIC_KOSPI,
+    entryIntent: {
+      orderType: ORDER_TYPE.LIMIT_BUY,
+      limitPrice: 90,
+    },
+    exitPolicy: { stopLossPrice: 80, takeProfitPrice: 120 },
+    candles: candlesForMarket(MARKET.SYNTHETIC_KOSPI),
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.status, STATUS.NOT_FILLED);
+  assert.equal(result.entryStatus, ENTRY_STATUS.NOT_FILLED);
+  assert.equal(result.market, MARKET.SYNTHETIC_KOSPI);
+});
+
+test("GATE5H-E24 원본 캔들 시장 불변", () => {
+  const candles = Object.freeze(candlesForMarket(MARKET.SYNTHETIC_KOSPI).map((c) => Object.freeze(c)));
+  const snapshot = JSON.stringify(candles);
+  evaluateDailyBarExecution(validInput({
+    market: MARKET.SYNTHETIC_KOSPI,
+    candles,
+  }));
+  assert.equal(JSON.stringify(candles), snapshot);
+  assert.equal(candles[0].market, MARKET.SYNTHETIC_KOSPI);
+});
+
+test("GATE5H-E25 createExecutionResult 기본 시장 필드", () => {
+  const result = createExecutionResult({});
+  assert.equal(result.market, null);
+  assert.equal(result.marketContractStatus, null);
+});
+
+test("GATE5H-E26 차단 경로에서도 알려진 시장 유지", () => {
+  const result = evaluateDailyBarExecution(validInput({
+    market: MARKET.SYNTHETIC_KOSPI,
+    candles: candlesForMarket(MARKET.SYNTHETIC_KOSPI),
+    entryIntent: { earliestExecutionTradingDate: "2101-01-10" },
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.NO_ELIGIBLE_ENTRY_CANDLE), true);
+  assert.equal(result.market, MARKET.SYNTHETIC_KOSPI);
 });
