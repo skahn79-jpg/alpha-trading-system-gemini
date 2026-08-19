@@ -2549,3 +2549,132 @@ test("GATE5K-P22 ledger events integer cash", () => {
   assert.equal(exit.cost, 121);
   assert.equal(exit.cashAfter, 1009869);
 });
+
+function buildMtmMissThreeDayHoldInput() {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const candleRows = [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10000, high: 10500, low: 9800, close: 10200 },
+    { tradingDate: t[3], open: 10000, high: 21000, low: 9900, close: 20000 },
+  ];
+  const dataset = buildDataset(calendar, candleRows);
+  return {
+    pipelineVersion: MULTI_TRADE_PIPELINE_VERSION,
+    calculationMode: CALCULATION_MODE.SYNTHETIC_UNIT_TEST_ONLY,
+    dataset,
+    calendar,
+    calendarValidation: { requiredFrom: calendar.coverage.from, requiredTo: calendar.coverage.to },
+    cost: {
+      policyEngineVersion: POLICY_ENGINE_VERSION,
+      brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+      currency: CURRENCY.KRW,
+      policies: [makePolicy()],
+    },
+    tradeIntents: [{
+      tradeId: "T1",
+      quantity: 10,
+      entryDate: t[1],
+      exitDate: t[3],
+      entryIntent: {
+        orderType: ORDER_TYPE.MARKET_OPEN,
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: t[1],
+        limitPrice: null,
+      },
+      exitPolicy: {
+        stopLossPrice: 9500,
+        takeProfitPrice: 20000,
+        intrabarConflictPolicy: INTRABAR_CONFLICT_POLICY.STOP_FIRST,
+      },
+    }],
+    initialCapital: 1000000,
+  };
+}
+
+test("GATE5K-R01 two-trade second qty=20 insufficient cash", () => {
+  const input = buildPortfolioKospiInput({ initialCapital: 150000 });
+  input.tradeIntents = [
+    { ...input.tradeIntents[0] },
+    { ...input.tradeIntents[1], quantity: 20 },
+  ];
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(hasCode(result, "INSUFFICIENT_CASH"), true);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PORTFOLIO_LEDGER);
+  assert.equal(result.closedTrades.length, 2);
+  assert.equal(result.closedTrades[0].tradeId, "T1");
+});
+
+test("GATE5K-R02 ledger block is not a COMPLETED_* success", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 50000 });
+  const result = runSyntheticPortfolioLedger(input);
+  assert.notEqual(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  assert.equal(String(result.pipelineStatus).startsWith("COMPLETED_"), false);
+  assert.equal(result.capitalConstraintApplied, false);
+});
+
+test("GATE5K-R03 ledger block official cash/equity are null", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 50000 });
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PORTFOLIO_LEDGER);
+  assert.equal(result.finalCash, null);
+  assert.equal(result.finalEquity, null);
+});
+
+test("GATE5K-R09 MTM candle miss → BLOCKED_PORTFOLIO_LEDGER", () => {
+  const input = buildMtmMissThreeDayHoldInput();
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(hasCode(result, "MTM_CANDLE_NOT_FOUND"), true);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PORTFOLIO_LEDGER);
+});
+
+test("GATE5K-R10 MTM miss has no previous-close fallback", () => {
+  const input = buildMtmMissThreeDayHoldInput();
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(hasCode(result, "MTM_CANDLE_NOT_FOUND"), true);
+  assert.notEqual(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  assert.equal(result.finalCash, null);
+});
+
+test("GATE5K-R11b pipeline BLOCKED_COST_STAGE", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  input.cost = {
+    ...input.cost,
+    policies: [makePolicy({
+      policyId: "synthetic-cost-kosdaq-v1",
+      market: MARKET.SYNTHETIC_KOSDAQ,
+    })],
+  };
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_COST_STAGE);
+  assert.equal(hasCode(result, COST_ERROR.COST_POLICY_MARKET_MISMATCH), true);
+  assert.equal(result.costStageStatus, STAGE_STATUS.FAILED);
+});
+
+test("GATE5K-R17 cost mismatch sets costStageStatus FAILED", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  input.cost = {
+    ...input.cost,
+    policies: [makePolicy({
+      policyId: "synthetic-cost-kosdaq-v1",
+      market: MARKET.SYNTHETIC_KOSDAQ,
+    })],
+  };
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_COST_STAGE);
+  assert.equal(result.costStageStatus, STAGE_STATUS.FAILED);
+  assert.equal(hasCode(result, COST_ERROR.COST_POLICY_MARKET_MISMATCH), true);
+  assert.equal(hasCode(result, ERROR.COST_STAGE_FAILED), true);
+  assert.notEqual(result.costStageStatus, STAGE_STATUS.NOT_STARTED);
+});
+
+test("GATE5K-R12 calendar mismatch → BLOCKED_DATA_STAGE", () => {
+  const calendarInput = buildPortfolioKospiInput({ oneTrade: true });
+  calendarInput.calendar = buildCalendar({
+    market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ,
+    calendarId: "synthetic-calendar-kosdaq-v1",
+  });
+  const calendarResult = runSyntheticPortfolioLedger(calendarInput);
+  assert.equal(hasCode(calendarResult, "CALENDAR_MARKET_MISMATCH"), true);
+  assert.equal(calendarResult.pipelineStatus, PIPELINE_STATUS.BLOCKED_DATA_STAGE);
+});

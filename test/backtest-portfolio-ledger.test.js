@@ -907,3 +907,44 @@ test("GATE5K-L70 fractional capital 차단", () => {
   const result = runPortfolioLedger(fx.input);
   assert.equal(hasCode(result, ERROR.INVALID_INITIAL_CAPITAL), true);
 });
+
+test("GATE5K-R04 ENTRY equity = INITIAL_CAPITAL - ENTRY_COST", () => {
+  const fx = oneTradeFixture();
+  const result = runPortfolioLedger(fx.input);
+  const entry = eventsOf(result, LEDGER_EVENT_TYPE.ENTRY)[0];
+  assert.equal(entry.marketPrice, ENTRY_PRICE);
+  assert.equal(entry.equity, INITIAL_CAPITAL - ENTRY_COST);
+  assert.equal(entry.equity, ENTRY_CASH_AFTER + ENTRY_AMOUNT);
+});
+
+test("GATE5K-R05 MTM unrealizedPnl does not subtract ENTRY_COST", () => {
+  const fx = oneTradeFixture();
+  const result = runPortfolioLedger(fx.input);
+  const mtm = eventsOf(result, LEDGER_EVENT_TYPE.MARK_TO_MARKET)[0];
+  assert.equal(mtm.unrealizedPnl, 2000);
+  assert.notEqual(mtm.unrealizedPnl, 2000 - ENTRY_COST);
+});
+
+test("GATE5K-R06 EXIT_PRICE !== exit-date candle close", () => {
+  const fx = oneTradeFixture();
+  const exitCandle = fx.input.candles.find((c) => c.tradingDate === fx.t[2]);
+  assert.equal(EXIT_PRICE, 11000);
+  assert.equal(exitCandle.close, 11100);
+  assert.notEqual(EXIT_PRICE, exitCandle.close);
+});
+
+test("GATE5K-R07 exit-date equity is post-exit FLAT cash", () => {
+  const fx = oneTradeFixture();
+  const result = runPortfolioLedger(fx.input);
+  const snap = result.dailyEquityCurve.find((d) => d.tradingDate === fx.t[2]);
+  assert.equal(snap.equity, EXIT_CASH_AFTER);
+  assert.notEqual(snap.equity, ENTRY_CASH_AFTER + (QTY * 11100));
+});
+
+test("GATE5K-R08 exit-date marketValue and unrealizedPnl are 0", () => {
+  const fx = oneTradeFixture();
+  const result = runPortfolioLedger(fx.input);
+  const snap = result.dailyEquityCurve.find((d) => d.tradingDate === fx.t[2]);
+  assert.equal(snap.marketValue, 0);
+  assert.equal(snap.unrealizedPnl, 0);
+});

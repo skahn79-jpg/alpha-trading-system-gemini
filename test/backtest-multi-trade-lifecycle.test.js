@@ -2,6 +2,8 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const lifecycle = require("../lib/backtest/multi-trade-lifecycle");
 const {
@@ -1276,4 +1278,151 @@ test("GATE5J-R08 market invariant는 data 검증에서 보호됨(collectMarketEr
     || hasCode(result, ERROR_CODE.DATA_STAGE_FAILED);
   assert.equal(hasInvariantViolation, true,
     `market invariant 안전망 없음. errorCodes=${JSON.stringify(result.errorCodes)}`);
+});
+
+const LIFECYCLE_SRC_PATH = path.join(__dirname, "..", "lib", "backtest", "multi-trade-lifecycle.js");
+
+test("GATE5K-R11 cost mismatch → failedStage=COST", () => {
+  const fx = build2TradeKospiFixture();
+  const mismatchedCost = {
+    policyEngineVersion: POLICY_ENGINE_VERSION,
+    brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+    currency: CURRENCY.KRW,
+    policies: [makePolicy({ policyId: "synthetic-cost-kosdaq-v1", market: MARKET.SYNTHETIC_KOSDAQ })],
+  };
+  const result = runSyntheticMultiTradeLifecycle({
+    dataset: fx.dataset,
+    calendar: fx.calendar,
+    calendarValidation: fx.calendarValidation,
+    cost: mismatchedCost,
+    tradeIntents: fx.tradeIntents,
+    calculationMode: fx.calculationMode,
+  });
+  assert.equal(result.lifecycleStatus, LIFECYCLE_STATUS.BLOCKED);
+  assert.equal(result.failedStage, "COST");
+  assert.equal(hasCode(result, "COST_POLICY_MARKET_MISMATCH"), true);
+});
+
+test("GATE5K-R13 evaluateDailyBarExecution call count === 1", () => {
+  const src = fs.readFileSync(LIFECYCLE_SRC_PATH, "utf8");
+  const matches = src.match(/executionModel\.evaluateDailyBarExecution/g) || [];
+  assert.equal(matches.length, 1);
+});
+
+test("GATE5K-R14 SL on exitDate", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const dataset = buildDataset(calendar, [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10000, high: 10100, low: 9800, close: 10000 },
+    { tradingDate: t[2], open: 10000, high: 10100, low: 9400, close: 9600 },
+  ]);
+  const cost = {
+    policyEngineVersion: POLICY_ENGINE_VERSION,
+    brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+    currency: CURRENCY.KRW,
+    policies: [makePolicy()],
+  };
+  const result = runSyntheticMultiTradeLifecycle({
+    dataset,
+    calendar,
+    calendarValidation: { requiredFrom: calendar.coverage.from, requiredTo: calendar.coverage.to },
+    cost,
+    tradeIntents: [{
+      tradeId: "T1",
+      quantity: 10,
+      entryDate: t[1],
+      exitDate: t[2],
+      entryIntent: {
+        orderType: "MARKET_OPEN",
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: t[1],
+        limitPrice: null,
+      },
+      exitPolicy: { stopLossPrice: 9500, takeProfitPrice: 20000, intrabarConflictPolicy: "STOP_FIRST" },
+    }],
+    calculationMode: "SYNTHETIC_UNIT_TEST_ONLY",
+  });
+  assert.equal(result.lifecycleStatus, LIFECYCLE_STATUS.COMPLETED);
+  assert.equal(result.closedTrades[0].exitPrice, 9500);
+  assert.equal(result.closedTrades[0].exitDate, t[2]);
+});
+
+test("GATE5K-R15 TP on exitDate", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const dataset = buildDataset(calendar, [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10000, high: 10500, low: 9800, close: 10200 },
+    { tradingDate: t[2], open: 10800, high: 11200, low: 10700, close: 11100 },
+  ]);
+  const cost = {
+    policyEngineVersion: POLICY_ENGINE_VERSION,
+    brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+    currency: CURRENCY.KRW,
+    policies: [makePolicy()],
+  };
+  const result = runSyntheticMultiTradeLifecycle({
+    dataset,
+    calendar,
+    calendarValidation: { requiredFrom: calendar.coverage.from, requiredTo: calendar.coverage.to },
+    cost,
+    tradeIntents: [{
+      tradeId: "T1",
+      quantity: 10,
+      entryDate: t[1],
+      exitDate: t[2],
+      entryIntent: {
+        orderType: "MARKET_OPEN",
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: t[1],
+        limitPrice: null,
+      },
+      exitPolicy: { stopLossPrice: 9500, takeProfitPrice: 11000, intrabarConflictPolicy: "STOP_FIRST" },
+    }],
+    calculationMode: "SYNTHETIC_UNIT_TEST_ONLY",
+  });
+  assert.equal(result.lifecycleStatus, LIFECYCLE_STATUS.COMPLETED);
+  assert.equal(result.closedTrades[0].exitPrice, 11000);
+  assert.equal(result.closedTrades[0].exitDate, t[2]);
+});
+
+test("GATE5K-R16 early SL before exitDate → EXIT_DATE_MISMATCH", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const dataset = buildDataset(calendar, [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10000, high: 10100, low: 9800, close: 10000 },
+    { tradingDate: t[2], open: 10000, high: 10100, low: 9000, close: 9600 },
+    { tradingDate: t[3], open: 10800, high: 11200, low: 10700, close: 11100 },
+  ]);
+  const cost = {
+    policyEngineVersion: POLICY_ENGINE_VERSION,
+    brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+    currency: CURRENCY.KRW,
+    policies: [makePolicy()],
+  };
+  const result = runSyntheticMultiTradeLifecycle({
+    dataset,
+    calendar,
+    calendarValidation: { requiredFrom: calendar.coverage.from, requiredTo: calendar.coverage.to },
+    cost,
+    tradeIntents: [{
+      tradeId: "T1",
+      quantity: 10,
+      entryDate: t[1],
+      exitDate: t[3],
+      entryIntent: {
+        orderType: "MARKET_OPEN",
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: t[1],
+        limitPrice: null,
+      },
+      exitPolicy: { stopLossPrice: 9500, takeProfitPrice: 11000, intrabarConflictPolicy: "STOP_FIRST" },
+    }],
+    calculationMode: "SYNTHETIC_UNIT_TEST_ONLY",
+  });
+  assert.equal(result.lifecycleStatus, LIFECYCLE_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR_CODE.EXIT_DATE_MISMATCH), true);
+  assert.deepEqual(result.closedTrades, []);
 });
