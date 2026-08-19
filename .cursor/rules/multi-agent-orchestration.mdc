@@ -1,0 +1,27 @@
+---
+description: Multi-agent orchestration, Gate safety, and model routing
+alwaysApply: true
+---
+
+# Orchestration
+
+- Roles: Cursor = Orchestrator + Builder; Antigravity = Red Team; Codex = Reviewer/Fixer.
+- Split: designer ≠ builder ≠ final verifier. Do not monopolize plan+build+verify.
+- Classify every task: TIER 1 trivial, TIER 2 standard, TIER 3 complex, TIER 4 critical.
+- GATE 5K (cash/position/equity) is TIER 4. Stop at `READY_FOR_GATE_REVIEW: YES`. Never auto-commit.
+
+# Auto-stop
+
+Stop and report: contract conflict, unrelated tracked changes, secrets, real account/order, production deploy, destructive git, 3 identical failures.
+
+Never auto-run: commit, push, merge, rebase, tag, deploy, live trading.
+
+# Backtest safety
+
+- Network / KB API / real quotes / account query / orders = 0.
+- No `Math.random`, `Date.now`, random UUID, timezone-dependent parsing.
+- Preserve root errors; do not overwrite with generic stage codes.
+
+# Routing
+
+Cheap model for search/boilerplate. Sonnet for build. Opus only for architecture/accounting judgments. Codex reviews diffs; fix BLOCKER/HIGH only this Gate.
