@@ -1738,6 +1738,8 @@ test("GATE5H-P50 허용 파일 외 변경 없음", () => {
     "test/backtest-synthetic-pipeline.test.js",
     "lib/backtest/multi-trade-lifecycle.js",
     "test/backtest-multi-trade-lifecycle.test.js",
+    "lib/backtest/portfolio-ledger.js",
+    "test/backtest-portfolio-ledger.test.js",
   ]);
   for (const name of names) {
     assert.equal(allowed.has(name), true, name);
@@ -1968,6 +1970,7 @@ test("GATE5I-P20 동일 입력 동일 결과", () => {
 
 const {
   runSyntheticMultiTradePipeline,
+  runSyntheticPortfolioLedger,
   MULTI_TRADE_PIPELINE_VERSION,
 } = pipeline;
 
@@ -2215,9 +2218,13 @@ test("GATE5J-P21 GATE5H-P50 허용 파일 세트 업데이트 확인", () => {
     "test/backtest-synthetic-pipeline.test.js",
     "lib/backtest/multi-trade-lifecycle.js",
     "test/backtest-multi-trade-lifecycle.test.js",
+    "lib/backtest/portfolio-ledger.js",
+    "test/backtest-portfolio-ledger.test.js",
   ]);
   assert.equal(allowed.has("lib/backtest/multi-trade-lifecycle.js"), true);
   assert.equal(allowed.has("test/backtest-multi-trade-lifecycle.test.js"), true);
+  assert.equal(allowed.has("lib/backtest/portfolio-ledger.js"), true);
+  assert.equal(allowed.has("test/backtest-portfolio-ledger.test.js"), true);
 });
 
 test("GATE5J-P22 single-trade 계약 변경 없음 — PIPELINE_VERSION 불변", () => {
@@ -2284,4 +2291,261 @@ test("GATE5J-P23 one-trade parity — single vs multi 결과 비교", () => {
   assert.equal(ct.totalCost, singleResult.totalCost);
   assert.equal(ct.grossPnl, singleResult.grossProfit);
   assert.equal(ct.netPnl, singleResult.netProfit);
+});
+
+// ─── GATE5K Pipeline Tests ────────────────────────────────────────────────────
+
+function buildPortfolioKospiInput(overrides) {
+  const extras = overrides || {};
+  const base = buildMultiTradeKospiInput();
+  if (extras.oneTrade) base.tradeIntents = [base.tradeIntents[0]];
+  return {
+    ...base,
+    initialCapital: extras.initialCapital != null ? extras.initialCapital : 1000000,
+  };
+}
+
+function buildPortfolioKosdaqInput(overrides) {
+  const extras = overrides || {};
+  const base = buildMultiTradeKosdaqInput();
+  if (extras.oneTrade) base.tradeIntents = [base.tradeIntents[0]];
+  return {
+    ...base,
+    initialCapital: extras.initialCapital != null ? extras.initialCapital : 1000000,
+  };
+}
+
+test("GATE5K-P01 KOSPI one-trade portfolio success", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 1000000 });
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  assert.equal(result.closedTrades.length, 1);
+  assert.equal(result.finalCash, 1009869);
+  assert.equal(result.finalEquity, 1009869);
+  assert.equal(result.capitalConstraintApplied, true);
+});
+
+test("GATE5K-P02 KOSDAQ one-trade success", () => {
+  const input = buildPortfolioKosdaqInput({ oneTrade: true, initialCapital: 1000000 });
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  assert.equal(result.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ);
+  assert.equal(result.closedTrades.length, 1);
+  assert.equal(result.finalCash, 1009869);
+  assert.equal(result.finalEquity, 1009869);
+  assert.equal(result.capitalConstraintApplied, true);
+});
+
+test("GATE5K-P03 KOSPI two-trade success", () => {
+  const input = buildPortfolioKospiInput();
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  assert.equal(result.closedTrades.length, 2);
+  assert.equal(result.finalCash, 1019738);
+});
+
+test("GATE5K-P04 KOSDAQ two-trade success", () => {
+  const input = buildPortfolioKosdaqInput();
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  assert.equal(result.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ);
+  assert.equal(result.closedTrades.length, 2);
+  assert.equal(result.finalCash, 1019738);
+});
+
+test("GATE5K-P05 insufficient cash block", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 50000 });
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PORTFOLIO_LEDGER);
+  assert.equal(hasCode(result, "INSUFFICIENT_CASH"), true);
+  assert.equal(result.capitalConstraintApplied, false);
+});
+
+test("GATE5K-P06 no quantity resize", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 50000 });
+  assert.equal(input.tradeIntents[0].quantity, 10);
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PORTFOLIO_LEDGER);
+  assert.equal(input.tradeIntents[0].quantity, 10);
+});
+
+test("GATE5K-P07 final cash parity", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  const pnlSum = result.closedTrades.reduce((acc, trade) => acc + trade.netPnl, 0);
+  assert.equal(result.finalCash, input.initialCapital + pnlSum);
+});
+
+test("GATE5K-P08 final equity parity", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  assert.equal(result.finalEquity, result.finalCash);
+});
+
+test("GATE5K-P09 daily equity generated", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  assert.equal(Array.isArray(result.dailyEquityCurve), true);
+  assert.equal(result.dailyEquityCurve.length > 0, true);
+});
+
+test("GATE5K-P10 flat-period equity", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  const first = result.dailyEquityCurve[0];
+  assert.equal(first.marketValue, 0);
+  assert.equal(first.equity, first.cashBalance);
+});
+
+test("GATE5K-P11 MTM gain", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  assert.equal(
+    result.ledgerEvents.some((e) => e.eventType === "MARK_TO_MARKET" && e.unrealizedPnl > 0),
+    true,
+  );
+});
+
+test("GATE5K-P12 MTM loss", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  const entryDate = input.tradeIntents[0].entryDate;
+  for (const candle of input.dataset.candles) {
+    if (candle.tradingDate === entryDate) {
+      // open/high/low 유지: MARKET_OPEN 진입가와 SL/TP 경로를 바꾸지 않는다.
+      // close=9000은 기존 low(9800)보다 낮아 OHLC_INCONSISTENT로 데이터 단계가 차단되고,
+      // low를 9000으로 내리면 stopLoss(9500)가 진입일에 체결된다.
+      // 진입가(10000) 미만이면서 OHLC를 만족하는 close만 패치한다.
+      candle.close = 9800;
+    }
+  }
+  input.dataset.contentChecksum = computeDatasetContentChecksum(input.dataset);
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  assert.equal(Array.isArray(result.ledgerEvents), true);
+  assert.equal(
+    result.ledgerEvents.some((e) => e.eventType === "MARK_TO_MARKET" && e.unrealizedPnl < 0),
+    true,
+  );
+});
+
+test("GATE5K-P13 ledger atomic failure", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 1 });
+  const result = runSyntheticPortfolioLedger(input);
+  assert.notEqual(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  assert.equal(result.capitalConstraintApplied, false);
+});
+
+test("GATE5K-P14 root error preservation", () => {
+  const calendarInput = buildPortfolioKospiInput({ oneTrade: true });
+  calendarInput.calendar = buildCalendar({
+    market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ,
+    calendarId: "synthetic-calendar-kosdaq-v1",
+  });
+  const calendarResult = runSyntheticPortfolioLedger(calendarInput);
+  assert.equal(hasCode(calendarResult, "CALENDAR_MARKET_MISMATCH"), true);
+  assert.equal(calendarResult.errorCodes.includes("CALENDAR_MARKET_MISMATCH"), true);
+  assert.equal(
+    calendarResult.errorCodes.length === 1
+      && (calendarResult.errorCodes[0] === ERROR.DATA_STAGE_FAILED
+        || calendarResult.errorCodes[0] === ERROR.PIPELINE_MARKET_INVARIANT_VIOLATION),
+    false,
+  );
+
+  const costInput = buildPortfolioKospiInput({ oneTrade: true });
+  costInput.cost.policies = [makePolicy({
+    policyId: "synthetic-cost-kosdaq-v1",
+    market: MARKET.SYNTHETIC_KOSDAQ,
+  })];
+  const costResult = runSyntheticPortfolioLedger(costInput);
+  assert.equal(hasCode(costResult, COST_ERROR.COST_POLICY_MARKET_MISMATCH), true);
+  assert.equal(costResult.errorCodes.includes(COST_ERROR.COST_POLICY_MARKET_MISMATCH), true);
+  assert.equal(
+    costResult.errorCodes.length === 1 && costResult.errorCodes[0] === ERROR.COST_STAGE_FAILED,
+    false,
+  );
+});
+
+test("GATE5K-P15 legacy market block", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  input.dataset.markets = [SYNTHETIC_MARKETS.SYNTHETIC_MARKET];
+  input.dataset.candles.forEach((c) => {
+    c.market = SYNTHETIC_MARKETS.SYNTHETIC_MARKET;
+  });
+  const result = runSyntheticPortfolioLedger(input);
+  assert.notEqual(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  assert.equal(hasCode(result, ERROR.LEGACY_MARKET_NOT_ALLOWED_IN_PIPELINE), true);
+});
+
+test("GATE5K-P16 production market block", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  input.dataset.markets = ["KOSPI"];
+  const result = runSyntheticPortfolioLedger(input);
+  assert.notEqual(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  assert.equal(hasCode(result, ERROR.PRODUCTION_MARKET_NOT_ALLOWED), true);
+});
+
+test("GATE5K-P17 safety fields false", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  assertOperationalBlocked(result);
+  assert.equal(result.capitalConstraintApplied, true);
+});
+
+test("GATE5K-P18 performance fields null", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  assertPerformanceNull(result);
+});
+
+test("GATE5K-P19 input immutable", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  const datasetSnap = JSON.stringify(input.dataset);
+  const intentsSnap = JSON.stringify(input.tradeIntents);
+  const calendarSnap = JSON.stringify(input.calendar);
+  runSyntheticPortfolioLedger(input);
+  assert.equal(JSON.stringify(input.dataset), datasetSnap);
+  assert.equal(JSON.stringify(input.tradeIntents), intentsSnap);
+  assert.equal(JSON.stringify(input.calendar), calendarSnap);
+});
+
+test("GATE5K-P20 network/order count remains zero", () => {
+  const src = fs.readFileSync(PIPELINE_PATH, "utf8");
+  assert.equal(src.includes("require(\"http\")"), false);
+  assert.equal(src.includes("require(\"https\")"), false);
+  assert.equal(src.includes("axios"), false);
+  assert.equal(src.includes("fetch("), false);
+  assert.equal(src.includes("placeOrder"), false);
+  assert.equal(src.includes("submitOrder"), false);
+});
+
+test("GATE5K-P21 missing initialCapital", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  delete input.initialCapital;
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PIPELINE_SCHEMA);
+  assert.equal(hasCode(result, ERROR.MISSING_REQUIRED_FIELD), true);
+  assert.equal(result.capitalConstraintApplied, false);
+});
+
+test("GATE5K-P22 ledger events integer cash", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  const entry = result.ledgerEvents.find((e) => e.eventType === "ENTRY");
+  assert.equal(entry.cashBefore, 1000000);
+  assert.equal(entry.entryAmount, 100000);
+  assert.equal(entry.cost, 10);
+  assert.equal(entry.cashAfter, 899990);
+  const exit = result.ledgerEvents.find((e) => e.eventType === "EXIT");
+  assert.equal(exit.cashBefore, 899990);
+  assert.equal(exit.exitAmount, 110000);
+  assert.equal(exit.cost, 121);
+  assert.equal(exit.cashAfter, 1009869);
 });
