@@ -1,262 +1,356 @@
-# AGENTS.md — Alpha Trading System Multi-Agent Orchestration Rules
+# AGENTS.md — Cursor Native Multi-Agent Orchestration
 
-## 1. 목적
+## 0. 목적
 
-이 저장소는 멀티 에이전트 방식으로 개발한다.
+이 저장소에서는 Cursor에서 실제 호출 가능한 sub-agent만 사용하여 자동 오케스트레이션을 수행한다.
 
-각 에이전트는 동일한 업무를 중복 수행하지 않고 역할을 분리한다.
+외부 Agent인 Gemini Antigravity와 Codex는 Cursor 내부 자동 호출 대상으로 간주하지 않는다.
 
-기본 흐름:
+현재 확인된 Cursor 호출 가능 Agent:
 
 ```text
-Requirement
-→ Planner
-→ Red Team
-→ Builder
-→ Test
-→ Reviewer
-→ Fixer
-→ Final Verification
-→ Gate Review
+generalPurpose
+explore
+shell
+cursor-guide
+ci-investigator
+bugbot
+security-review
+best-of-n-runner
+deep-reasoner
+runner
 ```
 
-현재 프로젝트의 기본 역할:
+외부 Agent:
 
 ```text
-Cursor       = Orchestrator + Main Builder
-Antigravity  = Architecture Review + Red Team + Independent Analysis
-Codex        = Code Review + Local Fix + Regression Review
+Gemini Antigravity
+Codex
 ```
 
-모든 단계가 정상 완료되면 현재 승인된 작업 범위 안에서는 다음 단계로 자동 진행한다.
+는 별도 독립 검증 단계에서만 사용한다.
 
-단 다음은 자동 실행 금지:
+---
+
+# 1. 기본 실행 구조
+
+사용자가 Gate 작업을 요청하면 다음 순서로 자동 진행한다.
 
 ```text
+USER TASK
+   ↓
+CURSOR ORCHESTRATOR
+   ↓
+TIER CLASSIFICATION
+   ↓
+PLAN / ANALYSIS
+   ↓
+RED TEAM
+   ↓
+IMPLEMENTATION
+   ↓
+TEST
+   ↓
+CODE REVIEW
+   ↓
+FIX
+   ↓
+FULL REGRESSION
+   ↓
+FINAL VERIFICATION
+   ↓
+READY_FOR_GATE_REVIEW
+```
+
+Gate 범위 내에서는 각 단계가 끝날 때마다 사용자 확인 없이 다음 단계로 진행한다.
+
+단 다음 작업은 자동 실행하지 않는다.
+
+```text
+git add
 git commit
 git push
 git merge
 git rebase
 git tag
 production deployment
-real trading
+paper trading execution
+live trading
 real order
 account-changing operation
 ```
 
 ---
 
-# 2. 최우선 원칙
+# 2. Orchestrator
 
-항상 다음 구조를 유지한다.
+기본 Orchestrator:
 
 ```text
-설계자 ≠ 구현자 ≠ 최종 검증자
+Cursor parent Agent
 ```
 
-동일 에이전트가 설계·구현·검증을 전부 독점하지 않는다.
+역할:
 
-다만 작은 수정은 비용 절감을 위해 단순화할 수 있다.
+* 현재 branch 확인
+* HEAD 확인
+* git status 확인
+* 현재 Gate 판정
+* 직전 승인 Gate 확인
+* 작업 범위 파악
+* TIER 판정
+* 필요한 sub-agent 선택
+* file ownership 지정
+* handoff 관리
+* 테스트 관리
+* fallback 관리
+* 최종 결과 취합
 
 ---
 
-# 3. 작업 난이도 분류
+# 3. TIER 자동 분류
 
-작업 시작 시 반드시 다음 중 하나로 분류한다.
-
-## TIER 1 — Trivial
+## TIER 1 — TRIVIAL
 
 예:
 
-* 오타 수정
-* 주석 수정
-* 단순 rename
-* 명확한 한 줄 버그
-* 테스트 expectation 단순 수정
-* 문서 정리
-
-권장 흐름:
-
 ```text
-Builder
-→ Targeted Test
+오타
+문서 수정
+rename
+주석
+format
+한 줄 수정
 ```
 
-Red Team 생략 가능.
-
----
-
-## TIER 2 — Standard
-
-예:
-
-* 단일 함수 구현
-* 작은 API 변경
-* UI 컴포넌트
-* 단순 validation
-* 기존 패턴을 따르는 테스트 추가
-* 국소 리팩터링
-
-권장 흐름:
+실행:
 
 ```text
-Planner-light
-→ Builder
-→ Test
-→ Reviewer
+generalPurpose
+→ runner
 ```
 
 ---
 
-## TIER 3 — Complex
+## TIER 2 — STANDARD
 
 예:
 
-* 여러 모듈 변경
-* 상태 머신
-* 데이터 모델 변경
-* API contract 변경
-* 백테스트 lifecycle
-* 인증/권한
-* 회계 계산
-* multi-step pipeline
+```text
+단일 함수
+작은 API
+UI component
+기존 validation 확장
+간단한 bug fix
+국소 refactoring
+```
 
-권장 흐름:
+실행:
 
 ```text
-Planner
-→ Antigravity Red Team
-→ Builder
-→ Independent Test
-→ Codex Review
+generalPurpose
+→ runner
+→ bugbot
+```
+
+---
+
+## TIER 3 — COMPLEX
+
+예:
+
+```text
+복수 모듈 수정
+새 상태 머신
+새 pipeline
+데이터 contract 변경
+인증/권한
+백테스트 lifecycle
+복잡한 API 연계
+```
+
+실행:
+
+```text
+deep-reasoner
+→ best-of-n-runner
+→ generalPurpose
+→ runner
+→ bugbot
+→ runner(full regression)
+```
+
+---
+
+## TIER 4 — CRITICAL
+
+다음 중 하나라도 해당:
+
+```text
+financial accounting
+portfolio
+capital constraint
+performance metrics
+broker/order
+security
+authorization
+data integrity
+production deployment
+paper/live trading
+critical state machine
+benchmark/alpha
+walk-forward/OOS
+```
+
+실행:
+
+```text
+deep-reasoner
+→ best-of-n-runner
+→ generalPurpose
+→ runner
+→ bugbot
+→ security-review (해당 시)
+→ ci-investigator (실패 시)
 → Fixer
-→ Full Regression
+→ runner full regression
+→ Final Verification
+```
+
+TIER 4에서는 최소 하나의 구현 Agent와 별도 review Agent가 존재해야 한다.
+
+---
+
+# 4. Agent 역할
+
+## deep-reasoner
+
+역할:
+
+```text
+Architecture
+Complex reasoning
+State machine
+Accounting contract
+Error contract
+Invariant
+Acceptance criteria
+Risk prioritization
+```
+
+실제 구현은 최소화한다.
+
+출력:
+
+```text
+PLAN
+INVARIANTS
+ERROR_CONTRACT
+ACCEPTANCE_CRITERIA
+OUT_OF_SCOPE
+RISKS
 ```
 
 ---
 
-## TIER 4 — Critical
+## best-of-n-runner
 
-예:
-
-* 금융 계산
-* 주문 관련 코드
-* 계좌 처리
-* 권한/보안
-* 데이터 무결성
-* migration
-* production deployment
-* 실제 broker API
-* 자본/수익률 계산
-* safety boundary 변경
-
-필수 흐름:
+역할:
 
 ```text
-Deep Planner
-→ Antigravity Independent Review
-→ Builder
-→ Independent Test
-→ Codex Review
-→ Red Team Re-check
-→ Full Regression
-→ Final Verifier
-→ Human Approval
+Red Team
+Alternative design comparison
+Edge case discovery
+Failure scenario generation
+Test gap analysis
 ```
 
-자동 commit 금지.
-
----
-
-# 4. Cursor 역할
-
-Cursor는 기본적으로 Orchestrator와 Builder 역할을 맡는다.
-
-Cursor가 먼저 해야 할 일:
-
-```text
-1. 현재 branch 확인
-2. HEAD 확인
-3. git status 확인
-4. 현재 Gate 확인
-5. 변경 금지 파일 확인
-6. acceptance criteria 추출
-7. 작업 난이도 분류
-8. 필요한 에이전트 결정
-```
-
-그 후 작업을 분할한다.
-
----
-
-# 5. Antigravity 호출 조건
-
-다음 조건 중 하나라도 해당하면 Antigravity 검토를 수행한다.
-
-```text
-회계
-금융 수학
-알고리즘
-상태 머신
-복수 모듈 변경
-보안
-동시성
-데이터 무결성
-look-ahead bias
-leakage
-백테스트
-performance calculation
-architecture decision
-새로운 error contract
-```
-
-Antigravity의 기본 역할은 구현이 아니다.
-
-다음 질문을 중심으로 검토한다.
+주 질문:
 
 ```text
 무엇이 깨질 수 있는가?
-어떤 edge case가 빠졌는가?
-어떤 invariant가 필요한가?
-설계가 기존 contract를 깨는가?
-silent fallback이 존재하는가?
-테스트가 구현을 과도하게 신뢰하는가?
+어떤 경계값이 빠졌는가?
+silent fallback이 있는가?
+기존 contract를 깨는가?
+테스트가 구현을 과도하게 따라가는가?
 ```
+
+코드는 기본적으로 수정하지 않는다.
 
 ---
 
-# 6. Codex 호출 조건
+## explore
 
-다음 상황에서 Codex reviewer를 사용한다.
-
-```text
-Builder 구현 완료
-diff 50줄 이상
-복수 파일 수정
-새 모듈 생성
-복잡한 조건 분기
-error propagation 변경
-계산식 변경
-테스트 10개 이상 추가
-```
-
-Codex는 먼저 review 결과를 작성한다.
-
-바로 대규모 수정하지 않는다.
-
-각 finding:
+역할:
 
 ```text
-Severity:
-File:
-Location:
-Problem:
-Impact:
-Expected:
-Recommended Fix:
+repository exploration
+dependency tracing
+call-site search
+legacy contract discovery
 ```
 
-Severity:
+읽기 전용 조사에 우선 사용한다.
+
+---
+
+## generalPurpose
+
+기본 Builder.
+
+역할:
+
+```text
+actual implementation
+module creation
+minimal refactoring
+integration
+targeted test implementation
+```
+
+Planner/Red Team에서 확정한 범위 밖으로 임의 확장하지 않는다.
+
+---
+
+## runner
+
+역할:
+
+```text
+unit tests
+integration tests
+regression
+lint
+type check
+git diff --check
+```
+
+테스트 실행 전담으로 우선 사용한다.
+
+---
+
+## bugbot
+
+기본 Code Reviewer.
+
+검토:
+
+```text
+logic bug
+off-by-one
+error swallowing
+error contract overwrite
+mutation
+double counting
+rounding
+state transition
+incorrect fallback
+dead code
+test/implementation mismatch
+non-determinism
+```
+
+Finding severity:
 
 ```text
 BLOCKER
@@ -265,506 +359,372 @@ MEDIUM
 LOW
 ```
 
-BLOCKER/HIGH만 현재 Gate에서 자동 수정 대상으로 한다.
+BLOCKER/HIGH만 현재 Gate 자동 수정 대상으로 한다.
 
 ---
 
-# 7. 파일 Ownership
+## security-review
 
-한 시점에 한 파일의 write owner는 하나만 허용한다.
+다음 경우에만 호출:
+
+```text
+authentication
+authorization
+session
+secret
+API key
+admin capability
+broker access
+order access
+external input
+security boundary
+```
+
+일반 백테스트 계산에는 호출하지 않는다.
+
+---
+
+## ci-investigator
+
+호출 조건:
+
+```text
+CI failure
+test environment discrepancy
+build failure
+local PASS / CI FAIL
+dependency issue
+```
+
+정상 테스트에는 호출하지 않는다.
+
+---
+
+## shell
+
+명령 실행 보조.
+
+직접적인 설계 판단 역할로 사용하지 않는다.
+
+---
+
+## cursor-guide
+
+Cursor 자체 기능/설정 확인이 필요한 경우에만 사용한다.
+
+---
+
+# 5. File Ownership
+
+한 시점에 같은 파일을 두 Agent가 동시에 수정하지 않는다.
 
 예:
 
 ```text
 portfolio-ledger.js
-OWNER = CURSOR_BUILDER
+WRITE_OWNER = generalPurpose
 
 portfolio-ledger.test.js
-OWNER = TEST_AGENT
+WRITE_OWNER = test/generalPurpose
 ```
 
-다른 Agent는 읽기/review만 수행한다.
-
-동시 쓰기 금지.
+Review Agent는 읽기 전용.
 
 ---
 
-# 8. Handoff 규칙
+# 6. Handoff Protocol
 
-각 Agent는 작업 종료 시 반드시 다음 형식으로 결과를 남긴다.
+각 sub-agent는 종료 시 다음을 남긴다.
 
 ```text
 TASK_ID:
+GATE:
 ROLE:
+SUBAGENT:
 STATUS:
-
 WORK_COMPLETED:
+FILES_READ:
 FILES_CHANGED:
 TESTS_RUN:
 TEST_RESULT:
-
-RISKS_FOUND:
+RISKS:
+BLOCKERS:
 OPEN_ISSUES:
-
 NEXT_ROLE:
 NEXT_ACTION:
 ```
 
-다음 Agent는 기존 handoff를 우선 읽고 이어서 작업한다.
-
-같은 조사를 반복하지 않는다.
+다음 Agent는 이전 결과를 읽고 이어서 진행한다.
 
 ---
 
-# 9. 자동 진행 규칙
+# 7. 자동 실행
 
-다음은 사용자 승인 없이 연속 진행 가능하다.
+다음 흐름은 자동이다.
 
 ```text
-Plan 완료
-→ Red Team
+deep-reasoner PASS
+→ best-of-n-runner
 
 Red Team 완료
-→ Build
+→ Builder
 
 Build 완료
-→ Targeted Tests
+→ runner
 
-Targeted Tests PASS
-→ Review
+Target tests PASS
+→ bugbot
 
-Review BLOCKER/HIGH
+BLOCKER/HIGH 있음
 → Fix
 
-Fix 완료
-→ Regression
+Fix
+→ affected tests
+→ full regression
 
-Regression PASS
+Full regression PASS
 → Final Verification
 ```
 
 ---
 
-# 10. 자동 중단 조건
+# 8. 실패 Loop
 
-다음이면 즉시 멈추고 보고한다.
+테스트 실패:
 
 ```text
-요구사항 충돌
-기존 확정 contract 변경 필요
-tracked unrelated change 발견
-secret/API key 노출
-실제 계좌 변경 필요
-실제 주문 필요
-production deployment 필요
-destructive git 필요
-3회 연속 동일 실패
+FAIL
+→ root cause analysis
+→ smallest safe fix
+→ affected tests
+→ regression
 ```
 
-사소한 구현 선택은 중단 사유가 아니다.
+동일 root cause로 최대 3회.
 
-합리적인 최소 변경을 선택한다.
+3회 실패 시:
+
+```text
+REPEATED_FAILURE
+```
+
+로 종료하고 상세 보고한다.
 
 ---
 
-# 11. 테스트 정책
+# 9. 테스트 정책
 
-항상 테스트 순서:
+순서:
 
 ```text
-Affected Unit Tests
-→ Related Integration Tests
-→ Full Regression
-→ Static Check
+affected unit
+→ related integration
+→ full npm test
+→ lint/type/static
 → git diff --check
+→ git status
 ```
 
-기존 테스트 삭제 금지.
-
-다음 방식으로 실패를 숨기지 않는다.
+금지:
 
 ```text
+기존 테스트 삭제
 assert 약화
-테스트 skip
-오류 코드 generic화
+skip 추가
 validation 제거
-fallback 추가
+error contract 약화
+테스트 통과용 fallback 추가
 ```
 
 ---
 
-# 12. 금융 프로젝트 공통 Safety Boundary
+# 10. Error Contract
 
-Synthetic/backtest 계층에서는 기본적으로:
+root error와 stage status를 분리한다.
+
+예:
 
 ```text
-external network = 0
-KB Open API = 0
-real quotes = 0
-account query = 0
-order call = 0
+rootError = COST_POLICY_MARKET_MISMATCH
+stageStatus = COST_STAGE_FAILED
+failedStage = COST
 ```
 
-실제 주문 관련 코드는 실행하지 않는다.
+상위 계층은 구체적인 root error를 generic error로 덮지 않는다.
 
 ---
 
-# 13. Determinism
+# 11. Determinism
 
-백테스트 및 계산 코드에서는 금지:
+Backtest 계층에서 금지:
 
 ```text
 Math.random()
 Date.now()
 random UUID
-현재시각 기반 값
+현재시각 기반 결과
 locale-dependent ordering
-timezone-dependent implicit parsing
+implicit timezone parsing
 ```
 
-동일 입력은 동일 결과를 반환해야 한다.
+동일 입력은 동일 결과를 생성한다.
 
 ---
 
-# 14. Error Contract
+# 12. Financial Safety Boundary
 
-구체적인 root error를 generic stage error로 덮지 않는다.
-
-예:
+Synthetic/backtest Gate에서는 기본:
 
 ```text
-root:
-COST_POLICY_MARKET_MISMATCH
-
-stage:
-COST_STAGE_FAILED
+real data calls = 0
+network calls = 0
+KB API calls = 0
+real quote calls = 0
+order calls = 0
 ```
 
-둘 다 필요한 경우 별도로 보존한다.
+별도 승인 없는 한 유지한다.
 
 ---
 
-# 15. Model Routing
+# 13. Git Boundary
 
-에이전트 선택과 별도로 모델 비용을 자동 최적화한다.
-
-## Low-cost model
-
-사용:
+Gate 구현 동안:
 
 ```text
-검색
-파일 탐색
-간단한 코드 이해
-rename
-boilerplate
-단순 테스트
-문서 업데이트
-formatting
+git add 금지
+git commit 금지
+git push 금지
+git merge 금지
+git rebase 금지
+git tag 금지
 ```
 
-권장:
+`READY_FOR_GATE_REVIEW: YES` 이후에도 자동 commit하지 않는다.
 
-```text
-Gemini Flash 계열
-Claude Sonnet 계열의 빠른 모드
-경량 Codex
-```
+사용자 승인 필요.
 
 ---
 
-## Standard model
+# 14. 외부 Agent 처리
 
-사용:
-
-```text
-일반 코드 구현
-React
-Node
-API
-테스트
-작은 리팩터링
-bug fix
-```
-
-권장 우선순위:
+Cursor 내부에서 다음을 실제 호출하려 하지 않는다.
 
 ```text
-1. Sonnet
-2. Gemini
-3. Codex
+Antigravity
+Codex
 ```
 
-동일 업무에 고비용 reasoning model을 기본 사용하지 않는다.
+`subagent_type="antigravity"`
+`subagent_type="codex"`
 
----
+사용 금지.
 
-## High-reasoning model
-
-사용 조건:
+Cursor 내부 review는:
 
 ```text
-architecture
-금융 회계
-복잡한 상태 머신
-multi-module contract
-root cause 불명확
-3개 이상 대안 비교
-보안
-데이터 무결성
-복잡한 디버깅
+best-of-n-runner
+bugbot
+deep-reasoner
 ```
 
-권장:
+를 사용한다.
+
+Antigravity/Codex 별도 검증이 필요한지는 최종 보고에 다음 형태로 제안한다.
 
 ```text
-Opus 또는 동급 deep reasoning
-```
-
-고비용 모델은 전체 작업이 아니라 **설계/판단 부분만** 사용한다.
-
-이후 구현은 Sonnet/Codex로 넘긴다.
-
----
-
-# 16. 모델별 기본 역할
-
-## Sonnet
-
-기본 Builder.
-
-사용:
-
-```text
-일반 구현
-리팩터링
-API
-React
-Node
-테스트
-기존 패턴 확장
-```
-
-프로젝트의 기본 모델로 우선 사용한다.
-
----
-
-## Opus
-
-Architect / Critical Reasoner.
-
-사용:
-
-```text
-복잡한 architecture
-금융 회계 설계
-상태 머신
-대규모 리팩터링 판단
-복잡한 실패 분석
-security-critical design
-```
-
-단순 코딩에는 사용하지 않는다.
-
----
-
-## Gemini / Antigravity
-
-Red Team / Independent Analyst.
-
-사용:
-
-```text
-edge case
-대안 설계
-수학 검산
-알고리즘 비교
-대규모 context review
-test gap 분석
-```
-
-주 구현자로 기본 사용하지 않는다.
-
----
-
-## Codex
-
-Reviewer / Local Fixer.
-
-사용:
-
-```text
-diff review
-bug localization
-국소 patch
-test-driven correction
-repository code reasoning
-```
-
-전체 아키텍처 결정은 기본 역할이 아니다.
-
----
-
-# 17. 비용 최적화 라우팅
-
-항상 가장 저렴하게 성공 가능한 모델부터 사용한다.
-
-```text
-Simple
-→ cheap model
-
-Standard
-→ Sonnet
-
-Complex
-→ Sonnet + Antigravity review
-
-Critical
-→ Opus plan
-  + Antigravity red team
-  + Sonnet build
-  + Codex review
-```
-
-다음 패턴 금지:
-
-```text
-Opus로 파일 검색
-Opus로 boilerplate 생성
-여러 고비용 모델이 같은 코드를 중복 구현
-모든 Agent에게 전체 repository 전달
-```
-
----
-
-# 18. Escalation Rule
-
-저비용 모델이 실패하면 단계적으로 승격한다.
-
-```text
-Tier 1 model
-  ↓ failure
-Sonnet
-  ↓ unresolved
-Codex / Antigravity independent analysis
-  ↓ unresolved
-Opus
-```
-
-처음부터 최고비용 모델을 사용하지 않는다.
-
----
-
-# 19. Context 최소화
-
-각 Agent에게 필요한 파일만 제공한다.
-
-예:
-
-Architect:
-
-```text
-requirements
-interfaces
-critical modules
-```
-
+EXTERNAL_REVIEW_RECOMMENDATION:
 Antigravity:
-
-```text
-design
-relevant code
-tests
-known risks
-```
-
-Builder:
-
-```text
-target files
-dependencies
-acceptance criteria
-```
-
+REQUIRED / OPTIONAL / NOT_REQUIRED
 Codex:
-
-```text
-git diff
-test failures
-contracts
-```
-
-Verifier:
-
-```text
-acceptance criteria
-diff summary
-test results
-git status
+REQUIRED / OPTIONAL / NOT_REQUIRED
+Reason:
+...
 ```
 
 ---
 
-# 20. GATE 실행 규칙
+# 15. Orchestration Log
 
-현재 프로젝트는 Gate 단위로 관리한다.
-
-각 Gate:
+각 Gate 최종 보고에는 반드시 기록:
 
 ```text
-PLAN
-→ RED TEAM
-→ BUILD
-→ TEST
-→ REVIEW
-→ FIX
-→ VERIFY
+GATE:
+TIER:
+SUBAGENTS_REQUESTED:
+SUBAGENTS_USED:
+Planner:
+Red Team:
+Builder:
+Test:
+Reviewer:
+Security Review:
+CI Investigator:
+Fixer:
+Final Verifier:
+Fallbacks:
+Unavailable Agents:
+Files Changed:
+Tests Added:
+Total Tests:
+Pass:
+Fail:
+BLOCKER:
+HIGH:
+MEDIUM:
+LOW:
+Network Calls:
+Order Calls:
+Git Status:
+EXTERNAL_REVIEW_RECOMMENDATION:
+READY_FOR_GATE_REVIEW:
 ```
 
-완료 상태:
+---
+
+# 16. Final Verification
+
+최종적으로 반드시 확인:
+
+```text
+Acceptance criteria
+Invariant
+Root error contract
+Stage contract
+Input immutability
+Determinism
+Safety boundary
+Full tests
+git diff --check
+git status
+Network calls
+Order calls
+```
+
+성공:
 
 ```text
 READY_FOR_GATE_REVIEW: YES
 ```
 
-에서 자동 작업을 멈춘다.
+실패:
 
-사용자 승인 전 commit 금지.
+```text
+READY_FOR_GATE_REVIEW: NO
+```
 
 ---
 
-# 21. 현재 프로젝트 기준
+# 17. 현재 운영 원칙
 
-현재 승인된 기준:
-
-```text
-GATE 5J
-Commit:
-76c9f972134124d4efc4e82346641f15a6a2a497
-```
-
-다음:
+사용자가:
 
 ```text
-GATE 5K
-Cash / Position / Equity Ledger
+GATE <번호> 진행
 ```
 
-GATE 5K는 TIER 4 / CRITICAL로 분류한다.
+이라고만 하면 이 규칙을 자동 적용한다.
 
-따라서:
+필요한 sub-agent를 자동 선택하고 구현·테스트·리뷰·회귀까지 진행한다.
 
-```text
-Opus/Deep Planner
-→ Antigravity Red Team
-→ Sonnet/Cursor Builder
-→ Independent Test
-→ Codex Review
-→ Fix
-→ Full Regression
-→ Final Verify
-```
-
-순으로 실행한다.
-
-Commit은 자동 실행하지 않는다.
+단 commit/push/merge는 수행하지 않는다.
