@@ -1740,6 +1740,8 @@ test("GATE5H-P50 허용 파일 외 변경 없음", () => {
     "test/backtest-multi-trade-lifecycle.test.js",
     "lib/backtest/portfolio-ledger.js",
     "test/backtest-portfolio-ledger.test.js",
+    "lib/backtest/performance-metrics.js",
+    "test/backtest-performance-metrics.test.js",
   ]);
   for (const name of names) {
     assert.equal(allowed.has(name), true, name);
@@ -1971,6 +1973,7 @@ test("GATE5I-P20 동일 입력 동일 결과", () => {
 const {
   runSyntheticMultiTradePipeline,
   runSyntheticPortfolioLedger,
+  runSyntheticPerformancePipeline,
   MULTI_TRADE_PIPELINE_VERSION,
 } = pipeline;
 
@@ -2220,11 +2223,15 @@ test("GATE5J-P21 GATE5H-P50 허용 파일 세트 업데이트 확인", () => {
     "test/backtest-multi-trade-lifecycle.test.js",
     "lib/backtest/portfolio-ledger.js",
     "test/backtest-portfolio-ledger.test.js",
+    "lib/backtest/performance-metrics.js",
+    "test/backtest-performance-metrics.test.js",
   ]);
   assert.equal(allowed.has("lib/backtest/multi-trade-lifecycle.js"), true);
   assert.equal(allowed.has("test/backtest-multi-trade-lifecycle.test.js"), true);
   assert.equal(allowed.has("lib/backtest/portfolio-ledger.js"), true);
   assert.equal(allowed.has("test/backtest-portfolio-ledger.test.js"), true);
+  assert.equal(allowed.has("lib/backtest/performance-metrics.js"), true);
+  assert.equal(allowed.has("test/backtest-performance-metrics.test.js"), true);
 });
 
 test("GATE5J-P22 single-trade 계약 변경 없음 — PIPELINE_VERSION 불변", () => {
@@ -2677,4 +2684,372 @@ test("GATE5K-R12 calendar mismatch → BLOCKED_DATA_STAGE", () => {
   const calendarResult = runSyntheticPortfolioLedger(calendarInput);
   assert.equal(hasCode(calendarResult, "CALENDAR_MARKET_MISMATCH"), true);
   assert.equal(calendarResult.pipelineStatus, PIPELINE_STATUS.BLOCKED_DATA_STAGE);
+});
+
+// ─── GATE5L Pipeline Tests ────────────────────────────────────────────────────
+
+const PERFORMANCE_METRICS_PATH = path.join(__dirname, "..", "lib", "backtest", "performance-metrics.js");
+
+function utcMsFromYmd(ymd) {
+  const year = Number(ymd.slice(0, 4));
+  const month = Number(ymd.slice(5, 7));
+  const day = Number(ymd.slice(8, 10));
+  return Date.UTC(year, month - 1, day);
+}
+
+function assertFiniteOrNullWithStatus(value, status) {
+  if (value == null) {
+    assert.equal(status != null, true);
+    return;
+  }
+  assert.equal(Number.isFinite(value), true);
+  assert.equal(status != null, true);
+}
+
+function buildLosingTradeInput() {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const candleRows = [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10000, high: 10100, low: 9800, close: 10000 },
+    { tradingDate: t[2], open: 10000, high: 10100, low: 9400, close: 9600 },
+  ];
+  const dataset = buildDataset(calendar, candleRows);
+  return {
+    pipelineVersion: MULTI_TRADE_PIPELINE_VERSION,
+    calculationMode: CALCULATION_MODE.SYNTHETIC_UNIT_TEST_ONLY,
+    dataset,
+    calendar,
+    calendarValidation: { requiredFrom: calendar.coverage.from, requiredTo: calendar.coverage.to },
+    cost: {
+      policyEngineVersion: POLICY_ENGINE_VERSION,
+      brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+      currency: CURRENCY.KRW,
+      policies: [makePolicy()],
+    },
+    tradeIntents: [{
+      tradeId: "T1",
+      quantity: 10,
+      entryDate: t[1],
+      exitDate: t[2],
+      entryIntent: {
+        orderType: ORDER_TYPE.MARKET_OPEN,
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: t[1],
+        limitPrice: null,
+      },
+      exitPolicy: {
+        stopLossPrice: 9500,
+        takeProfitPrice: 20000,
+        intrabarConflictPolicy: INTRABAR_CONFLICT_POLICY.STOP_FIRST,
+      },
+    }],
+    initialCapital: 1000000,
+  };
+}
+
+function assertNoNetworkOrOrderCalls(src) {
+  assert.equal(src.includes("require(\"http\")"), false);
+  assert.equal(src.includes("require(\"https\")"), false);
+  assert.equal(src.includes("axios"), false);
+  assert.equal(src.includes("fetch("), false);
+  assert.equal(src.includes("placeOrder"), false);
+  assert.equal(src.includes("submitOrder"), false);
+}
+
+test("GATE5L-P01 KOSPI success COMPLETED_PERFORMANCE_METRICS", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 1000000 });
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS);
+  assert.equal(result.performanceStatus, "COMPLETED_PERFORMANCE_METRICS");
+  assert.equal(result.finalEquity, 1009869);
+  assert.equal(result.totalReturn, 1009869 / 1000000 - 1);
+});
+
+test("GATE5L-P02 KOSDAQ success same cash numbers", () => {
+  const input = buildPortfolioKosdaqInput({ oneTrade: true, initialCapital: 1000000 });
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS);
+  assert.equal(result.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ);
+  assert.equal(result.finalEquity, 1009869);
+  assert.equal(result.totalReturn, 1009869 / 1000000 - 1);
+});
+
+test("GATE5L-P03 positive totalReturn", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 1000000 });
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS);
+  assert.equal(result.totalReturn > 0, true);
+});
+
+test("GATE5L-P04 negative totalReturn still completes performance", () => {
+  const input = buildLosingTradeInput();
+  const ledger = runSyntheticPortfolioLedger(input);
+  assert.equal(ledger.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS);
+  assert.equal(result.totalReturn < 0, true);
+});
+
+test("GATE5L-P05 CAGR propagated with elapsedDays from curve", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 1000000 });
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS);
+  assertFiniteOrNullWithStatus(result.cagr, result.cagrStatus);
+  assert.equal(Number.isFinite(result.cagr), true);
+  assert.equal(result.cagrStatus, "SHORT_PERIOD_ANNUALIZED");
+  const curve = result.dailyEquityCurve;
+  assert.equal(Array.isArray(curve) && curve.length >= 2, true);
+  const elapsedDays = (utcMsFromYmd(curve[curve.length - 1].tradingDate)
+    - utcMsFromYmd(curve[0].tradingDate)) / 86400000;
+  assert.equal(result.elapsedDays, elapsedDays);
+  assert.equal(elapsedDays >= 2, true);
+});
+
+test("GATE5L-P06 MDD <= 0", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 1000000 });
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS);
+  assert.equal(Number.isFinite(result.mdd), true);
+  assert.equal(result.mdd <= 0, true);
+  assert.equal(result.mddStatus, "CALCULATED");
+});
+
+test("GATE5L-P07 winRate in [0,1] or null with status", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 1000000 });
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS);
+  if (result.winRate == null) {
+    assert.equal(result.winRateStatus != null, true);
+  } else {
+    assert.equal(result.winRate >= 0 && result.winRate <= 1, true);
+    assert.equal(result.winRateStatus != null, true);
+  }
+});
+
+test("GATE5L-P08 profitFactor finite or null with status", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 1000000 });
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS);
+  assertFiniteOrNullWithStatus(result.profitFactor, result.profitFactorStatus);
+  assert.equal(result.profitFactor, null);
+  assert.equal(result.profitFactorStatus, "NO_GROSS_LOSS");
+});
+
+test("GATE5L-P09 sharpe finite or null with status", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 1000000 });
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS);
+  assertFiniteOrNullWithStatus(result.sharpeRatio, result.sharpeStatus);
+});
+
+test("GATE5L-P10 BLOCKED_PORTFOLIO_LEDGER insufficient cash", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 50000 });
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PORTFOLIO_LEDGER);
+  assert.equal(result.performanceStatus, "NOT_STARTED");
+  assert.equal(result.performanceStageStatus, STAGE_STATUS.NOT_STARTED);
+  assert.equal(result.totalReturn, null);
+  assert.equal(hasCode(result, "INSUFFICIENT_CASH"), true);
+  assert.equal(hasCode(result, ERROR.PERFORMANCE_STAGE_FAILED), false);
+});
+
+test("GATE5L-P11 insufficient cash capitalConstraintApplied false", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 50000 });
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PORTFOLIO_LEDGER);
+  assert.equal(result.performanceStatus, "NOT_STARTED");
+  assert.equal(result.capitalConstraintApplied, false);
+  assert.equal(hasCode(result, "INSUFFICIENT_CASH"), true);
+});
+
+test("GATE5L-P12 MTM missing performanceStatus NOT_STARTED", () => {
+  const input = buildMtmMissThreeDayHoldInput();
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PORTFOLIO_LEDGER);
+  assert.equal(result.performanceStatus, "NOT_STARTED");
+  assert.equal(result.performanceStageStatus, STAGE_STATUS.NOT_STARTED);
+  assert.equal(result.totalReturn, null);
+  assert.equal(hasCode(result, "MTM_CANDLE_NOT_FOUND"), true);
+});
+
+test("GATE5L-P13 ledger block preserves root errors", () => {
+  const cashInput = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 50000 });
+  const cashResult = runSyntheticPerformancePipeline(cashInput);
+  assert.equal(cashResult.pipelineStatus, PIPELINE_STATUS.BLOCKED_PORTFOLIO_LEDGER);
+  assert.equal(hasCode(cashResult, "INSUFFICIENT_CASH"), true);
+  assert.equal(hasCode(cashResult, ERROR.PERFORMANCE_STAGE_FAILED), false);
+  assert.equal(cashResult.performanceStatus, "NOT_STARTED");
+
+  const calendarInput = buildPortfolioKospiInput({ oneTrade: true });
+  calendarInput.calendar = buildCalendar({
+    market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ,
+    calendarId: "synthetic-calendar-kosdaq-v1",
+  });
+  const calendarResult = runSyntheticPerformancePipeline(calendarInput);
+  assert.equal(calendarResult.pipelineStatus, PIPELINE_STATUS.BLOCKED_DATA_STAGE);
+  assert.equal(hasCode(calendarResult, "CALENDAR_MARKET_MISMATCH"), true);
+  assert.equal(hasCode(calendarResult, ERROR.PERFORMANCE_STAGE_FAILED), false);
+  assert.equal(calendarResult.performanceStatus, "NOT_STARTED");
+});
+
+test("GATE5L-P14 portfolio success does not set failedStage PERFORMANCE", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 1000000 });
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS);
+  assert.notEqual(result.failedStage, "PERFORMANCE");
+  assert.equal(result.performanceStageStatus, STAGE_STATUS.PASSED_SYNTHETIC_ONLY);
+});
+
+test("GATE5L-P15 benchmarkReturn null", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 1000000 });
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS);
+  assert.equal(result.benchmarkReturn, null);
+});
+
+test("GATE5L-P16 alpha null", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 1000000 });
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS);
+  assert.equal(result.alpha, null);
+});
+
+test("GATE5L-P17 safety flags false", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 1000000 });
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS);
+  assertOperationalBlocked(result);
+});
+
+test("GATE5L-P18 capitalConstraintApplied true", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 1000000 });
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS);
+  assert.equal(result.capitalConstraintApplied, true);
+});
+
+test("GATE5L-P19 input immutable", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 1000000 });
+  const datasetSnap = JSON.stringify(input.dataset);
+  const intentsSnap = JSON.stringify(input.tradeIntents);
+  const calendarSnap = JSON.stringify(input.calendar);
+  runSyntheticPerformancePipeline(input);
+  assert.equal(JSON.stringify(input.dataset), datasetSnap);
+  assert.equal(JSON.stringify(input.tradeIntents), intentsSnap);
+  assert.equal(JSON.stringify(input.calendar), calendarSnap);
+});
+
+test("GATE5L-P20 source has no network or order calls", () => {
+  assertNoNetworkOrOrderCalls(fs.readFileSync(PIPELINE_PATH, "utf8"));
+  assertNoNetworkOrOrderCalls(fs.readFileSync(PERFORMANCE_METRICS_PATH, "utf8"));
+});
+
+test("GATE5L-P21 determinism deepEqual", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 1000000 });
+  const r1 = runSyntheticPerformancePipeline(input);
+  const r2 = runSyntheticPerformancePipeline(input);
+  assert.deepEqual(r1, r2);
+});
+
+test("GATE5L-P22 GATE5K-P18 ledger performance still null", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  const result = runSyntheticPortfolioLedger(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER);
+  assertPerformanceNull(result);
+});
+
+test("GATE5L-P23 losing trade profitFactor allows finite or null", () => {
+  const input = buildLosingTradeInput();
+  const result = runSyntheticPerformancePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS);
+  assertFiniteOrNullWithStatus(result.profitFactor, result.profitFactorStatus);
+  assert.equal(result.totalReturn < 0, true);
+});
+
+test("GATE5L-R11 overflow trades force PERFORMANCE fail-closed", () => {
+  const metricsModule = require("../lib/backtest/performance-metrics");
+  const originalCalculatePerformanceMetrics = metricsModule.calculatePerformanceMetrics;
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  let result;
+  try {
+    metricsModule.calculatePerformanceMetrics = function patched(metricsInput) {
+      return originalCalculatePerformanceMetrics({
+        ...metricsInput,
+        closedTrades: [
+          { netPnl: Number.MAX_VALUE },
+          { netPnl: Number.MAX_VALUE },
+          { netPnl: -1 },
+        ],
+      });
+    };
+    result = runSyntheticPerformancePipeline(input);
+    assert.equal(result.failedStage, "PERFORMANCE");
+    assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PERFORMANCE_STAGE);
+    assert.equal(hasCode(result, ERROR.INVALID_INPUT), true);
+    assert.equal(hasCode(result, ERROR.PERFORMANCE_STAGE_FAILED), true);
+    assert.equal(result.totalReturn, null);
+  } finally {
+    metricsModule.calculatePerformanceMetrics = originalCalculatePerformanceMetrics;
+  }
+});
+
+test("GATE5L-R12 malformed closedTrades force PERFORMANCE fail-closed", () => {
+  const metricsModule = require("../lib/backtest/performance-metrics");
+  const originalCalculatePerformanceMetrics = metricsModule.calculatePerformanceMetrics;
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  let result;
+  try {
+    metricsModule.calculatePerformanceMetrics = function patched(metricsInput) {
+      return originalCalculatePerformanceMetrics({
+        ...metricsInput,
+        closedTrades: null,
+      });
+    };
+    result = runSyntheticPerformancePipeline(input);
+    assert.equal(result.failedStage, "PERFORMANCE");
+    assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PERFORMANCE_STAGE);
+    assert.equal(hasCode(result, ERROR.INVALID_INPUT), true);
+    assert.equal(hasCode(result, ERROR.PERFORMANCE_STAGE_FAILED), true);
+    assert.equal(result.totalReturn, null);
+  } finally {
+    metricsModule.calculatePerformanceMetrics = originalCalculatePerformanceMetrics;
+  }
+});
+
+test("GATE5L-R13 overflow keeps INVALID_INPUT and PERFORMANCE_STAGE_FAILED", () => {
+  const metricsModule = require("../lib/backtest/performance-metrics");
+  const originalCalculatePerformanceMetrics = metricsModule.calculatePerformanceMetrics;
+  const input = buildPortfolioKospiInput({ oneTrade: true });
+  let result;
+  try {
+    metricsModule.calculatePerformanceMetrics = function patched(metricsInput) {
+      return originalCalculatePerformanceMetrics({
+        ...metricsInput,
+        closedTrades: [
+          { netPnl: Number.MAX_VALUE },
+          { netPnl: Number.MAX_VALUE },
+          { netPnl: -1 },
+        ],
+      });
+    };
+    result = runSyntheticPerformancePipeline(input);
+    assert.equal(result.failedStage, "PERFORMANCE");
+    assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PERFORMANCE_STAGE);
+    assert.equal(hasCode(result, ERROR.INVALID_INPUT), true);
+    assert.equal(hasCode(result, ERROR.PERFORMANCE_STAGE_FAILED), true);
+    assert.equal(result.errorCodes.includes(ERROR.INVALID_INPUT), true);
+    assert.equal(result.errorCodes.includes(ERROR.PERFORMANCE_STAGE_FAILED), true);
+    assert.equal(
+      result.errorCodes.filter((code) => code === ERROR.INVALID_INPUT).length > 0
+        && result.errorCodes.filter((code) => code === ERROR.PERFORMANCE_STAGE_FAILED).length > 0,
+      true,
+    );
+    assert.notEqual(
+      result.errorCodes.length === 1 && result.errorCodes[0] === ERROR.PERFORMANCE_STAGE_FAILED,
+      true,
+    );
+  } finally {
+    metricsModule.calculatePerformanceMetrics = originalCalculatePerformanceMetrics;
+  }
 });
