@@ -1742,6 +1742,8 @@ test("GATE5H-P50 허용 파일 외 변경 없음", () => {
     "test/backtest-portfolio-ledger.test.js",
     "lib/backtest/performance-metrics.js",
     "test/backtest-performance-metrics.test.js",
+    "lib/backtest/benchmark-performance.js",
+    "test/backtest-benchmark-performance.test.js",
   ]);
   for (const name of names) {
     assert.equal(allowed.has(name), true, name);
@@ -1974,6 +1976,7 @@ const {
   runSyntheticMultiTradePipeline,
   runSyntheticPortfolioLedger,
   runSyntheticPerformancePipeline,
+  runSyntheticBenchmarkPipeline,
   MULTI_TRADE_PIPELINE_VERSION,
 } = pipeline;
 
@@ -2225,6 +2228,8 @@ test("GATE5J-P21 GATE5H-P50 허용 파일 세트 업데이트 확인", () => {
     "test/backtest-portfolio-ledger.test.js",
     "lib/backtest/performance-metrics.js",
     "test/backtest-performance-metrics.test.js",
+    "lib/backtest/benchmark-performance.js",
+    "test/backtest-benchmark-performance.test.js",
   ]);
   assert.equal(allowed.has("lib/backtest/multi-trade-lifecycle.js"), true);
   assert.equal(allowed.has("test/backtest-multi-trade-lifecycle.test.js"), true);
@@ -2232,6 +2237,8 @@ test("GATE5J-P21 GATE5H-P50 허용 파일 세트 업데이트 확인", () => {
   assert.equal(allowed.has("test/backtest-portfolio-ledger.test.js"), true);
   assert.equal(allowed.has("lib/backtest/performance-metrics.js"), true);
   assert.equal(allowed.has("test/backtest-performance-metrics.test.js"), true);
+  assert.equal(allowed.has("lib/backtest/benchmark-performance.js"), true);
+  assert.equal(allowed.has("test/backtest-benchmark-performance.test.js"), true);
 });
 
 test("GATE5J-P22 single-trade 계약 변경 없음 — PIPELINE_VERSION 불변", () => {
@@ -2689,6 +2696,7 @@ test("GATE5K-R12 calendar mismatch → BLOCKED_DATA_STAGE", () => {
 // ─── GATE5L Pipeline Tests ────────────────────────────────────────────────────
 
 const PERFORMANCE_METRICS_PATH = path.join(__dirname, "..", "lib", "backtest", "performance-metrics.js");
+const BENCHMARK_PERFORMANCE_PATH = path.join(__dirname, "..", "lib", "backtest", "benchmark-performance.js");
 
 function utcMsFromYmd(ymd) {
   const year = Number(ymd.slice(0, 4));
@@ -3052,4 +3060,296 @@ test("GATE5L-R13 overflow keeps INVALID_INPUT and PERFORMANCE_STAGE_FAILED", () 
   } finally {
     metricsModule.calculatePerformanceMetrics = originalCalculatePerformanceMetrics;
   }
+});
+
+// ─── GATE5M Pipeline Tests ────────────────────────────────────────────────────
+
+function buildBenchmarkSeriesForPerformance(periodStart, periodEnd, startClose, endClose, extras) {
+  const rows = [
+    { tradingDate: periodStart, close: startClose },
+    { tradingDate: addDaysYmd(periodStart, 1), close: (startClose + endClose) / 2 },
+    { tradingDate: periodEnd, close: endClose },
+  ];
+  if (!Array.isArray(extras)) return rows;
+  return rows.concat(extras);
+}
+
+function buildPortfolioKospiWithBenchmark(overrides) {
+  const extras = overrides || {};
+  const input = buildPortfolioKospiInput(extras);
+  const perf = runSyntheticPerformancePipeline(input);
+  input.benchmark = {
+    market: extras.benchmarkMarket || input.dataset.markets[0],
+    benchmarkSeries: buildBenchmarkSeriesForPerformance(
+      perf.periodStart,
+      perf.periodEnd,
+      extras.startClose != null ? extras.startClose : 200,
+      extras.endClose != null ? extras.endClose : 220,
+      extras.benchmarkExtras,
+    ),
+  };
+  return input;
+}
+
+function buildPortfolioKosdaqWithBenchmark(overrides) {
+  const extras = overrides || {};
+  const input = buildPortfolioKosdaqInput(extras);
+  const perf = runSyntheticPerformancePipeline(input);
+  input.benchmark = {
+    market: extras.benchmarkMarket || input.dataset.markets[0],
+    benchmarkSeries: buildBenchmarkSeriesForPerformance(
+      perf.periodStart,
+      perf.periodEnd,
+      extras.startClose != null ? extras.startClose : 200,
+      extras.endClose != null ? extras.endClose : 220,
+      extras.benchmarkExtras,
+    ),
+  };
+  return input;
+}
+
+test("GATE5M-P01 KOSPI full success COMPLETED_BENCHMARK_ALPHA", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true, initialCapital: 1000000 });
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_BENCHMARK_ALPHA);
+  assert.equal(result.benchmarkStatus, "COMPLETED_BENCHMARK_ALPHA");
+});
+
+test("GATE5M-P02 KOSDAQ full success", () => {
+  const input = buildPortfolioKosdaqWithBenchmark({ oneTrade: true, initialCapital: 1000000 });
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_BENCHMARK_ALPHA);
+  assert.equal(result.market, SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ);
+});
+
+test("GATE5M-P03 benchmarkReturn propagated", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_BENCHMARK_ALPHA);
+  assert.equal(Number(result.benchmarkReturn.toFixed(2)), 0.1);
+});
+
+test("GATE5M-P04 alpha propagated", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  const perf = runSyntheticPerformancePipeline(input);
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(Number(result.alpha.toFixed(12)), Number((perf.totalReturn - 0.1).toFixed(12)));
+});
+
+test("GATE5M-P05 positive alpha example", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true, startClose: 200, endClose: 201 });
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_BENCHMARK_ALPHA);
+  assert.equal(result.alpha > 0, true);
+});
+
+test("GATE5M-P06 negative alpha example", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true, startClose: 200, endClose: 260 });
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_BENCHMARK_ALPHA);
+  assert.equal(result.alpha < 0, true);
+});
+
+test("GATE5M-P07 zero alpha example", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  const perf = runSyntheticPerformancePipeline(input);
+  input.benchmark.benchmarkSeries = buildBenchmarkSeriesForPerformance(
+    perf.periodStart,
+    perf.periodEnd,
+    100,
+    100 * (1 + perf.totalReturn),
+  );
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_BENCHMARK_ALPHA);
+  assert.equal(result.alpha, 0);
+});
+
+test("GATE5M-P08 performance not complete -> benchmark NOT_STARTED", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 50000 });
+  input.benchmark = {
+    market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI,
+    benchmarkSeries: [
+      { tradingDate: "2101-03-01", close: 200 },
+      { tradingDate: "2101-03-02", close: 220 },
+    ],
+  };
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PORTFOLIO_LEDGER);
+  assert.equal(result.benchmarkStatus, "NOT_STARTED");
+  assert.equal(result.benchmarkStageStatus, STAGE_STATUS.NOT_STARTED);
+});
+
+test("GATE5M-P09 portfolio blocked -> benchmark NOT_STARTED", () => {
+  const input = buildPortfolioKospiInput({ oneTrade: true, initialCapital: 1 });
+  input.benchmark = {
+    market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI,
+    benchmarkSeries: [
+      { tradingDate: "2101-03-01", close: 200 },
+      { tradingDate: "2101-03-02", close: 220 },
+    ],
+  };
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.notEqual(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_BENCHMARK_ALPHA);
+  assert.equal(result.benchmarkStatus, "NOT_STARTED");
+});
+
+test("GATE5M-P10 performance failed -> benchmark NOT_STARTED", () => {
+  const input = buildMtmMissThreeDayHoldInput();
+  input.benchmark = {
+    market: SYNTHETIC_MARKETS.SYNTHETIC_KOSPI,
+    benchmarkSeries: [
+      { tradingDate: "2101-03-01", close: 200 },
+      { tradingDate: "2101-03-02", close: 220 },
+    ],
+  };
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.notEqual(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_BENCHMARK_ALPHA);
+  assert.equal(result.benchmarkStatus, "NOT_STARTED");
+});
+
+test("GATE5M-P11 missing benchmark start -> BENCHMARK failed", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  const perf = runSyntheticPerformancePipeline(input);
+  input.benchmark.benchmarkSeries = input.benchmark.benchmarkSeries
+    .filter((row) => row.tradingDate !== perf.periodStart);
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_BENCHMARK_STAGE);
+  assert.equal(result.failedStage, "BENCHMARK");
+});
+
+test("GATE5M-P12 missing benchmark end -> BENCHMARK failed", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  const perf = runSyntheticPerformancePipeline(input);
+  input.benchmark.benchmarkSeries = input.benchmark.benchmarkSeries
+    .filter((row) => row.tradingDate !== perf.periodEnd);
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_BENCHMARK_STAGE);
+  assert.equal(result.failedStage, "BENCHMARK");
+});
+
+test("GATE5M-P13 market mismatch -> BENCHMARK_MARKET_MISMATCH", () => {
+  const input = buildPortfolioKospiWithBenchmark({
+    oneTrade: true,
+    benchmarkMarket: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ,
+  });
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_BENCHMARK_STAGE);
+  assert.equal(hasCode(result, "BENCHMARK_MARKET_MISMATCH"), true);
+});
+
+test("GATE5M-P14 invalid benchmark input", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  input.benchmark.benchmarkSeries[1].close = Number.NaN;
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_BENCHMARK_STAGE);
+  assert.equal(hasCode(result, "INVALID_BENCHMARK_INPUT"), true);
+});
+
+test("GATE5M-P14b malformed benchmarkSeries object fails closed not NOT_STARTED", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  input.benchmark.benchmarkSeries = {};
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_BENCHMARK_STAGE);
+  assert.equal(result.failedStage, "BENCHMARK");
+  assert.equal(hasCode(result, "INVALID_BENCHMARK_INPUT"), true);
+  assert.notEqual(result.benchmarkStatus, "NOT_STARTED");
+});
+
+test("GATE5M-P15 failedStage=BENCHMARK", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  input.benchmark.market = "KOSPI";
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_BENCHMARK_STAGE);
+  assert.equal(result.failedStage, "BENCHMARK");
+});
+
+test("GATE5M-P16 root preserved in errorCodes", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  input.benchmark.benchmarkSeries = [{ tradingDate: "2101-03-01", close: 200 }];
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_BENCHMARK_STAGE);
+  assert.equal(
+    hasCode(result, "INVALID_BENCHMARK_INPUT") || hasCode(result, "BENCHMARK_PERIOD_MISMATCH"),
+    true,
+  );
+});
+
+test("GATE5M-P17 BENCHMARK_STAGE_FAILED summary present", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  input.benchmark.market = "KOSPI";
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(hasCode(result, ERROR.BENCHMARK_STAGE_FAILED), true);
+});
+
+test("GATE5M-P18 benchmarkReturn null on failure", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  input.benchmark.market = "KOSPI";
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_BENCHMARK_STAGE);
+  assert.equal(result.benchmarkReturn, null);
+});
+
+test("GATE5M-P19 alpha null on failure", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  input.benchmark.market = "KOSPI";
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_BENCHMARK_STAGE);
+  assert.equal(result.alpha, null);
+});
+
+test("GATE5M-P20 safety flags false on success", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_BENCHMARK_ALPHA);
+  assertOperationalBlocked(result);
+});
+
+test("GATE5M-P21 executionStatus NOT_EXECUTED", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.executionStatus, EXEC_STATUS.NOT_EXECUTED);
+});
+
+test("GATE5M-P22 calculationStatus SIMULATED_CALCULATION_ONLY", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.calculationStatus, CALCULATION_STATUS.SIMULATED_CALCULATION_ONLY);
+});
+
+test("GATE5M-P23 determinism deepEqual", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  const a = runSyntheticBenchmarkPipeline(input);
+  const b = runSyntheticBenchmarkPipeline(input);
+  assert.deepEqual(a, b);
+});
+
+test("GATE5M-P24 input immutable", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  const snap = JSON.stringify(input);
+  runSyntheticBenchmarkPipeline(input);
+  assert.equal(JSON.stringify(input), snap);
+});
+
+test("GATE5M-P25 source no network/order calls in benchmark path", () => {
+  assertNoNetworkOrOrderCalls(fs.readFileSync(PIPELINE_PATH, "utf8"));
+  assertNoNetworkOrOrderCalls(fs.readFileSync(BENCHMARK_PERFORMANCE_PATH, "utf8"));
+});
+
+test("GATE5M-R03 overflow benchmark series fail-closed at BENCHMARK stage", () => {
+  const input = buildPortfolioKospiWithBenchmark({ oneTrade: true });
+  const start = input.benchmark.benchmarkSeries[0].tradingDate;
+  const end = input.benchmark.benchmarkSeries[input.benchmark.benchmarkSeries.length - 1].tradingDate;
+  input.benchmark.benchmarkSeries = input.benchmark.benchmarkSeries.map((row) => {
+    if (row.tradingDate === start) return { tradingDate: row.tradingDate, close: Number.MIN_VALUE };
+    if (row.tradingDate === end) return { tradingDate: row.tradingDate, close: Number.MAX_VALUE };
+    return row;
+  });
+  const result = runSyntheticBenchmarkPipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_BENCHMARK_STAGE);
+  assert.equal(result.failedStage, "BENCHMARK");
+  assert.equal(hasCode(result, "INVALID_BENCHMARK_INPUT"), true);
+  assert.equal(hasCode(result, ERROR.BENCHMARK_STAGE_FAILED), true);
+  assert.equal(result.benchmarkReturn, null);
+  assert.equal(result.alpha, null);
+  assert.equal(Number.isFinite(result.totalReturn), true);
 });
