@@ -1744,6 +1744,8 @@ test("GATE5H-P50 허용 파일 외 변경 없음", () => {
     "test/backtest-performance-metrics.test.js",
     "lib/backtest/benchmark-performance.js",
     "test/backtest-benchmark-performance.test.js",
+    "lib/backtest/walk-forward-validation.js",
+    "test/backtest-walk-forward-validation.test.js",
   ]);
   for (const name of names) {
     assert.equal(allowed.has(name), true, name);
@@ -2230,6 +2232,8 @@ test("GATE5J-P21 GATE5H-P50 허용 파일 세트 업데이트 확인", () => {
     "test/backtest-performance-metrics.test.js",
     "lib/backtest/benchmark-performance.js",
     "test/backtest-benchmark-performance.test.js",
+    "lib/backtest/walk-forward-validation.js",
+    "test/backtest-walk-forward-validation.test.js",
   ]);
   assert.equal(allowed.has("lib/backtest/multi-trade-lifecycle.js"), true);
   assert.equal(allowed.has("test/backtest-multi-trade-lifecycle.test.js"), true);
@@ -2239,6 +2243,8 @@ test("GATE5J-P21 GATE5H-P50 허용 파일 세트 업데이트 확인", () => {
   assert.equal(allowed.has("test/backtest-performance-metrics.test.js"), true);
   assert.equal(allowed.has("lib/backtest/benchmark-performance.js"), true);
   assert.equal(allowed.has("test/backtest-benchmark-performance.test.js"), true);
+  assert.equal(allowed.has("lib/backtest/walk-forward-validation.js"), true);
+  assert.equal(allowed.has("test/backtest-walk-forward-validation.test.js"), true);
 });
 
 test("GATE5J-P22 single-trade 계약 변경 없음 — PIPELINE_VERSION 불변", () => {
