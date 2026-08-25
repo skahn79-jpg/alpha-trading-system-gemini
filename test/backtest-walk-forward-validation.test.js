@@ -1803,3 +1803,88 @@ test("GATE5W-W05 embargo=1 SHORT fail-closed min 5", () => {
   assert.equal(r.ok, false);
   assert.equal(r.errors[0].field, "embargoTradingDayCount");
 });
+
+function captureWalkForwardBenchmarks(runInput) {
+  const pipelineMod = require("../lib/backtest/synthetic-pipeline");
+  const original = pipelineMod.runSyntheticBenchmarkPipeline;
+  const captures = [];
+  pipelineMod.runSyntheticBenchmarkPipeline = function patched(input) {
+    const benchmarkDates = input && input.benchmark && Array.isArray(input.benchmark.benchmarkSeries)
+      ? input.benchmark.benchmarkSeries.map((r) => r && r.tradingDate)
+      : [];
+    const result = original(input);
+    captures.push({ benchmarkDates, pipelineStatus: result && result.pipelineStatus });
+    return result;
+  };
+  try {
+    const result = runWalkForwardValidation(runInput);
+    return { result, captures };
+  } finally {
+    pipelineMod.runSyntheticBenchmarkPipeline = original;
+  }
+}
+
+test("GATE5Y-W01 extra future benchmark excluded from every standalone OOS fold", () => {
+  const dates = generateWeekdayDates("2101-03-01", 22);
+  const extraDate = generateWeekdayDates(dates[dates.length - 1], 3)[1];
+  const input = buildWalkForwardInput({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
+  });
+  input.benchmarkSeries.push({ tradingDate: extraDate, close: 99999 });
+  const { result, captures } = captureWalkForwardBenchmarks(input);
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(captures.length > 0, true);
+  for (const cap of captures) {
+    assert.equal(cap.benchmarkDates.includes(extraDate), false);
+  }
+});
+
+test("GATE5Y-W02 embargo=1 ULTRA_SHORT 22-date success still PASS", () => {
+  const r = runWalkForwardValidation(buildWalkForwardInput({
+    tradingDates: generateWeekdayDates("2101-03-01", 22),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
+    embargoTradingDayCount: 1,
+    horizonType: "ULTRA_SHORT",
+  }));
+  assert.equal(r.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+});
+
+test("GATE5Y-W03 omitted embargo still FAIL", () => {
+  const input = buildWalkForwardInput();
+  delete input.embargoTradingDayCount;
+  const result = runWalkForwardValidation(input);
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+});
+
+test("GATE5Y-W04 reversed benchmark order does not change fold metrics", () => {
+  const base = buildWalkForwardInput();
+  const r0 = runWalkForwardValidation(deepClone(base));
+  const reversed = deepClone(base);
+  reversed.benchmarkSeries = reversed.benchmarkSeries.slice().reverse();
+  const r1 = runWalkForwardValidation(reversed);
+  assert.equal(r0.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(r1.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(r0.meanOosTotalReturn, r1.meanOosTotalReturn);
+  assert.equal(r0.meanOosAlpha, r1.meanOosAlpha);
+});
+
+test("GATE5Y-W05 empty benchmark after slice fail-closed", () => {
+  const dates = generateWeekdayDates("2101-03-01", 22);
+  const extraDate = generateWeekdayDates(dates[dates.length - 1], 3)[1];
+  const input = buildWalkForwardInput({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
+  });
+  input.benchmarkSeries = [{ tradingDate: extraDate, close: 1 }];
+  const result = runWalkForwardValidation(input);
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.OOS_FOLD_FAILED), true);
+});
