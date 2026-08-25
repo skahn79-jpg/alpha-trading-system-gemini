@@ -1293,3 +1293,92 @@ test("GATE5N-R08 large finite (MAX_VALUE/4 per fold) → COMPLETED, Number.isFin
   assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
   assert.equal(Number.isFinite(result.meanOosTotalReturn), true);
 });
+
+
+// ─── GATE 5R — Purged walk-forward embargo ─────────────────────────────
+
+test("GATE5R-W01 omitted embargo equals explicit 0 and 5Q indices", () => {
+  const dates = [
+    "2101-03-02", "2101-03-03", "2101-03-04", "2101-03-05",
+    "2101-03-06", "2101-03-09", "2101-03-10", "2101-03-11",
+    "2101-03-12", "2101-03-13", "2101-03-16", "2101-03-17",
+  ];
+  const a = generateWalkForwardWindows({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 3,
+  });
+  const b = generateWalkForwardWindows({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 3,
+    embargoTradingDayCount: 0,
+  });
+  assert.equal(a.ok, true);
+  assert.equal(b.ok, true);
+  assert.equal(a.windows[0].oosStartIndex, a.windows[0].trainEndIndex + 1);
+  assert.deepEqual(a.windows.map((w) => ({
+    trainStartIndex: w.trainStartIndex,
+    trainEndIndex: w.trainEndIndex,
+    oosStartIndex: w.oosStartIndex,
+    oosEndIndex: w.oosEndIndex,
+  })), b.windows.map((w) => ({
+    trainStartIndex: w.trainStartIndex,
+    trainEndIndex: w.trainEndIndex,
+    oosStartIndex: w.oosStartIndex,
+    oosEndIndex: w.oosEndIndex,
+  })));
+  assert.deepEqual(a.windows[0].embargoDates, []);
+  assert.equal(a.windows[0].embargoTradingDayCount, 0);
+  assert.equal(a.windows[0].embargoStart, null);
+  assert.equal(a.windows[0].embargoEnd, null);
+});
+
+test("GATE5R-W02 embargo=1 is index gap not calendar skip", () => {
+  const dates = generateWeekdayDates("2101-03-01", 18);
+  const result = generateWalkForwardWindows({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 3,
+    embargoTradingDayCount: 1,
+  });
+  assert.equal(result.ok, true);
+  const w = result.windows[0];
+  assert.equal(w.trainEndIndex, 5);
+  assert.equal(w.oosStartIndex, 7);
+  assert.equal(w.oosEndIndex, 9);
+  assert.deepEqual(w.embargoDates, [dates[6]]);
+  assert.equal(w.embargoStart, dates[6]);
+  assert.equal(w.embargoEnd, dates[6]);
+  assert.equal(w.oosStart, dates[7]);
+  assert.notEqual(w.trainEnd, w.oosStart);
+});
+
+test("GATE5R-W03 negative embargo fail-closed", () => {
+  const result = generateWalkForwardWindows({
+    tradingDates: D,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 3,
+    embargoTradingDayCount: -1,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(result.errors[0].field, "embargoTradingDayCount");
+});
+
+test("GATE5R-W04 embargo included in insufficient-data bound", () => {
+  const dates = generateWeekdayDates("2101-03-01", 12);
+  const result = generateWalkForwardWindows({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 3,
+    embargoTradingDayCount: 4,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.INSUFFICIENT_WALK_FORWARD_DATA), true);
+});

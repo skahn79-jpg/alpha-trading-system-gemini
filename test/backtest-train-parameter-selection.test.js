@@ -2867,3 +2867,55 @@ test("GATE5Q-P06 Train selection unchanged vs tiled OOS", () => {
   assert.equal(small.folds[0].selectedCandidateId, wide.folds[0].selectedCandidateId);
   assert.equal(small.folds[0].selectionScore, wide.folds[0].selectionScore);
 });
+
+
+// ─── GATE 5R — Embargo isolation ───────────────────────────────────────
+
+test("GATE5R-P01 embargo=0 selection matches omitted embargo", () => {
+  const dates = generateWeekdayDates("2101-03-01", 12);
+  const a = runWalkForwardTrainParameterSelection(buildSelectionInput({ tradingDates: dates }));
+  const b = runWalkForwardTrainParameterSelection(buildSelectionInput({
+    tradingDates: dates,
+    embargoTradingDayCount: 0,
+  }));
+  assert.equal(a.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(b.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(a.folds[0].selectedCandidateId, b.folds[0].selectedCandidateId);
+  assert.equal(a.folds[0].selectionScore, b.folds[0].selectionScore);
+  assert.equal(a.folds[0].oosTotalReturn, b.folds[0].oosTotalReturn);
+  assert.deepEqual(a.folds[0].embargoDates, []);
+});
+
+test("GATE5R-P02 embargo bar mutation does not change train or OOS scores", () => {
+  const dates = generateWeekdayDates("2101-03-01", 18);
+  const base = buildSelectionInput({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 3,
+    embargoTradingDayCount: 1,
+  });
+  const r0 = runWalkForwardTrainParameterSelection(deepClone(base));
+  assert.equal(r0.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.deepEqual(r0.folds[0].embargoDates, [dates[6]]);
+  assert.equal(r0.folds[0].oosStart, dates[7]);
+  const mutated = deepClone(base);
+  mutated.pipelineBase.dataset.candles[6].open = 8000;
+  mutated.pipelineBase.dataset.candles[6].high = 50000;
+  mutated.pipelineBase.dataset.candles[6].low = 7900;
+  mutated.pipelineBase.dataset.candles[6].close = 45000;
+  mutated.pipelineBase.dataset.contentChecksum = computeDatasetContentChecksum(mutated.pipelineBase.dataset);
+  const r1 = runWalkForwardTrainParameterSelection(mutated);
+  assert.equal(r1.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(r0.folds[0].selectedCandidateId, r1.folds[0].selectedCandidateId);
+  assert.equal(r0.folds[0].selectionScore, r1.folds[0].selectionScore);
+  assert.equal(r0.folds[0].oosTotalReturn, r1.folds[0].oosTotalReturn);
+});
+
+test("GATE5R-P03 invalid embargo fail-closed", () => {
+  const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
+    embargoTradingDayCount: 1.5,
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+});
