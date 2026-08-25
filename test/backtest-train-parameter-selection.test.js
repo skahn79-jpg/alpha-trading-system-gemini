@@ -2284,6 +2284,7 @@ test("GATE5O-R2A-C first failure snapshot isolates pipeline error references", (
 test("GATE5O-R2A-D train calendar equals canonical dates and excludes gap TRADING_DAY", () => {
   const input = buildSelectionInput();
   const canonicalTrainDates = input.tradingDates.slice(0, input.trainWindowSize);
+  const tile1Dates = canonicalTrainDates.slice(0, TILE_SIZE);
   const gapDate = findWeekendBetween(canonicalTrainDates);
   assert.equal(gapDate != null, true);
   injectExtraCalendarDays(input.pipelineBase, [
@@ -2294,13 +2295,14 @@ test("GATE5O-R2A-D train calendar equals canonical dates and excludes gap TRADIN
   const capture = captures.find(
     (row) => row.kind === "train" && String(row.tradeId).startsWith("WF-0001:"),
   );
-  assert.deepEqual(capture.calendarDays.map((day) => day.tradingDate), canonicalTrainDates);
+  assert.deepEqual(capture.calendarDays.map((day) => day.tradingDate), tile1Dates);
   assert.equal(capture.calendarDays.some((day) => day.tradingDate === gapDate), false);
 });
 
 test("GATE5O-R2A-E non-member CLOSED is absent entirely", () => {
   const input = buildSelectionInput();
   const canonicalTrainDates = input.tradingDates.slice(0, input.trainWindowSize);
+  const tile1Dates = canonicalTrainDates.slice(0, TILE_SIZE);
   const gapDate = findWeekendBetween(canonicalTrainDates);
   assert.equal(gapDate != null, true);
   injectExtraCalendarDays(input.pipelineBase, [
@@ -2312,12 +2314,13 @@ test("GATE5O-R2A-E non-member CLOSED is absent entirely", () => {
     (row) => row.kind === "train" && String(row.tradeId).startsWith("WF-0001:"),
   );
   assert.equal(capture.calendarDays.some((day) => day.tradingDate === gapDate), false);
-  assert.deepEqual(capture.calendarDays.map((day) => day.tradingDate), canonicalTrainDates);
+  assert.deepEqual(capture.calendarDays.map((day) => day.tradingDate), tile1Dates);
 });
 
 test("GATE5O-R2A-F missing canonical row is synthesized with exact membership", () => {
   const input = buildSelectionInput();
   const canonicalTrainDates = input.tradingDates.slice(0, input.trainWindowSize);
+  const tile1Dates = canonicalTrainDates.slice(0, TILE_SIZE);
   const missingDate = canonicalTrainDates[2];
   input.pipelineBase.calendar.days = input.pipelineBase.calendar.days.filter(
     (day) => day.tradingDate !== missingDate,
@@ -2327,8 +2330,8 @@ test("GATE5O-R2A-F missing canonical row is synthesized with exact membership", 
   const capture = captures.find(
     (row) => row.kind === "train" && String(row.tradeId).startsWith("WF-0001:"),
   );
-  assert.deepEqual(capture.calendarDays.map((day) => day.tradingDate), canonicalTrainDates);
-  assert.equal(capture.calendarDays.length, canonicalTrainDates.length);
+  assert.deepEqual(capture.calendarDays.map((day) => day.tradingDate), tile1Dates);
+  assert.equal(capture.calendarDays.length, tile1Dates.length);
   assert.equal(
     capture.calendarDays.find((day) => day.tradingDate === missingDate).dayStatus,
     "TRADING_DAY",
@@ -2469,7 +2472,7 @@ test("GATE5O-R2A-K empty source days synthesize exact train and OOS calendars", 
     (row) => row.kind === "train" && String(row.tradeId).startsWith("WF-0001:"),
   );
   const oosCapture = captures.find((row) => row.kind === "oos" && row.tradeId === "WF-0001:oos:T01");
-  assert.deepEqual(trainCapture.calendarDays, expectedDays(trainDates));
+  assert.deepEqual(trainCapture.calendarDays, expectedDays(trainDates.slice(0, TILE_SIZE)));
   assert.deepEqual(oosCapture.calendarDays, expectedDays(oosDates));
 });
 
@@ -2562,15 +2565,19 @@ test("GATE5P-P05 train pipeline uses tiled intents T01..; OOS remains single win
     stepSize: 3,
   }));
   assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
-  const trainCap = captures.find((c) => c.kind === "train" && String(c.tradeId).startsWith("WF-0001:"));
-  assert.equal(trainCap.tradeIntents.length, 2);
-  assert.equal(trainCap.tradeIntents[0].tradeId, "WF-0001:P001:train:T01");
-  assert.equal(trainCap.tradeIntents[1].tradeId, "WF-0001:P001:train:T02");
-  assert.equal(trainCap.tradeIntents[0].entryDate, dates[1]);
-  assert.equal(trainCap.tradeIntents[0].exitDate, dates[2]);
-  assert.equal(trainCap.tradeIntents[0].exitDateMode, "LATEST_ALLOWED");
-  assert.equal(trainCap.tradeIntents[1].entryDate, dates[4]);
-  assert.equal(trainCap.tradeIntents[1].exitDate, dates[5]);
+  const t01 = captures.find((c) => c.kind === "train" && c.tradeId === "WF-0001:P001:train:T01");
+  const t02 = captures.find((c) => c.kind === "train" && c.tradeId === "WF-0001:P001:train:T02");
+  assert.equal(t01 != null, true);
+  assert.equal(t02 != null, true);
+  assert.equal(t01.tradeIntents.length, 1);
+  assert.equal(t02.tradeIntents.length, 1);
+  assert.equal(t01.tradeIntents[0].tradeId, "WF-0001:P001:train:T01");
+  assert.equal(t02.tradeIntents[0].tradeId, "WF-0001:P001:train:T02");
+  assert.equal(t01.tradeIntents[0].entryDate, dates[1]);
+  assert.equal(t01.tradeIntents[0].exitDate, dates[2]);
+  assert.equal(t01.tradeIntents[0].exitDateMode, "LATEST_ALLOWED");
+  assert.equal(t02.tradeIntents[0].entryDate, dates[4]);
+  assert.equal(t02.tradeIntents[0].exitDate, dates[5]);
   const oosCap = captures.find((c) => c.kind === "oos" && c.tradeId === "WF-0001:oos:T01");
   assert.equal(oosCap.tradeIntents.length, 1);
   assert.equal(oosCap.tradeIntents[0].tradeId, "WF-0001:oos:T01");
@@ -2677,7 +2684,7 @@ test("GATE5P-P09 multi-tile first-root is candidate pipeline failure", () => {
   try {
     pipelineMod.runSyntheticPerformancePipeline = function patched(input) {
       const intents = input.tradeIntents || [];
-      if (intents.length >= 2 && String(intents[0].tradeId).includes(":train:")) {
+      if (intents.length >= 1 && String(intents[0].tradeId).includes(":train:")) {
         return {
           pipelineStatus: "BLOCKED_PERFORMANCE_STAGE",
           errors: [{ code: "MULTI_TILE_ROOT" }],
@@ -2797,12 +2804,15 @@ test("GATE5Q-P02 OOS tile tradeIds T01.. and frozen winner params on every tile"
     stepSize: 14,
   }));
   assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
-  const oosCap = captures.find((c) => c.kind === "oos" && String(c.tradeId).startsWith("WF-0001:oos:"));
-  assert.equal(oosCap.tradeIntents.length, 2);
-  assert.equal(oosCap.tradeIntents[0].tradeId, "WF-0001:oos:T01");
-  assert.equal(oosCap.tradeIntents[1].tradeId, "WF-0001:oos:T02");
+  const oosT01 = captures.find((c) => c.kind === "oos" && c.tradeId === "WF-0001:oos:T01");
+  const oosT02 = captures.find((c) => c.kind === "oos" && c.tradeId === "WF-0001:oos:T02");
+  assert.equal(oosT01 != null, true);
+  assert.equal(oosT02 != null, true);
+  assert.equal(oosT01.tradeIntents.length, 1);
+  assert.equal(oosT02.tradeIntents.length, 1);
   const winner = result.folds[0].selectedParameters;
-  for (const intent of oosCap.tradeIntents) {
+  for (const cap of [oosT01, oosT02]) {
+    const intent = cap.tradeIntents[0];
     assert.equal(intent.exitPolicy.stopLossPrice, winner.stopLossPrice);
     assert.equal(intent.exitPolicy.takeProfitPrice, winner.takeProfitPrice);
     assert.equal(intent.exitDateMode, "LATEST_ALLOWED");
@@ -3018,4 +3028,70 @@ test("GATE5U-P02 trainWindowSize 303 exceeds tile cap fail-closed", () => {
   assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
   assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
   assert.equal(result.errors[0].field, "trainWindowSize");
+});
+
+test("GATE5X-W01 tile1 dataset excludes tile2 dates", () => {
+  const dates = generateWeekdayDates("2101-03-01", 22);
+  const { result, captures } = capturePipelineCalendars(buildSelectionInput({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  const t01 = captures.find((c) => c.kind === "train" && c.tradeId === "WF-0001:P001:train:T01");
+  const t02 = captures.find((c) => c.kind === "train" && c.tradeId === "WF-0001:P001:train:T02");
+  assert.equal(t01 != null, true);
+  assert.equal(t02 != null, true);
+  assert.equal(t01.tradeIntents.length, 1);
+  const tile2 = new Set(dates.slice(3, 6));
+  for (const date of t01.candleDates) {
+    assert.equal(tile2.has(date), false);
+  }
+  for (const d of t01.calendarDays) {
+    assert.equal(tile2.has(d.tradingDate), false);
+  }
+  assert.deepEqual(t01.candleDates.slice().sort(), dates.slice(0, 3).slice().sort());
+});
+
+test("GATE5X-W02 extra post-window candle excluded from every tile slice", () => {
+  const dates = generateWeekdayDates("2101-03-01", 22);
+  const input = buildSelectionInput({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
+  });
+  const extraDate = generateWeekdayDates(dates[dates.length - 1], 3)[1];
+  input.pipelineBase.dataset.candles.push(integratedCandle(extraDate, {
+    open: 99999, high: 99999, low: 99999, close: 99999,
+  }));
+  input.pipelineBase.dataset.contentChecksum = computeDatasetContentChecksum(input.pipelineBase.dataset);
+  const { result, captures } = capturePipelineCalendars(input);
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  for (const cap of captures) {
+    assert.equal(cap.candleDates.includes(extraDate), false);
+  }
+  assert.equal(result.errorCodes.includes("LOOKAHEAD_CANDLE_PRESENT"), false);
+});
+
+test("GATE5X-W03 embargo=1 ULTRA_SHORT 22-date success still PASS", () => {
+  const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
+    tradingDates: generateWeekdayDates("2101-03-01", 22),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
+    embargoTradingDayCount: 1,
+    horizonType: "ULTRA_SHORT",
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(result.folds.length, 2);
+});
+
+test("GATE5X-W04 omitted embargo still FAIL", () => {
+  const input = buildSelectionInput();
+  delete input.embargoTradingDayCount;
+  const result = runWalkForwardTrainParameterSelection(input);
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
 });
