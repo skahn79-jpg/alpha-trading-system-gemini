@@ -1806,21 +1806,43 @@ test("GATE5W-W05 embargo=1 SHORT fail-closed min 5", () => {
 
 function captureWalkForwardBenchmarks(runInput) {
   const pipelineMod = require("../lib/backtest/synthetic-pipeline");
+  const leakageGuard = require("../lib/backtest/leakage-guard");
   const original = pipelineMod.runSyntheticBenchmarkPipeline;
+  const originalGuard = leakageGuard.assertFeatureWindowNoLookAhead;
   const captures = [];
+  const featureCaptures = [];
+  leakageGuard.assertFeatureWindowNoLookAhead = function patchedGuard(payload) {
+    featureCaptures.push({
+      featureDates: payload && Array.isArray(payload.featureWindow)
+        ? payload.featureWindow.map((c) => c && c.tradingDate)
+        : [],
+      featureAsOfTradingDate: payload && payload.featureAsOfTradingDate,
+    });
+    return originalGuard(payload);
+  };
   pipelineMod.runSyntheticBenchmarkPipeline = function patched(input) {
     const benchmarkDates = input && input.benchmark && Array.isArray(input.benchmark.benchmarkSeries)
       ? input.benchmark.benchmarkSeries.map((r) => r && r.tradingDate)
       : [];
+    const candleDates = input && input.dataset && Array.isArray(input.dataset.candles)
+      ? input.dataset.candles.map((c) => c.tradingDate)
+      : [];
+    const tradeIntent = input && Array.isArray(input.tradeIntents) ? input.tradeIntents[0] : null;
     const result = original(input);
-    captures.push({ benchmarkDates, pipelineStatus: result && result.pipelineStatus });
+    captures.push({
+      benchmarkDates,
+      candleDates,
+      tradeIntent,
+      pipelineStatus: result && result.pipelineStatus,
+    });
     return result;
   };
   try {
     const result = runWalkForwardValidation(runInput);
-    return { result, captures };
+    return { result, captures, featureCaptures };
   } finally {
     pipelineMod.runSyntheticBenchmarkPipeline = original;
+    leakageGuard.assertFeatureWindowNoLookAhead = originalGuard;
   }
 }
 
@@ -1887,4 +1909,88 @@ test("GATE5Y-W05 empty benchmark after slice fail-closed", () => {
   const result = runWalkForwardValidation(input);
   assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
   assert.equal(hasCode(result, ERROR.OOS_FOLD_FAILED), true);
+});
+
+test("GATE5Z-W01 feature asOf is signal and execution candles include entry and exit", () => {
+  const { result, captures, featureCaptures } = captureWalkForwardBenchmarks(buildWalkForwardInput({
+    tradingDates: generateWeekdayDates("2101-03-01", 22),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(featureCaptures.length > 0, true);
+  assert.equal(captures.length > 0, true);
+  for (const cap of captures) {
+    const signal = cap.tradeIntent.entryIntent.signalTradingDate;
+    const entry = cap.tradeIntent.entryDate;
+    const exit = cap.tradeIntent.exitDate;
+    assert.equal(signal < entry, true);
+    assert.equal(cap.candleDates.includes(entry), true);
+    assert.equal(cap.candleDates.includes(exit), true);
+  }
+  for (const feat of featureCaptures) {
+    assert.equal(feat.featureAsOfTradingDate != null, true);
+    for (const date of feat.featureDates) {
+      assert.equal(date <= feat.featureAsOfTradingDate, true);
+    }
+  }
+});
+
+test("GATE5Z-W02 embargo=1 ULTRA_SHORT 22-date success still PASS", () => {
+  const r = runWalkForwardValidation(buildWalkForwardInput({
+    tradingDates: generateWeekdayDates("2101-03-01", 22),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
+    embargoTradingDayCount: 1,
+    horizonType: "ULTRA_SHORT",
+  }));
+  assert.equal(r.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+});
+
+test("GATE5Z-W03 omitted embargo still FAIL", () => {
+  const input = buildWalkForwardInput();
+  delete input.embargoTradingDayCount;
+  const result = runWalkForwardValidation(input);
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+});
+
+test("GATE5Z-W04 extra future benchmark still excluded", () => {
+  const dates = generateWeekdayDates("2101-03-01", 22);
+  const extraDate = generateWeekdayDates(dates[dates.length - 1], 3)[1];
+  const input = buildWalkForwardInput({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
+  });
+  input.benchmarkSeries.push({ tradingDate: extraDate, close: 99999 });
+  const { result, captures } = captureWalkForwardBenchmarks(input);
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  for (const cap of captures) {
+    assert.equal(cap.benchmarkDates.includes(extraDate), false);
+  }
+});
+
+test("GATE5Z-W05 feature window does not include entry or exit dates", () => {
+  const { result, captures, featureCaptures } = captureWalkForwardBenchmarks(buildWalkForwardInput({
+    tradingDates: generateWeekdayDates("2101-03-01", 22),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  const cap = captures[0];
+  const signal = cap.tradeIntent.entryIntent.signalTradingDate;
+  const entry = cap.tradeIntent.entryDate;
+  const exit = cap.tradeIntent.exitDate;
+  const matching = featureCaptures.filter((f) => f.featureAsOfTradingDate === signal);
+  assert.equal(matching.length > 0, true);
+  for (const feat of matching) {
+    assert.equal(feat.featureDates.includes(entry), false);
+    assert.equal(feat.featureDates.includes(exit), false);
+    assert.equal(feat.featureDates.includes(signal), true);
+  }
 });
