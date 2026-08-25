@@ -457,7 +457,7 @@ test("GATE5N-W13 insufficient folds (<2)", () => {
   assert.equal(hasCode(r, ERROR.INSUFFICIENT_WALK_FORWARD_FOLDS), true);
 });
 
-test("GATE5N-W14 droppedIncompleteTail true when leftover cannot fill OOS", () => {
+test("GATE5N-W14 leftover suffix fail-closed", () => {
   const dates = generateWeekdayDates("2101-03-01", 19);
   const r = generateWalkForwardWindows(windowInput({
     tradingDates: dates,
@@ -465,9 +465,10 @@ test("GATE5N-W14 droppedIncompleteTail true when leftover cannot fill OOS", () =
     oosWindowSize: 3,
     stepSize: 9,
   }));
-  assert.equal(r.ok, true);
-  assert.equal(r.droppedIncompleteTail, true);
-  assert.equal(r.windows.length, 2);
+  assert.equal(r.ok, false);
+  assert.equal(hasCode(r, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(r.errors[0].field, "tradingDates");
+  assert.equal(r.droppedIncompleteTail, false);
 });
 
 test("GATE5N-W15 droppedIncompleteTail false when exact fit", () => {
@@ -611,8 +612,8 @@ test("GATE5N-W33 oosWindowSize 1 fail-closed not tile-aligned", () => {
   assert.equal(r.errors[0].field, "oosWindowSize");
 });
 
-test("GATE5N-W34 40-date window generation", () => {
-  const dates = generateWeekdayDates("2101-03-01", 40);
+test("GATE5N-W34 30-date exact two-block window generation", () => {
+  const dates = generateWeekdayDates("2101-03-01", 30);
   const r = generateWalkForwardWindows({
     tradingDates: dates,
     trainWindowSize: 9,
@@ -621,6 +622,7 @@ test("GATE5N-W34 40-date window generation", () => {
   });
   assert.equal(r.ok, true);
   assert.equal(r.windows.length, 2);
+  assert.equal(r.droppedIncompleteTail, false);
 });
 
 test("GATE5N-W35 last fold oosEnd is last complete OOS end", () => {
@@ -854,15 +856,17 @@ test("GATE5N-W67 insufficient folds one fold only", () => {
   assert.equal(hasCode(r, ERROR.INSUFFICIENT_WALK_FORWARD_FOLDS), true);
 });
 
-test("GATE5N-W68 dropped tail one date leftover", () => {
+test("GATE5N-W68 leftover suffix fail-closed", () => {
   const r = generateWalkForwardWindows(windowInput({
     tradingDates: generateWeekdayDates("2101-03-01", 19),
     trainWindowSize: 6,
     oosWindowSize: 3,
     stepSize: 9,
   }));
-  assert.equal(r.ok, true);
-  assert.equal(r.droppedIncompleteTail, true);
+  assert.equal(r.ok, false);
+  assert.equal(hasCode(r, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(r.errors[0].field, "tradingDates");
+  assert.equal(r.droppedIncompleteTail, false);
 });
 
 test("GATE5N-W69 success ok true", () => {
@@ -1194,7 +1198,7 @@ test("GATE5N-P35 fold uses runSyntheticBenchmarkPipeline path", () => {
   assert.equal(result.folds[0].alpha != null, true);
 });
 
-test("GATE5N-P36 droppedIncompleteTail propagated from windows", () => {
+test("GATE5N-P36 leftover suffix blocked at window config", () => {
   const dates = generateWeekdayDates("2101-03-01", 19);
   const input = buildWalkForwardInput({
     tradingDates: dates,
@@ -1203,7 +1207,10 @@ test("GATE5N-P36 droppedIncompleteTail propagated from windows", () => {
     stepSize: 9,
   });
   const result = runWalkForwardValidation(input);
-  assert.equal(result.droppedIncompleteTail, true);
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(result.errors[0].field, "tradingDates");
+  assert.equal(result.droppedIncompleteTail, false);
 });
 
 test("GATE5N-P37 errorCodes empty on success", () => {
@@ -1663,4 +1670,31 @@ test("GATE5U-W08 trainWindowSize 300 at tile cap succeeds", () => {
   });
   assert.equal(r.ok, true);
   assert.equal(r.windows.length, 2);
+});
+
+// ─── GATE 5V — Exact block coverage ────────────────────────────────────
+
+test("GATE5V-W01 leftover n=19 train=6 oos=3 step=9 fail-closed", () => {
+  const r = generateWalkForwardWindows({
+    tradingDates: generateWeekdayDates("2101-03-01", 19),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 9,
+  });
+  assert.equal(r.ok, false);
+  assert.equal(hasCode(r, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(r.errors[0].field, "tradingDates");
+  assert.equal(r.droppedIncompleteTail, false);
+});
+
+test("GATE5V-W02 exact n=18 succeeds with droppedIncompleteTail false", () => {
+  const r = generateWalkForwardWindows({
+    tradingDates: generateWeekdayDates("2101-03-01", 18),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 9,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.windows.length, 2);
+  assert.equal(r.droppedIncompleteTail, false);
 });
