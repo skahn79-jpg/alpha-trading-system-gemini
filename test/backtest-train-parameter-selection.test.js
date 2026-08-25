@@ -1257,16 +1257,18 @@ test("GATE5O-P23 candidateEvaluations sorted ASC per fold", () => {
 });
 
 
-test("GATE5O-P24 OOS window < 3 days fails fold", () => {
+test("GATE5O-P24 OOS window not tile-aligned fails at config", () => {
   const dates = generateWeekdayDates("2101-03-01", 12);
   const input = buildSelectionInput({
     tradingDates: dates,
-    trainWindowSize: 4,
+    trainWindowSize: 6,
     oosWindowSize: 2,
-    stepSize: 6,
+    stepSize: 8,
   });
   const result = runWalkForwardTrainParameterSelection(input);
   assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(result.errors[0].field, "oosWindowSize");
 });
 
 
@@ -1978,30 +1980,17 @@ test("GATE5O-R1-SM01 trainWindowSize>3; exitDate is bar2", () => {
   assert.equal(result.folds[0].trainTradingDayCount, 9);
 });
 
-test("GATE5O-R1-SM02 dropped tail extreme mutation → selection unchanged", () => {
-  // trainWindowSize 10 → 3 complete tiles (idx 0..8) + dropped tail idx 9.
+test("GATE5O-R1-SM02 trainWindowSize 10 fail-closed not tile-aligned", () => {
   const dates = generateWeekdayDates("2101-03-01", 26);
-  const baseInput = buildSelectionInput({
+  const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
     tradingDates: dates,
     trainWindowSize: 10,
     oosWindowSize: 3,
     stepSize: 13,
-  });
-  const r1 = runWalkForwardTrainParameterSelection(deepClone(baseInput));
-  const mutated = deepClone(baseInput);
-  const tail = 9;
-  mutated.pipelineBase.dataset.candles[tail].open = 10000;
-  mutated.pipelineBase.dataset.candles[tail].high = 50000;
-  mutated.pipelineBase.dataset.candles[tail].low = 9900;
-  mutated.pipelineBase.dataset.candles[tail].close = 45000;
-  mutated.pipelineBase.dataset.contentChecksum = computeDatasetContentChecksum(
-    mutated.pipelineBase.dataset,
-  );
-  const r2 = runWalkForwardTrainParameterSelection(mutated);
-  assert.equal(r1.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
-  assert.equal(r2.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
-  assert.equal(r1.folds[0].selectedCandidateId, r2.folds[0].selectedCandidateId);
-  assert.equal(r1.folds[0].selectionScore, r2.folds[0].selectionScore);
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(result.errors[0].field, "trainWindowSize");
 });
 
 test("GATE5O-R1-SM03 evaluationStart literal", () => {
@@ -2497,12 +2486,22 @@ test("GATE5P-P02 buildTrainTiles index-only slice; leftover dropped", () => {
   assert.deepEqual(built.droppedDates, ["2101-03-15"]);
 });
 
-test("GATE5P-P03 window sizes 3/4/5/6 tile and tail metadata", () => {
+test("GATE5P-P03 window sizes 3/6 success empty tails; 4/5 fail-closed", () => {
+  for (const size of [4, 5]) {
+    const dates = generateWeekdayDates("2101-03-01", 2 * (size + 3));
+    const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
+      tradingDates: dates,
+      trainWindowSize: size,
+      oosWindowSize: 3,
+      stepSize: size + 3,
+    }));
+    assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+    assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+    assert.equal(result.errors[0].field, "trainWindowSize");
+  }
   const cases = [
-    { size: 3, tiles: 1, evalDays: 3, dropped: 0 },
-    { size: 4, tiles: 1, evalDays: 3, dropped: 1 },
-    { size: 5, tiles: 1, evalDays: 3, dropped: 2 },
-    { size: 6, tiles: 2, evalDays: 6, dropped: 0 },
+    { size: 3, tiles: 1, evalDays: 3 },
+    { size: 6, tiles: 2, evalDays: 6 },
   ];
   for (const c of cases) {
     const dates = generateWeekdayDates("2101-03-01", 2 * (c.size + 3));
@@ -2517,15 +2516,10 @@ test("GATE5P-P03 window sizes 3/4/5/6 tile and tail metadata", () => {
     assert.equal(fold.selectionEvaluationPolicy, "NONOVERLAPPING_THREE_BAR_TILES");
     assert.equal(fold.selectionTradeCount, c.tiles);
     assert.equal(fold.selectionEvaluationTradingDayCount, c.evalDays);
-    assert.equal(fold.selectionDroppedTailTradingDayCount, c.dropped);
-    assert.equal(fold.selectionDroppedTailDates.length, c.dropped);
+    assert.equal(fold.selectionDroppedTailTradingDayCount, 0);
+    assert.deepEqual(fold.selectionDroppedTailDates, []);
     assert.equal(fold.selectionEvaluationStart, dates[0]);
     assert.equal(fold.selectionEvaluationEnd, dates[c.tiles * 3 - 1]);
-    if (c.dropped === 0) {
-      assert.deepEqual(fold.selectionDroppedTailDates, []);
-    } else {
-      assert.deepEqual(fold.selectionDroppedTailDates, dates.slice(c.tiles * 3, c.size));
-    }
   }
 });
 
@@ -2566,21 +2560,19 @@ test("GATE5P-P05 train pipeline uses tiled intents T01..; OOS remains single win
   assert.equal(oosCap.tradeIntents[0].tradeId, "WF-0001:oos:T01");
 });
 
-test("GATE5P-P06 zero complete tiles fail-closed", () => {
+test("GATE5P-P06 trainWindowSize 2 fail-closed at config before zero-tile", () => {
   const dates = generateWeekdayDates("2101-03-01", 12);
   const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
     tradingDates: dates,
     trainWindowSize: 2,
     oosWindowSize: 3,
-    stepSize: 3,
+    stepSize: 5,
   }));
   assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
-  assert.equal(result.selectionStatus, SELECTION_STATUS.BLOCKED);
-  assert.equal(hasCode(result, ERROR.TRAIN_CANDIDATE_EVALUATION_FAILED), true);
+  assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(result.errors[0].field, "trainWindowSize");
   assert.equal(result.officialFolds.length, 0);
   assert.equal(result.meanOosTotalReturn, null);
-  assert.equal(result.folds[0].selectedParameters, null);
-  assert.equal(result.folds[0].selectionScore, null);
 });
 
 test("GATE5P-P07 overflow finite trades → nonfinite totalReturn fail-closed", () => {
@@ -2691,25 +2683,27 @@ test("GATE5P-P09 multi-tile first-root is candidate pipeline failure", () => {
   }
 });
 
-test("GATE5P-P10 complete-tile mutation can change score; dropped tail cannot", () => {
-  const dates = generateWeekdayDates("2101-03-01", 26);
-  const base = buildSelectionInput({
-    tradingDates: dates,
+test("GATE5P-P10 complete-tile mutation can change score; leftover train size rejected", () => {
+  const leftover = runWalkForwardTrainParameterSelection(buildSelectionInput({
+    tradingDates: generateWeekdayDates("2101-03-01", 26),
     trainWindowSize: 10,
     oosWindowSize: 3,
     stepSize: 13,
+  }));
+  assert.equal(leftover.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(leftover.errors[0].field, "trainWindowSize");
+
+  const dates = generateWeekdayDates("2101-03-01", 24);
+  const base = buildSelectionInput({
+    tradingDates: dates,
+    trainWindowSize: 9,
+    oosWindowSize: 3,
+    stepSize: 12,
   });
   const r0 = runWalkForwardTrainParameterSelection(deepClone(base));
-  const tailMut = deepClone(base);
-  tailMut.pipelineBase.dataset.candles[9].high = 50000;
-  tailMut.pipelineBase.dataset.candles[9].close = 45000;
-  tailMut.pipelineBase.dataset.contentChecksum = computeDatasetContentChecksum(tailMut.pipelineBase.dataset);
-  const rTail = runWalkForwardTrainParameterSelection(tailMut);
-  assert.equal(r0.folds[0].selectedCandidateId, rTail.folds[0].selectedCandidateId);
-  assert.equal(r0.folds[0].selectionScore, rTail.folds[0].selectionScore);
-
+  assert.equal(r0.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(r0.folds[0].selectionDroppedTailTradingDayCount, 0);
   const tileMut = deepClone(base);
-  // tile 1 entry (idx 1, MARKET_OPEN) — TP already fills on original exit high, so change entry fill.
   tileMut.pipelineBase.dataset.candles[1].open = 8000;
   tileMut.pipelineBase.dataset.candles[1].high = 8100;
   tileMut.pipelineBase.dataset.candles[1].low = 7900;
@@ -2741,12 +2735,22 @@ test("GATE5P-P12 lifecycle default exit mode remains EXACT", () => {
 
 // ─── GATE 5Q — Full OOS-Window Scoring ────────────────────────────────
 
-test("GATE5Q-P01 oosWindow 3/4/5/6 tile and tail metadata", () => {
+test("GATE5Q-P01 oosWindow 3/6 success empty tails; 4/5 fail-closed", () => {
+  for (const oos of [4, 5]) {
+    const dates = generateWeekdayDates("2101-03-01", 2 * (6 + oos));
+    const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
+      tradingDates: dates,
+      trainWindowSize: 6,
+      oosWindowSize: oos,
+      stepSize: 6 + oos,
+    }));
+    assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+    assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+    assert.equal(result.errors[0].field, "oosWindowSize");
+  }
   const cases = [
-    { oos: 3, step: 3, tiles: 1, dropped: 0 },
-    { oos: 4, step: 4, tiles: 1, dropped: 1 },
-    { oos: 5, step: 5, tiles: 1, dropped: 2 },
-    { oos: 6, step: 6, tiles: 2, dropped: 0 },
+    { oos: 3, tiles: 1 },
+    { oos: 6, tiles: 2 },
   ];
   for (const c of cases) {
     const dates = generateWeekdayDates("2101-03-01", 2 * (6 + c.oos));
@@ -2761,14 +2765,10 @@ test("GATE5Q-P01 oosWindow 3/4/5/6 tile and tail metadata", () => {
     const oosDates = dates.slice(6, 6 + c.oos);
     assert.equal(fold.oosTradeCount, c.tiles);
     assert.equal(fold.oosEvaluationTradingDayCount, c.tiles * 3);
-    assert.equal(fold.oosDroppedTailTradingDayCount, c.dropped);
+    assert.equal(fold.oosDroppedTailTradingDayCount, 0);
+    assert.deepEqual(fold.oosDroppedTailDates, []);
     assert.equal(fold.oosEvaluationStart, oosDates[0]);
     assert.equal(fold.oosEvaluationEnd, oosDates[c.tiles * 3 - 1]);
-    if (c.dropped === 0) {
-      assert.deepEqual(fold.oosDroppedTailDates, []);
-    } else {
-      assert.deepEqual(fold.oosDroppedTailDates, oosDates.slice(c.tiles * 3));
-    }
   }
 });
 
@@ -2793,28 +2793,29 @@ test("GATE5Q-P02 OOS tile tradeIds T01.. and frozen winner params on every tile"
   }
 });
 
-test("GATE5Q-P03 dropped OOS tail mutation does not change OOS metrics; complete tile can", () => {
-  const dates = generateWeekdayDates("2101-03-01", 26);
-  const base = buildSelectionInput({
-    tradingDates: dates,
+test("GATE5Q-P03 leftover oos=7 rejected; complete tile mutation can change OOS metrics", () => {
+  const leftover = runWalkForwardTrainParameterSelection(buildSelectionInput({
+    tradingDates: generateWeekdayDates("2101-03-01", 26),
     trainWindowSize: 6,
     oosWindowSize: 7,
     stepSize: 13,
+  }));
+  assert.equal(leftover.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(leftover.errors[0].field, "oosWindowSize");
+
+  const dates = generateWeekdayDates("2101-03-01", 24);
+  const base = buildSelectionInput({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 6,
+    stepSize: 12,
   });
   const r0 = runWalkForwardTrainParameterSelection(deepClone(base));
   assert.equal(r0.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(r0.folds[0].oosDroppedTailTradingDayCount, 0);
   const oosStart = 6;
-  const tailMut = deepClone(base);
-  const tailIdx = oosStart + 6; // leftover after 2 complete tiles
-  tailMut.pipelineBase.dataset.candles[tailIdx].high = 50000;
-  tailMut.pipelineBase.dataset.candles[tailIdx].close = 45000;
-  tailMut.pipelineBase.dataset.contentChecksum = computeDatasetContentChecksum(tailMut.pipelineBase.dataset);
-  const rTail = runWalkForwardTrainParameterSelection(tailMut);
-  assert.equal(r0.folds[0].selectedCandidateId, rTail.folds[0].selectedCandidateId);
-  assert.equal(r0.folds[0].oosTotalReturn, rTail.folds[0].oosTotalReturn);
-
   const tileMut = deepClone(base);
-  const entryIdx = oosStart + 1; // first OOS tile entry (MARKET_OPEN)
+  const entryIdx = oosStart + 1;
   tileMut.pipelineBase.dataset.candles[entryIdx].open = 8000;
   tileMut.pipelineBase.dataset.candles[entryIdx].high = 8100;
   tileMut.pipelineBase.dataset.candles[entryIdx].low = 7900;
@@ -2849,20 +2850,18 @@ test("GATE5Q-P04 overflow finite OOS trades → nonfinite metrics fail-closed", 
   }
 });
 
-test("GATE5Q-P05 zero OOS tiles fail-closed with OOS_FOLD_FAILED; selection recorded", () => {
+test("GATE5Q-P05 oosWindowSize 2 fail-closed at config before zero-tile", () => {
   const dates = generateWeekdayDates("2101-03-01", 12);
   const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
     tradingDates: dates,
-    trainWindowSize: 4,
+    trainWindowSize: 6,
     oosWindowSize: 2,
-    stepSize: 6,
+    stepSize: 8,
   }));
   assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
-  assert.equal(hasCode(result, ERROR.OOS_FOLD_FAILED), true);
-  assert.equal(result.errors[0].code, ERROR.OOS_FOLD_FAILED);
-  assert.equal(result.folds[0].selectedCandidateId != null, true);
-  assert.equal(result.folds[0].selectionScore != null, true);
-  assert.equal(result.folds[0].oosTradeCount, 0);
+  assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(result.errors[0].field, "oosWindowSize");
+  assert.equal(hasCode(result, ERROR.OOS_FOLD_FAILED), false);
 });
 
 test("GATE5Q-P06 Train selection unchanged vs tiled OOS", () => {
@@ -2981,4 +2980,26 @@ test("GATE5T-P01 post-OOS embargo bar mutation does not change train or OOS scor
   assert.equal(r0.folds[0].selectionScore, r1.folds[0].selectionScore);
   assert.equal(r0.folds[0].oosTotalReturn, r1.folds[0].oosTotalReturn);
   assert.deepEqual(r0.folds[0].postOosEmbargoDates, [dates[10]]);
+});
+
+test("GATE5U-P01 success dropped tails empty", () => {
+  const result = runWalkForwardTrainParameterSelection(buildSelectionInput());
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  for (const fold of result.folds) {
+    assert.equal(fold.selectionDroppedTailTradingDayCount, 0);
+    assert.deepEqual(fold.selectionDroppedTailDates, []);
+    assert.equal(fold.oosDroppedTailTradingDayCount, 0);
+    assert.deepEqual(fold.oosDroppedTailDates, []);
+  }
+});
+
+test("GATE5U-P02 trainWindowSize 303 exceeds tile cap fail-closed", () => {
+  const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
+    trainWindowSize: 303,
+    oosWindowSize: 3,
+    stepSize: 306,
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(result.errors[0].field, "trainWindowSize");
 });

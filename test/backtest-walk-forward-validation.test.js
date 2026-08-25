@@ -62,7 +62,10 @@ const D = [
   "2101-03-01", "2101-03-02", "2101-03-03", "2101-03-04",
   "2101-03-05", "2101-03-06", "2101-03-07", "2101-03-08",
   "2101-03-09", "2101-03-10", "2101-03-11", "2101-03-12",
+  "2101-03-13", "2101-03-14", "2101-03-15", "2101-03-16",
+  "2101-03-17", "2101-03-18",
 ];
+const D12 = D.slice(0, 12);
 
 function hasCode(result, code) {
   return (result.errorCodes && result.errorCodes.includes(code))
@@ -335,8 +338,8 @@ function windowInput(overrides) {
   const preserveStepSize = o.preserveStepSize === true;
   const rest = { ...o };
   delete rest.preserveStepSize;
-  const trainWindowSize = rest.trainWindowSize != null ? rest.trainWindowSize : 4;
-  const oosWindowSize = rest.oosWindowSize != null ? rest.oosWindowSize : 2;
+  const trainWindowSize = rest.trainWindowSize != null ? rest.trainWindowSize : 6;
+  const oosWindowSize = rest.oosWindowSize != null ? rest.oosWindowSize : 3;
   const requiredStep = blockedStepSize(trainWindowSize, oosWindowSize, rest.embargoTradingDayCount);
   let stepSize = rest.stepSize != null ? rest.stepSize : requiredStep;
   if (!preserveStepSize && stepSize === oosWindowSize) {
@@ -344,8 +347,8 @@ function windowInput(overrides) {
   }
   return {
     tradingDates: D,
-    trainWindowSize: 4,
-    oosWindowSize: 2,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
     stepSize: requiredStep,
     ...rest,
     trainWindowSize,
@@ -356,24 +359,24 @@ function windowInput(overrides) {
 
 // ─── GATE5N Window Tests W01–W70 ───────────────────────────────────────────────
 
-test("GATE5N-W01 known answer 2 blocks train=4 oos=2 step=6", () => {
+test("GATE5N-W01 known answer 2 blocks train=6 oos=3 step=9", () => {
   const r = generateWalkForwardWindows(windowInput());
   assert.equal(r.ok, true);
   assert.equal(r.windows.length, 2);
   assert.equal(r.windows[0].foldId, "WF-0001");
   assert.equal(r.windows[0].trainStart, "2101-03-01");
-  assert.equal(r.windows[0].trainEnd, "2101-03-04");
-  assert.equal(r.windows[0].oosStart, "2101-03-05");
-  assert.equal(r.windows[0].oosEnd, "2101-03-06");
+  assert.equal(r.windows[0].trainEnd, "2101-03-06");
+  assert.equal(r.windows[0].oosStart, "2101-03-07");
+  assert.equal(r.windows[0].oosEnd, "2101-03-09");
   assert.equal(r.windows[1].foldId, "WF-0002");
-  assert.equal(r.windows[1].trainStart, "2101-03-07");
-  assert.equal(r.windows[1].trainEnd, "2101-03-10");
-  assert.equal(r.windows[1].oosStart, "2101-03-11");
-  assert.equal(r.windows[1].oosEnd, "2101-03-12");
+  assert.equal(r.windows[1].trainStart, "2101-03-10");
+  assert.equal(r.windows[1].trainEnd, "2101-03-15");
+  assert.equal(r.windows[1].oosStart, "2101-03-16");
+  assert.equal(r.windows[1].oosEnd, "2101-03-18");
 });
 
 test("GATE5N-W02 stepSize !== train+embargo+oos blocked", () => {
-  const r = generateWalkForwardWindows(windowInput({ stepSize: 3 }));
+  const r = generateWalkForwardWindows(windowInput({ stepSize: 3, preserveStepSize: true }));
   assert.equal(r.ok, false);
   assert.equal(hasCode(r, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
 });
@@ -434,10 +437,10 @@ test("GATE5N-W11 non-ascending dates blocked", () => {
 
 test("GATE5N-W12 insufficient data n < train+oos", () => {
   const r = generateWalkForwardWindows(windowInput({
-    tradingDates: D.slice(0, 5),
-    trainWindowSize: 4,
-    oosWindowSize: 2,
-    stepSize: 6,
+    tradingDates: D.slice(0, 8),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 9,
   }));
   assert.equal(r.ok, false);
   assert.equal(hasCode(r, ERROR.INSUFFICIENT_WALK_FORWARD_DATA), true);
@@ -445,22 +448,22 @@ test("GATE5N-W12 insufficient data n < train+oos", () => {
 
 test("GATE5N-W13 insufficient folds (<2)", () => {
   const r = generateWalkForwardWindows(windowInput({
-    tradingDates: D.slice(0, 4),
-    trainWindowSize: 2,
-    oosWindowSize: 2,
-    stepSize: 4,
+    tradingDates: D.slice(0, 9),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 9,
   }));
   assert.equal(r.ok, false);
   assert.equal(hasCode(r, ERROR.INSUFFICIENT_WALK_FORWARD_FOLDS), true);
 });
 
 test("GATE5N-W14 droppedIncompleteTail true when leftover cannot fill OOS", () => {
-  const dates = generateWeekdayDates("2101-03-01", 13);
+  const dates = generateWeekdayDates("2101-03-01", 19);
   const r = generateWalkForwardWindows(windowInput({
     tradingDates: dates,
-    trainWindowSize: 4,
-    oosWindowSize: 2,
-    stepSize: 6,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 9,
   }));
   assert.equal(r.ok, true);
   assert.equal(r.droppedIncompleteTail, true);
@@ -494,17 +497,17 @@ test("GATE5N-W18 OOS folds do not overlap", () => {
 });
 
 test("GATE5N-W19 trainTradingDayCount equals trainWindowSize", () => {
-  const r = generateWalkForwardWindows(windowInput({ trainWindowSize: 4 }));
-  for (const w of r.windows) assert.equal(w.trainTradingDayCount, 4);
+  const r = generateWalkForwardWindows(windowInput({ trainWindowSize: 6 }));
+  for (const w of r.windows) assert.equal(w.trainTradingDayCount, 6);
 });
 
 test("GATE5N-W20 oosTradingDayCount equals oosWindowSize", () => {
-  const r = generateWalkForwardWindows(windowInput({ oosWindowSize: 2 }));
-  for (const w of r.windows) assert.equal(w.oosTradingDayCount, 2);
+  const r = generateWalkForwardWindows(windowInput({ oosWindowSize: 3 }));
+  for (const w of r.windows) assert.equal(w.oosTradingDayCount, 3);
 });
 
 test("GATE5N-W21 minTrainWindowSize valid passes", () => {
-  const r = generateWalkForwardWindows(windowInput({ trainWindowSize: 4, minTrainWindowSize: 4 }));
+  const r = generateWalkForwardWindows(windowInput({ trainWindowSize: 6, minTrainWindowSize: 3 }));
   assert.equal(r.ok, true);
 });
 
@@ -515,13 +518,13 @@ test("GATE5N-W22 null input object blocked", () => {
 
 test("GATE5N-W23 weekend dates in list are index-valid", () => {
   const r = generateWalkForwardWindows(windowInput());
-  assert.equal(r.windows[0].oosStart, "2101-03-05");
+  assert.equal(r.windows[0].oosStart, "2101-03-07");
 });
 
 test("GATE5N-W24 trainStartIndex increments by stepSize", () => {
   const r = generateWalkForwardWindows(windowInput());
   assert.equal(r.windows[0].trainStartIndex, 0);
-  assert.equal(r.windows[1].trainStartIndex, 6);
+  assert.equal(r.windows[1].trainStartIndex, 9);
 });
 
 test("GATE5N-W25 oosStartIndex = trainEndIndex + 1", () => {
@@ -549,18 +552,18 @@ test("GATE5N-W28 fail droppedIncompleteTail false", () => {
 });
 
 test("GATE5N-W29 larger train window fewer folds", () => {
-  const dates = generateWeekdayDates("2101-03-01", 24);
+  const dates = generateWeekdayDates("2101-03-01", 36);
   const small = generateWalkForwardWindows(windowInput({
     tradingDates: dates,
-    trainWindowSize: 4,
-    oosWindowSize: 2,
-    stepSize: 6,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 9,
   }));
   const large = generateWalkForwardWindows(windowInput({
     tradingDates: dates,
-    trainWindowSize: 6,
-    oosWindowSize: 2,
-    stepSize: 8,
+    trainWindowSize: 9,
+    oosWindowSize: 3,
+    stepSize: 12,
   }));
   assert.equal(small.ok, true);
   assert.equal(large.ok, true);
@@ -571,7 +574,7 @@ test("GATE5N-W30 old rolling stepSize === oosWindowSize blocked", () => {
   const r = generateWalkForwardWindows(windowInput({
     oosWindowSize: 3,
     stepSize: 3,
-    trainWindowSize: 4,
+    trainWindowSize: 6,
     preserveStepSize: true,
   }));
   assert.equal(r.ok, false);
@@ -584,33 +587,36 @@ test("GATE5N-W31 exact minimum 2 folds", () => {
   assert.equal(r.windows.length, 2);
 });
 
-test("GATE5N-W32 trainWindowSize 1 allowed", () => {
+test("GATE5N-W32 trainWindowSize 1 fail-closed not tile-aligned", () => {
   const r = generateWalkForwardWindows(windowInput({
     trainWindowSize: 1,
-    oosWindowSize: 2,
-    stepSize: 3,
+    oosWindowSize: 3,
+    stepSize: 4,
   }));
-  assert.equal(r.ok, true);
+  assert.equal(r.ok, false);
+  assert.equal(hasCode(r, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(r.errors[0].field, "trainWindowSize");
 });
 
-test("GATE5N-W33 oosWindowSize 1 with step 1 needs enough dates", () => {
-  const dates = generateWeekdayDates("2101-03-01", 10);
+test("GATE5N-W33 oosWindowSize 1 fail-closed not tile-aligned", () => {
+  const dates = generateWeekdayDates("2101-03-01", 18);
   const r = generateWalkForwardWindows({
     tradingDates: dates,
-    trainWindowSize: 3,
+    trainWindowSize: 6,
     oosWindowSize: 1,
-    stepSize: 4,
+    stepSize: 7,
   });
-  assert.equal(r.ok, true);
-  assert.equal(r.windows.length >= 2, true);
+  assert.equal(r.ok, false);
+  assert.equal(hasCode(r, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(r.errors[0].field, "oosWindowSize");
 });
 
 test("GATE5N-W34 40-date window generation", () => {
   const dates = generateWeekdayDates("2101-03-01", 40);
   const r = generateWalkForwardWindows({
     tradingDates: dates,
-    trainWindowSize: 10,
-    oosWindowSize: 5,
+    trainWindowSize: 9,
+    oosWindowSize: 6,
     stepSize: 15,
   });
   assert.equal(r.ok, true);
@@ -619,7 +625,7 @@ test("GATE5N-W34 40-date window generation", () => {
 
 test("GATE5N-W35 last fold oosEnd is last complete OOS end", () => {
   const r = generateWalkForwardWindows(windowInput());
-  assert.equal(r.windows[r.windows.length - 1].oosEnd, "2101-03-12");
+  assert.equal(r.windows[r.windows.length - 1].oosEnd, "2101-03-18");
 });
 
 test("GATE5N-W36 first fold trainStart is first date", () => {
@@ -661,31 +667,31 @@ test("GATE5N-W42 stepSize zero blocked", () => {
   assert.equal(r.ok, false);
 });
 
-test("GATE5N-W43 minTrainWindowSize satisfied", () => {
-  const r = generateWalkForwardWindows(windowInput({ minTrainWindowSize: 2, trainWindowSize: 4 }));
+test("GATE5N-W43 minTrainWindowSize 2 allowed as floor under tile-aligned train", () => {
+  const r = generateWalkForwardWindows(windowInput({ minTrainWindowSize: 2, trainWindowSize: 6 }));
   assert.equal(r.ok, true);
 });
 
 test("GATE5N-W44 next train starts after previous oosEnd", () => {
   const r = generateWalkForwardWindows(windowInput());
   assert.equal(r.windows[0].trainStart, "2101-03-01");
-  assert.equal(r.windows[1].trainStart, "2101-03-07");
+  assert.equal(r.windows[1].trainStart, "2101-03-10");
   assert.equal(r.windows[1].trainStartIndex, r.windows[0].oosEndIndex + 1);
 });
 
 test("GATE5N-W45 consecutive OOS windows do not overlap", () => {
   const r = generateWalkForwardWindows(windowInput());
-  assert.equal(r.windows[0].oosEnd, "2101-03-06");
-  assert.equal(r.windows[1].oosStart, "2101-03-11");
+  assert.equal(r.windows[0].oosEnd, "2101-03-09");
+  assert.equal(r.windows[1].oosStart, "2101-03-16");
   assert.equal(r.windows[1].oosStart > r.windows[0].oosEnd, true);
 });
 
 test("GATE5N-W46 insufficient data at exact boundary", () => {
   const r = generateWalkForwardWindows(windowInput({
-    tradingDates: D.slice(0, 4),
-    trainWindowSize: 3,
-    oosWindowSize: 2,
-    stepSize: 5,
+    tradingDates: D.slice(0, 8),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 9,
   }));
   assert.equal(r.ok, false);
   assert.equal(hasCode(r, ERROR.INSUFFICIENT_WALK_FORWARD_DATA), true);
@@ -704,7 +710,7 @@ test("GATE5N-W47 sufficient data at exact boundary 6 dates train3 oos3", () => {
 
 test("GATE5N-W48 two folds with 12 dates train3 oos3 step6", () => {
   const r = generateWalkForwardWindows({
-    tradingDates: D,
+    tradingDates: D12,
     trainWindowSize: 3,
     oosWindowSize: 3,
     stepSize: 6,
@@ -779,9 +785,9 @@ test("GATE5N-W58 generateWalkForwardWindows not plain object", () => {
 
 test("GATE5N-W59 large step equal oos produces single fold path blocked", () => {
   const r = generateWalkForwardWindows(windowInput({
-    trainWindowSize: 8,
-    oosWindowSize: 4,
-    stepSize: 12,
+    trainWindowSize: 9,
+    oosWindowSize: 6,
+    stepSize: 15,
   }));
   assert.equal(r.ok, false);
   assert.equal(hasCode(r, ERROR.INSUFFICIENT_WALK_FORWARD_FOLDS), true);
@@ -802,7 +808,7 @@ test("GATE5N-W60 18 dates train6 oos3 step9 => 2 folds window only", () => {
 test("GATE5N-W61 fold count scales with data length", () => {
   const r2 = generateWalkForwardWindows(windowInput());
   const rLong = generateWalkForwardWindows(windowInput({
-    tradingDates: generateWeekdayDates("2101-03-01", 18),
+    tradingDates: generateWeekdayDates("2101-03-01", 27),
   }));
   assert.equal(rLong.windows.length > r2.windows.length, true);
 });
@@ -839,10 +845,10 @@ test("GATE5N-W66 oos window covers index range", () => {
 
 test("GATE5N-W67 insufficient folds one fold only", () => {
   const r = generateWalkForwardWindows(windowInput({
-    tradingDates: D.slice(0, 4),
-    trainWindowSize: 2,
-    oosWindowSize: 2,
-    stepSize: 4,
+    tradingDates: D.slice(0, 9),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 9,
   }));
   assert.equal(r.ok, false);
   assert.equal(hasCode(r, ERROR.INSUFFICIENT_WALK_FORWARD_FOLDS), true);
@@ -850,10 +856,10 @@ test("GATE5N-W67 insufficient folds one fold only", () => {
 
 test("GATE5N-W68 dropped tail one date leftover", () => {
   const r = generateWalkForwardWindows(windowInput({
-    tradingDates: generateWeekdayDates("2101-03-01", 13),
-    trainWindowSize: 4,
-    oosWindowSize: 2,
-    stepSize: 6,
+    tradingDates: generateWeekdayDates("2101-03-01", 19),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 9,
   }));
   assert.equal(r.ok, true);
   assert.equal(r.droppedIncompleteTail, true);
@@ -869,12 +875,12 @@ test("GATE5N-W70 windows array length matches fold count", () => {
   assert.equal(r.windows.length, 2);
 });
 
-test("GATE5N-W71 extra coverage 3-fold train5 oos2 step7", () => {
+test("GATE5N-W71 extra coverage 3-fold train6 oos3 step9", () => {
   const r = generateWalkForwardWindows(windowInput({
-    tradingDates: generateWeekdayDates("2101-03-01", 21),
-    trainWindowSize: 5,
-    oosWindowSize: 2,
-    stepSize: 7,
+    tradingDates: generateWeekdayDates("2101-03-01", 27),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 9,
   }));
   assert.equal(r.ok, true);
   assert.equal(r.windows.length, 3);
@@ -1145,17 +1151,18 @@ test("GATE5N-P31 NASDAQ production blocked", () => {
   assert.equal(hasCode(result, ERROR.PRODUCTION_MARKET_NOT_ALLOWED), true);
 });
 
-test("GATE5N-P32 oos window too small for trade blocked fold", () => {
+test("GATE5N-P32 oos window not tile-aligned fails at config", () => {
   const dates = generateWeekdayDates("2101-03-01", 12);
   const input = buildWalkForwardInput({
     tradingDates: dates,
-    trainWindowSize: 4,
+    trainWindowSize: 6,
     oosWindowSize: 2,
-    stepSize: 6,
+    stepSize: 8,
   });
   const result = runWalkForwardValidation(input);
   assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
-  assert.equal(result.failedFoldCount >= 1, true);
+  assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(result.errors[0].field, "oosWindowSize");
 });
 
 test("GATE5N-P33 folds and partialFoldResults same on block", () => {
@@ -1188,12 +1195,12 @@ test("GATE5N-P35 fold uses runSyntheticBenchmarkPipeline path", () => {
 });
 
 test("GATE5N-P36 droppedIncompleteTail propagated from windows", () => {
-  const dates = generateWeekdayDates("2101-03-01", 15);
+  const dates = generateWeekdayDates("2101-03-01", 19);
   const input = buildWalkForwardInput({
     tradingDates: dates,
-    trainWindowSize: 4,
+    trainWindowSize: 6,
     oosWindowSize: 3,
-    stepSize: 7,
+    stepSize: 9,
   });
   const result = runWalkForwardValidation(input);
   assert.equal(result.droppedIncompleteTail, true);
@@ -1218,7 +1225,7 @@ test("GATE5N-P39 fold alpha equals totalReturn minus benchmarkReturn approx", ()
 });
 
 test("GATE5N-P40 window-only insufficient data blocked before pipeline", () => {
-  const input = buildWalkForwardInput({ tradingDates: D.slice(0, 5), trainWindowSize: 4, oosWindowSize: 2, stepSize: 2 });
+  const input = buildWalkForwardInput({ tradingDates: D.slice(0, 5), trainWindowSize: 6, oosWindowSize: 3, stepSize: 9 });
   const result = runWalkForwardValidation(input);
   assert.equal(hasCode(result, ERROR.INSUFFICIENT_WALK_FORWARD_DATA), true);
 });
@@ -1436,20 +1443,20 @@ test("GATE5R-W04 embargo included in insufficient-data bound", () => {
 
 // ─── GATE 5S — Non-overlapping blocked walk-forward ─────────────────────
 
-test("GATE5S-W01 12-date two-block known answer rejects old 4-fold rolling", () => {
+test("GATE5S-W01 18-date two-block known answer rejects old rolling", () => {
   const blocked = generateWalkForwardWindows(windowInput());
   assert.equal(blocked.ok, true);
   assert.equal(blocked.windows.length, 2);
   assert.equal(blocked.windows[0].trainStart, "2101-03-01");
-  assert.equal(blocked.windows[0].oosEnd, "2101-03-06");
-  assert.equal(blocked.windows[1].trainStart, "2101-03-07");
-  assert.equal(blocked.windows[1].oosEnd, "2101-03-12");
-  const rolling = generateWalkForwardWindows(windowInput({ stepSize: 2, preserveStepSize: true }));
+  assert.equal(blocked.windows[0].oosEnd, "2101-03-09");
+  assert.equal(blocked.windows[1].trainStart, "2101-03-10");
+  assert.equal(blocked.windows[1].oosEnd, "2101-03-18");
+  const rolling = generateWalkForwardWindows(windowInput({ stepSize: 3, preserveStepSize: true }));
   assert.equal(rolling.ok, false);
   assert.equal(hasCode(rolling, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
 });
 
-test("GATE5S-W02 old embargo=1 14-date step=7 fail-closed", () => {
+test("GATE5S-W02 old embargo=1 14-date 4+2 fail-closed at tile alignment", () => {
   const dates = generateWeekdayDates("2101-03-01", 14);
   const r = generateWalkForwardWindows({
     tradingDates: dates,
@@ -1460,16 +1467,16 @@ test("GATE5S-W02 old embargo=1 14-date step=7 fail-closed", () => {
   });
   assert.equal(r.ok, false);
   assert.equal(hasCode(r, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
-  assert.equal(r.errors[0].field, "stepSize");
+  assert.equal(r.errors[0].field, "trainWindowSize");
 });
 
 test("GATE5S-W02b embargo=1 identity moved to 5T", () => {
-  const dates = generateWeekdayDates("2101-03-01", 16);
+  const dates = generateWeekdayDates("2101-03-01", 22);
   const r = generateWalkForwardWindows({
     tradingDates: dates,
-    trainWindowSize: 4,
-    oosWindowSize: 2,
-    stepSize: 8,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
     embargoTradingDayCount: 1,
   });
   assert.equal(r.ok, true);
@@ -1477,15 +1484,15 @@ test("GATE5S-W02b embargo=1 identity moved to 5T", () => {
   const a = r.windows[0];
   const b = r.windows[1];
   assert.equal(a.trainStartIndex, 0);
-  assert.equal(a.trainEndIndex, 3);
-  assert.deepEqual(a.embargoDates, [dates[4]]);
-  assert.equal(a.oosStartIndex, 5);
-  assert.equal(a.oosEndIndex, 6);
-  assert.equal(b.trainStartIndex, 8);
-  assert.equal(b.trainEndIndex, 11);
-  assert.deepEqual(b.embargoDates, [dates[12]]);
-  assert.equal(b.oosStartIndex, 13);
-  assert.equal(b.oosEndIndex, 14);
+  assert.equal(a.trainEndIndex, 5);
+  assert.deepEqual(a.embargoDates, [dates[6]]);
+  assert.equal(a.oosStartIndex, 7);
+  assert.equal(a.oosEndIndex, 9);
+  assert.equal(b.trainStartIndex, 11);
+  assert.equal(b.trainEndIndex, 16);
+  assert.deepEqual(b.embargoDates, [dates[17]]);
+  assert.equal(b.oosStartIndex, 18);
+  assert.equal(b.oosEndIndex, 20);
   assert.equal(b.trainStartIndex, a.oosEndIndex + 1 + 1);
   assert.equal(a.embargoDates.includes(dates[b.trainStartIndex]), false);
   assert.equal(b.embargoDates.includes(dates[a.oosStartIndex]), false);
@@ -1493,10 +1500,10 @@ test("GATE5S-W02b embargo=1 identity moved to 5T", () => {
 
 test("GATE5S-W03 pairwise disjoint train/embargo/oos across folds", () => {
   const r = generateWalkForwardWindows({
-    tradingDates: generateWeekdayDates("2101-03-01", 16),
-    trainWindowSize: 4,
-    oosWindowSize: 2,
-    stepSize: 8,
+    tradingDates: generateWeekdayDates("2101-03-01", 22),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
     embargoTradingDayCount: 1,
   });
   assert.equal(r.ok, true);
@@ -1528,7 +1535,7 @@ test("GATE5T-W01 embargo=0 keeps 5S two-block identity", () => {
   assert.equal(r.ok, true);
   assert.equal(r.windows.length, 2);
   assert.equal(r.windows[0].trainStart, "2101-03-01");
-  assert.equal(r.windows[0].oosEnd, "2101-03-06");
+  assert.equal(r.windows[0].oosEnd, "2101-03-09");
   assert.equal(r.windows[1].trainStartIndex, r.windows[0].oosEndIndex + 1);
   assert.deepEqual(r.windows[0].postOosEmbargoDates, []);
   assert.equal(r.windows[0].postOosEmbargoStart, null);
@@ -1536,13 +1543,13 @@ test("GATE5T-W01 embargo=0 keeps 5S two-block identity", () => {
   assert.equal(r.windows[0].postOosEmbargoTradingDayCount, 0);
 });
 
-test("GATE5T-W02 embargo=1 16-date known answer", () => {
-  const dates = generateWeekdayDates("2101-03-01", 16);
+test("GATE5T-W02 embargo=1 22-date known answer", () => {
+  const dates = generateWeekdayDates("2101-03-01", 22);
   const r = generateWalkForwardWindows({
     tradingDates: dates,
-    trainWindowSize: 4,
-    oosWindowSize: 2,
-    stepSize: 8,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
     embargoTradingDayCount: 1,
   });
   assert.equal(r.ok, true);
@@ -1550,29 +1557,110 @@ test("GATE5T-W02 embargo=1 16-date known answer", () => {
   const a = r.windows[0];
   const b = r.windows[1];
   assert.equal(a.trainStartIndex, 0);
-  assert.equal(a.trainEndIndex, 3);
-  assert.deepEqual(a.embargoDates, [dates[4]]);
-  assert.equal(a.oosStartIndex, 5);
-  assert.equal(a.oosEndIndex, 6);
-  assert.deepEqual(a.postOosEmbargoDates, [dates[7]]);
-  assert.equal(b.trainStartIndex, 8);
-  assert.equal(b.trainEndIndex, 11);
-  assert.deepEqual(b.embargoDates, [dates[12]]);
-  assert.equal(b.oosStartIndex, 13);
-  assert.equal(b.oosEndIndex, 14);
-  assert.deepEqual(b.postOosEmbargoDates, [dates[15]]);
+  assert.equal(a.trainEndIndex, 5);
+  assert.deepEqual(a.embargoDates, [dates[6]]);
+  assert.equal(a.oosStartIndex, 7);
+  assert.equal(a.oosEndIndex, 9);
+  assert.deepEqual(a.postOosEmbargoDates, [dates[10]]);
+  assert.equal(b.trainStartIndex, 11);
+  assert.equal(b.trainEndIndex, 16);
+  assert.deepEqual(b.embargoDates, [dates[17]]);
+  assert.equal(b.oosStartIndex, 18);
+  assert.equal(b.oosEndIndex, 20);
+  assert.deepEqual(b.postOosEmbargoDates, [dates[21]]);
   assert.equal(b.trainStartIndex, a.oosEndIndex + 1 + 1);
 });
 
 test("GATE5T-W03 old 5S embargo=1 step=train+embargo+oos rejected", () => {
   const r = generateWalkForwardWindows({
-    tradingDates: generateWeekdayDates("2101-03-01", 14),
-    trainWindowSize: 4,
-    oosWindowSize: 2,
-    stepSize: 7,
+    tradingDates: generateWeekdayDates("2101-03-01", 22),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 10,
     embargoTradingDayCount: 1,
   });
   assert.equal(r.ok, false);
   assert.equal(hasCode(r, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
   assert.equal(r.errors[0].field, "stepSize");
+});
+
+// ─── GATE 5U — Tile-aligned train/OOS window sizes ─────────────────────
+
+test("GATE5U-W01 trainWindowSize 4 fail-closed", () => {
+  const r = generateWalkForwardWindows(windowInput({ trainWindowSize: 4 }));
+  assert.equal(r.ok, false);
+  assert.equal(hasCode(r, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(r.errors[0].field, "trainWindowSize");
+});
+
+test("GATE5U-W02 oosWindowSize 2 fail-closed", () => {
+  const r = generateWalkForwardWindows(windowInput({ oosWindowSize: 2 }));
+  assert.equal(r.ok, false);
+  assert.equal(hasCode(r, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(r.errors[0].field, "oosWindowSize");
+});
+
+test("GATE5U-W03 old 12-date 4+2 fixture rejected at config", () => {
+  const r = generateWalkForwardWindows({
+    tradingDates: D12,
+    trainWindowSize: 4,
+    oosWindowSize: 2,
+    stepSize: 6,
+  });
+  assert.equal(r.ok, false);
+  assert.equal(hasCode(r, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(r.errors[0].field, "trainWindowSize");
+});
+
+test("GATE5U-W04 minTrainWindowSize 1 cannot validate non-multiple train", () => {
+  const r = generateWalkForwardWindows(windowInput({ trainWindowSize: 4, minTrainWindowSize: 1 }));
+  assert.equal(r.ok, false);
+  assert.equal(r.errors[0].field, "trainWindowSize");
+});
+
+test("GATE5U-W05 embargo=0 tile-aligned identity two blocks", () => {
+  const dates = generateWeekdayDates("2101-03-01", 18);
+  const r = generateWalkForwardWindows({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 9,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.windows.length, 2);
+  assert.equal(r.windows[1].trainStartIndex, 9);
+});
+
+test("GATE5U-W06 trainWindowSize 303 exceeds tile cap fail-closed", () => {
+  const r = generateWalkForwardWindows(windowInput({
+    trainWindowSize: 303,
+    oosWindowSize: 3,
+    stepSize: 306,
+  }));
+  assert.equal(r.ok, false);
+  assert.equal(hasCode(r, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(r.errors[0].field, "trainWindowSize");
+});
+
+test("GATE5U-W07 oosWindowSize 303 exceeds tile cap fail-closed", () => {
+  const r = generateWalkForwardWindows(windowInput({
+    trainWindowSize: 6,
+    oosWindowSize: 303,
+    stepSize: 309,
+  }));
+  assert.equal(r.ok, false);
+  assert.equal(hasCode(r, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(r.errors[0].field, "oosWindowSize");
+});
+
+test("GATE5U-W08 trainWindowSize 300 at tile cap succeeds", () => {
+  const dates = generateWeekdayDates("2101-03-01", 606);
+  const r = generateWalkForwardWindows({
+    tradingDates: dates,
+    trainWindowSize: 300,
+    oosWindowSize: 3,
+    stepSize: 303,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.windows.length, 2);
 });
