@@ -1510,7 +1510,7 @@ test("GATE5S-W01 18-date two-block known answer rejects old rolling", () => {
 });
 
 test("GATE5S-W02 old embargo=1 14-date 4+2 fail-closed at tile alignment", () => {
-  const dates = generateWeekdayDates("2101-03-01", 14);
+  const dates = generateWeekdayDates("2101-03-01", 28);
   const r = generateWalkForwardWindows({
     horizonType: "ULTRA_SHORT",
     tradingDates: dates,
@@ -1847,6 +1847,7 @@ function captureWalkForwardBenchmarks(runInput) {
       candleDates,
       tradeIntent,
       pipelineStatus: result && result.pipelineStatus,
+      initialCapital: input && input.initialCapital,
     });
     return result;
   };
@@ -2046,4 +2047,294 @@ test("GATE6A-W03 5Z feature asOf remains signal and flags stay false", () => {
       assert.equal(date <= feat.featureAsOfTradingDate, true);
     }
   }
+});
+
+
+function sixBarWalkForwardInput() {
+  return buildWalkForwardInput({
+    tradingDates: generateWeekdayDates("2101-03-01", 28),
+    trainWindowSize: 6,
+    oosWindowSize: 6,
+    stepSize: 14,
+    embargoTradingDayCount: 1,
+    horizonType: "ULTRA_SHORT",
+  });
+}
+
+function withTileMetrics(metricFactory, fn) {
+  const original = pipelineMod.runSyntheticBenchmarkPipeline;
+  try {
+    let call = 0;
+    pipelineMod.runSyntheticBenchmarkPipeline = function patched(inp) {
+      const base = original(inp);
+      call += 1;
+      const override = metricFactory(call, base, inp);
+      return {
+        ...base,
+        pipelineStatus: PIPELINE_STATUS.COMPLETED_BENCHMARK_ALPHA,
+        totalReturn: override.totalReturn,
+        benchmarkReturn: override.benchmarkReturn,
+        alpha: override.alpha,
+        errors: [],
+        errorCodes: [],
+      };
+    };
+    return fn();
+  } finally {
+    pipelineMod.runSyntheticBenchmarkPipeline = original;
+  }
+}
+
+test("GATE6B-W01 oos=3 remains one 3-bar tile per fold", () => {
+  const { result, captures } = captureWalkForwardBenchmarks(buildWalkForwardInput({
+    tradingDates: generateWeekdayDates("2101-03-01", 22),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(captures.length, 2);
+  for (const cap of captures) {
+    assert.equal(cap.candleDates.length, 3);
+    const signal = cap.tradeIntent.entryIntent.signalTradingDate;
+    const entry = cap.tradeIntent.entryDate;
+    const exit = cap.tradeIntent.exitDate;
+    assert.equal(cap.candleDates[0], signal);
+    assert.equal(cap.candleDates[1], entry);
+    assert.equal(cap.candleDates[2], exit);
+    assert.equal(cap.initialCapital, 1000000);
+  }
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6B-W02 oos=6 scores two tiles as equal-weighted mean", () => {
+  const dates = generateWeekdayDates("2101-03-01", 28);
+  const input = buildWalkForwardInput({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 6,
+    stepSize: 14,
+    embargoTradingDayCount: 1,
+    horizonType: "ULTRA_SHORT",
+    initialCapital: 1000000,
+  });
+  const original = pipelineMod.runSyntheticBenchmarkPipeline;
+  let call = 0;
+  const capturedCapitals = [];
+  const capturedTiles = [];
+  try {
+    pipelineMod.runSyntheticBenchmarkPipeline = function patched(inp) {
+      call += 1;
+      capturedCapitals.push(inp.initialCapital);
+      capturedTiles.push((inp.dataset && Array.isArray(inp.dataset.candles)
+        ? inp.dataset.candles.map((c) => c.tradingDate)
+        : []));
+      const base = original(inp);
+      const totalReturn = call % 2 === 1 ? 0.10 : 0.30;
+      const benchmarkReturn = call % 2 === 1 ? 0.04 : 0.08;
+      return {
+        ...base,
+        pipelineStatus: PIPELINE_STATUS.COMPLETED_BENCHMARK_ALPHA,
+        totalReturn,
+        benchmarkReturn,
+        alpha: totalReturn - benchmarkReturn,
+        errors: [],
+        errorCodes: [],
+      };
+    };
+    const result = runWalkForwardValidation(input);
+    assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+    assert.equal(call, 4);
+    assert.equal(result.foldCount, 2);
+    assert.equal(Math.abs(result.folds[0].totalReturn - 0.20) < 1e-12, true);
+    assert.equal(Math.abs(result.folds[0].benchmarkReturn - 0.06) < 1e-12, true);
+    assert.equal(Math.abs(result.folds[0].alpha - 0.14) < 1e-12, true);
+    assert.equal(Math.abs(result.folds[1].totalReturn - 0.20) < 1e-12, true);
+    assert.equal(Math.abs(result.folds[1].benchmarkReturn - 0.06) < 1e-12, true);
+    assert.equal(Math.abs(result.folds[1].alpha - 0.14) < 1e-12, true);
+    assert.deepEqual(capturedCapitals, [1000000, 1000000, 1000000, 1000000]);
+    const windows = generateWalkForwardWindows({
+      tradingDates: dates,
+      trainWindowSize: 6,
+      oosWindowSize: 6,
+      stepSize: 14,
+      embargoTradingDayCount: 1,
+      horizonType: "ULTRA_SHORT",
+    });
+    assert.equal(windows.windows.length, 2);
+    const oos0 = dates.slice(windows.windows[0].oosStartIndex, windows.windows[0].oosEndIndex + 1);
+    const oos1 = dates.slice(windows.windows[1].oosStartIndex, windows.windows[1].oosEndIndex + 1);
+    assert.equal(oos0.length, 6);
+    assert.equal(oos1.length, 6);
+    assert.deepEqual(capturedTiles[0], oos0.slice(0, 3));
+    assert.deepEqual(capturedTiles[1], oos0.slice(3, 6));
+    assert.deepEqual(capturedTiles[2], oos1.slice(0, 3));
+    assert.deepEqual(capturedTiles[3], oos1.slice(3, 6));
+    assertOfficialLeakageFreeze(result);
+  } finally {
+    pipelineMod.runSyntheticBenchmarkPipeline = original;
+  }
+});
+
+test("GATE6B-W03 embargo=1 ULTRA_SHORT 22-date success still PASS", () => {
+  const result = runWalkForwardValidation(buildWalkForwardInput({
+    tradingDates: generateWeekdayDates("2101-03-01", 22),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
+    embargoTradingDayCount: 1,
+    horizonType: "ULTRA_SHORT",
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6B-W04 omitted embargo still FAIL", () => {
+  const input = buildWalkForwardInput();
+  delete input.embargoTradingDayCount;
+  const result = runWalkForwardValidation(input);
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6B-W05 feature asOf is signal of that tile for oos=6", () => {
+  const { result, captures, featureCaptures } = captureWalkForwardBenchmarks(buildWalkForwardInput({
+    tradingDates: generateWeekdayDates("2101-03-01", 28),
+    trainWindowSize: 6,
+    oosWindowSize: 6,
+    stepSize: 14,
+    embargoTradingDayCount: 1,
+    horizonType: "ULTRA_SHORT",
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(captures.length, 4);
+  assert.equal(featureCaptures.length, 4);
+  for (const cap of captures) {
+    const signal = cap.tradeIntent.entryIntent.signalTradingDate;
+    const entry = cap.tradeIntent.entryDate;
+    const exit = cap.tradeIntent.exitDate;
+    assert.equal(signal < entry, true);
+    assert.equal(entry <= exit, true);
+    assert.equal(cap.candleDates.includes(entry), true);
+    assert.equal(cap.candleDates.includes(exit), true);
+    const matching = featureCaptures.filter((f) => f.featureAsOfTradingDate === signal);
+    assert.equal(matching.length > 0, true);
+    for (const feat of matching) {
+      assert.equal(feat.featureDates.includes(entry), false);
+      assert.equal(feat.featureDates.includes(exit), false);
+      assert.equal(feat.featureDates.includes(signal), true);
+      for (const date of feat.featureDates) {
+        assert.equal(date <= feat.featureAsOfTradingDate, true);
+      }
+    }
+  }
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6B-W06 extra future benchmark excluded from every standalone tile", () => {
+  const dates = generateWeekdayDates("2101-03-01", 28);
+  const extraDate = generateWeekdayDates(dates[dates.length - 1], 3)[1];
+  const input = buildWalkForwardInput({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 6,
+    stepSize: 14,
+    embargoTradingDayCount: 1,
+    horizonType: "ULTRA_SHORT",
+  });
+  input.benchmarkSeries.push({ tradingDate: extraDate, close: 99999 });
+  const { result, captures } = captureWalkForwardBenchmarks(input);
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(captures.length, 4);
+  for (const cap of captures) {
+    assert.equal(cap.benchmarkDates.includes(extraDate), false);
+    assert.equal(cap.benchmarkDates.length, 3);
+  }
+});
+
+test("GATE6B-W07 first tile failure maps to OOS_FOLD_FAILED and stops later tiles", () => {
+  const dates = generateWeekdayDates("2101-03-01", 28);
+  const input = buildWalkForwardInput({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 6,
+    stepSize: 14,
+    embargoTradingDayCount: 1,
+    horizonType: "ULTRA_SHORT",
+  });
+  const original = pipelineMod.runSyntheticBenchmarkPipeline;
+  let call = 0;
+  try {
+    pipelineMod.runSyntheticBenchmarkPipeline = function patched(inp) {
+      call += 1;
+      if (call === 1) {
+        return {
+          pipelineStatus: "BLOCKED_PIPELINE",
+          totalReturn: null,
+          benchmarkReturn: null,
+          alpha: null,
+          errors: [{ code: ERROR.OOS_FOLD_FAILED, field: "tile1" }],
+          errorCodes: [ERROR.OOS_FOLD_FAILED],
+        };
+      }
+      return original(inp);
+    };
+    const result = runWalkForwardValidation(input);
+    assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+    assert.equal(hasCode(result, ERROR.OOS_FOLD_FAILED), true);
+    assert.equal(call, 3);
+    assert.equal(result.errors[0].field, "tile1");
+    assertOfficialLeakageFreeze(result);
+  } finally {
+    pipelineMod.runSyntheticBenchmarkPipeline = original;
+  }
+});
+
+test("GATE6B-W08 two finite MAX_VALUE tile totals overflow fold mean as OOS_FOLD_FAILED", () => {
+  const result = withTileMetrics(
+    () => ({ totalReturn: Number.MAX_VALUE, benchmarkReturn: 0.01, alpha: 0.01 }),
+    () => runWalkForwardValidation(sixBarWalkForwardInput()),
+  );
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.OOS_FOLD_FAILED), true);
+  assert.equal(hasCode(result, ERROR.WALK_FORWARD_AGGREGATE_NONFINITE), false);
+  assert.equal(result.errors[0].field, "oosMetrics");
+  assert.equal(result.folds[0].totalReturn, null);
+  assert.equal(result.folds[0].benchmarkReturn, null);
+  assert.equal(result.folds[0].alpha, null);
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6B-W09 two finite MAX_VALUE tile benchmarks overflow fold mean as OOS_FOLD_FAILED", () => {
+  const result = withTileMetrics(
+    () => ({ totalReturn: 0.01, benchmarkReturn: Number.MAX_VALUE, alpha: 0.01 }),
+    () => runWalkForwardValidation(sixBarWalkForwardInput()),
+  );
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.OOS_FOLD_FAILED), true);
+  assert.equal(result.errors[0].field, "oosMetrics");
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6B-W10 two finite MAX_VALUE tile alphas overflow fold mean as OOS_FOLD_FAILED", () => {
+  const result = withTileMetrics(
+    () => ({ totalReturn: 0.01, benchmarkReturn: 0.01, alpha: Number.MAX_VALUE }),
+    () => runWalkForwardValidation(sixBarWalkForwardInput()),
+  );
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.OOS_FOLD_FAILED), true);
+  assert.equal(result.errors[0].field, "oosMetrics");
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6B-W11 large finite tile pair remains COMPLETED", () => {
+  const result = withTileMetrics(
+    () => ({ totalReturn: Number.MAX_VALUE / 4, benchmarkReturn: 0.01, alpha: 0.01 }),
+    () => runWalkForwardValidation(sixBarWalkForwardInput()),
+  );
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(Number.isFinite(result.folds[0].totalReturn), true);
+  assert.equal(Number.isFinite(result.meanOosTotalReturn), true);
+  assertOfficialLeakageFreeze(result);
 });
