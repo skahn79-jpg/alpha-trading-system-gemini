@@ -77,6 +77,19 @@ function hasCode(result, code) {
     || (result.errors && result.errors.some((err) => err.code === code));
 }
 
+
+function assertOfficialLeakageFreeze(result) {
+  assert.equal(result.calendarVerified, false);
+  assert.equal(result.datasetVerified, false);
+  assert.equal(result.costPolicyVerified, false);
+  assert.equal(result.backtestExecutionEligible, false);
+  assert.equal(result.promotionEligible, false);
+  assert.equal(result.paperEligible, false);
+  assert.equal(result.liveEligible, false);
+  assert.equal(result.executionStatus, EXEC_STATUS.NOT_EXECUTED);
+  assert.equal(result.calculationStatus, CALCULATION_STATUS.SIMULATED_CALCULATION_ONLY);
+}
+
 function pad2(n) {
   return String(n).padStart(2, "0");
 }
@@ -3355,4 +3368,44 @@ test("GATE5Z-W08 same-day signal fill helper fail-closed", () => {
     },
   }, dates, ERROR.TRAIN_CANDIDATE_EVALUATION_FAILED, "T");
   assert.equal(ok.ok, true);
+});
+
+test("GATE6A-W01 22-date embargo=1 success pins all official flags false", () => {
+  const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
+    tradingDates: generateWeekdayDates("2101-03-01", 22),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
+    embargoTradingDayCount: 1,
+    horizonType: "ULTRA_SHORT",
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6A-W02 omitted embargo still FAIL", () => {
+  const input = buildSelectionInput();
+  delete input.embargoTradingDayCount;
+  const result = runWalkForwardTrainParameterSelection(input);
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6A-W03 5Z feature asOf remains signal and flags stay false", () => {
+  const { result, featureCaptures } = capturePipelineCalendars(buildSelectionInput({
+    tradingDates: generateWeekdayDates("2101-03-01", 22),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assertOfficialLeakageFreeze(result);
+  assert.equal(featureCaptures.length > 0, true);
+  for (const feat of featureCaptures) {
+    assert.equal(feat.featureAsOfTradingDate != null, true);
+    for (const date of feat.featureDates) {
+      assert.equal(date <= feat.featureAsOfTradingDate, true);
+    }
+  }
 });
