@@ -290,7 +290,7 @@ function blockedStepSize(trainWindowSize, oosWindowSize, embargoTradingDayCount)
   const embargo = Number.isInteger(embargoTradingDayCount) && embargoTradingDayCount >= 0
     ? embargoTradingDayCount
     : 0;
-  return trainWindowSize + embargo + oosWindowSize;
+  return trainWindowSize + 2 * embargo + oosWindowSize;
 }
 
 function buildWalkForwardInput(overrides) {
@@ -1387,12 +1387,12 @@ test("GATE5R-W01 omitted embargo equals explicit 0 and 5Q indices", () => {
 });
 
 test("GATE5R-W02 embargo=1 is index gap not calendar skip", () => {
-  const dates = generateWeekdayDates("2101-03-01", 20);
+  const dates = generateWeekdayDates("2101-03-01", 22);
   const result = generateWalkForwardWindows({
     tradingDates: dates,
     trainWindowSize: 6,
     oosWindowSize: 3,
-    stepSize: 10,
+    stepSize: 11,
     embargoTradingDayCount: 1,
   });
   assert.equal(result.ok, true);
@@ -1426,7 +1426,7 @@ test("GATE5R-W04 embargo included in insufficient-data bound", () => {
     tradingDates: dates,
     trainWindowSize: 6,
     oosWindowSize: 3,
-    stepSize: 13,
+    stepSize: 17,
     embargoTradingDayCount: 4,
   });
   assert.equal(result.ok, false);
@@ -1449,13 +1449,27 @@ test("GATE5S-W01 12-date two-block known answer rejects old 4-fold rolling", () 
   assert.equal(hasCode(rolling, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
 });
 
-test("GATE5S-W02 embargo=1 14-date slices pairwise disjoint", () => {
+test("GATE5S-W02 old embargo=1 14-date step=7 fail-closed", () => {
   const dates = generateWeekdayDates("2101-03-01", 14);
   const r = generateWalkForwardWindows({
     tradingDates: dates,
     trainWindowSize: 4,
     oosWindowSize: 2,
     stepSize: 7,
+    embargoTradingDayCount: 1,
+  });
+  assert.equal(r.ok, false);
+  assert.equal(hasCode(r, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(r.errors[0].field, "stepSize");
+});
+
+test("GATE5S-W02b embargo=1 identity moved to 5T", () => {
+  const dates = generateWeekdayDates("2101-03-01", 16);
+  const r = generateWalkForwardWindows({
+    tradingDates: dates,
+    trainWindowSize: 4,
+    oosWindowSize: 2,
+    stepSize: 8,
     embargoTradingDayCount: 1,
   });
   assert.equal(r.ok, true);
@@ -1467,22 +1481,22 @@ test("GATE5S-W02 embargo=1 14-date slices pairwise disjoint", () => {
   assert.deepEqual(a.embargoDates, [dates[4]]);
   assert.equal(a.oosStartIndex, 5);
   assert.equal(a.oosEndIndex, 6);
-  assert.equal(b.trainStartIndex, 7);
-  assert.equal(b.trainEndIndex, 10);
-  assert.deepEqual(b.embargoDates, [dates[11]]);
-  assert.equal(b.oosStartIndex, 12);
-  assert.equal(b.oosEndIndex, 13);
-  assert.equal(b.trainStartIndex, a.oosEndIndex + 1);
+  assert.equal(b.trainStartIndex, 8);
+  assert.equal(b.trainEndIndex, 11);
+  assert.deepEqual(b.embargoDates, [dates[12]]);
+  assert.equal(b.oosStartIndex, 13);
+  assert.equal(b.oosEndIndex, 14);
+  assert.equal(b.trainStartIndex, a.oosEndIndex + 1 + 1);
   assert.equal(a.embargoDates.includes(dates[b.trainStartIndex]), false);
   assert.equal(b.embargoDates.includes(dates[a.oosStartIndex]), false);
 });
 
 test("GATE5S-W03 pairwise disjoint train/embargo/oos across folds", () => {
   const r = generateWalkForwardWindows({
-    tradingDates: generateWeekdayDates("2101-03-01", 20),
+    tradingDates: generateWeekdayDates("2101-03-01", 16),
     trainWindowSize: 4,
     oosWindowSize: 2,
-    stepSize: 7,
+    stepSize: 8,
     embargoTradingDayCount: 1,
   });
   assert.equal(r.ok, true);
@@ -1490,8 +1504,9 @@ test("GATE5S-W03 pairwise disjoint train/embargo/oos across folds", () => {
     train: new Set(Array.from({ length: w.trainEndIndex - w.trainStartIndex + 1 }, (_, i) => w.trainStartIndex + i)),
     embargo: new Set(Array.from({ length: w.embargoTradingDayCount }, (_, i) => w.trainEndIndex + 1 + i)),
     oos: new Set(Array.from({ length: w.oosEndIndex - w.oosStartIndex + 1 }, (_, i) => w.oosStartIndex + i)),
+    postOosEmbargo: new Set(Array.from({ length: w.postOosEmbargoTradingDayCount }, (_, i) => w.oosEndIndex + 1 + i)),
   }));
-  const kinds = ["train", "embargo", "oos"];
+  const kinds = ["train", "embargo", "oos", "postOosEmbargo"];
   for (let i = 0; i < sets.length; i += 1) {
     for (let j = i; j < sets.length; j += 1) {
       for (const ka of kinds) {
@@ -1504,4 +1519,60 @@ test("GATE5S-W03 pairwise disjoint train/embargo/oos across folds", () => {
       }
     }
   }
+});
+
+// ─── GATE 5T — Post-OOS embargo ────────────────────────────────────────
+
+test("GATE5T-W01 embargo=0 keeps 5S two-block identity", () => {
+  const r = generateWalkForwardWindows(windowInput());
+  assert.equal(r.ok, true);
+  assert.equal(r.windows.length, 2);
+  assert.equal(r.windows[0].trainStart, "2101-03-01");
+  assert.equal(r.windows[0].oosEnd, "2101-03-06");
+  assert.equal(r.windows[1].trainStartIndex, r.windows[0].oosEndIndex + 1);
+  assert.deepEqual(r.windows[0].postOosEmbargoDates, []);
+  assert.equal(r.windows[0].postOosEmbargoStart, null);
+  assert.equal(r.windows[0].postOosEmbargoEnd, null);
+  assert.equal(r.windows[0].postOosEmbargoTradingDayCount, 0);
+});
+
+test("GATE5T-W02 embargo=1 16-date known answer", () => {
+  const dates = generateWeekdayDates("2101-03-01", 16);
+  const r = generateWalkForwardWindows({
+    tradingDates: dates,
+    trainWindowSize: 4,
+    oosWindowSize: 2,
+    stepSize: 8,
+    embargoTradingDayCount: 1,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.windows.length, 2);
+  const a = r.windows[0];
+  const b = r.windows[1];
+  assert.equal(a.trainStartIndex, 0);
+  assert.equal(a.trainEndIndex, 3);
+  assert.deepEqual(a.embargoDates, [dates[4]]);
+  assert.equal(a.oosStartIndex, 5);
+  assert.equal(a.oosEndIndex, 6);
+  assert.deepEqual(a.postOosEmbargoDates, [dates[7]]);
+  assert.equal(b.trainStartIndex, 8);
+  assert.equal(b.trainEndIndex, 11);
+  assert.deepEqual(b.embargoDates, [dates[12]]);
+  assert.equal(b.oosStartIndex, 13);
+  assert.equal(b.oosEndIndex, 14);
+  assert.deepEqual(b.postOosEmbargoDates, [dates[15]]);
+  assert.equal(b.trainStartIndex, a.oosEndIndex + 1 + 1);
+});
+
+test("GATE5T-W03 old 5S embargo=1 step=train+embargo+oos rejected", () => {
+  const r = generateWalkForwardWindows({
+    tradingDates: generateWeekdayDates("2101-03-01", 14),
+    trainWindowSize: 4,
+    oosWindowSize: 2,
+    stepSize: 7,
+    embargoTradingDayCount: 1,
+  });
+  assert.equal(r.ok, false);
+  assert.equal(hasCode(r, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(r.errors[0].field, "stepSize");
 });

@@ -377,7 +377,7 @@ function blockedStepSize(trainWindowSize, oosWindowSize, embargoTradingDayCount)
   const embargo = Number.isInteger(embargoTradingDayCount) && embargoTradingDayCount >= 0
     ? embargoTradingDayCount
     : 0;
-  return trainWindowSize + embargo + oosWindowSize;
+  return trainWindowSize + 2 * embargo + oosWindowSize;
 }
 
 function buildSelectionInput(overrides) {
@@ -2904,12 +2904,12 @@ test("GATE5R-P01 embargo=0 selection matches omitted embargo", () => {
 });
 
 test("GATE5R-P02 embargo bar mutation does not change train or OOS scores", () => {
-  const dates = generateWeekdayDates("2101-03-01", 20);
+  const dates = generateWeekdayDates("2101-03-01", 22);
   const base = buildSelectionInput({
     tradingDates: dates,
     trainWindowSize: 6,
     oosWindowSize: 3,
-    stepSize: 10,
+    stepSize: 11,
     embargoTradingDayCount: 1,
   });
   const r0 = runWalkForwardTrainParameterSelection(deepClone(base));
@@ -2958,4 +2958,27 @@ test("GATE5S-P01 previous-fold OOS mutation does not change next-fold train sele
   assert.equal(r1.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
   assert.equal(r0.folds[1].selectedCandidateId, r1.folds[1].selectedCandidateId);
   assert.equal(r0.folds[1].selectionScore, r1.folds[1].selectionScore);
+});
+
+test("GATE5T-P01 post-OOS embargo bar mutation does not change train or OOS scores", () => {
+  const dates = generateWeekdayDates("2101-03-01", 22);
+  const base = buildSelectionInput({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
+    embargoTradingDayCount: 1,
+  });
+  const r0 = runWalkForwardTrainParameterSelection(deepClone(base));
+  assert.equal(r0.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  const mutated = deepClone(base);
+  mutated.pipelineBase.dataset.candles[10].high = 50000;
+  mutated.pipelineBase.dataset.candles[10].close = 45000;
+  mutated.pipelineBase.dataset.contentChecksum = computeDatasetContentChecksum(mutated.pipelineBase.dataset);
+  const r1 = runWalkForwardTrainParameterSelection(mutated);
+  assert.equal(r1.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(r0.folds[0].selectedCandidateId, r1.folds[0].selectedCandidateId);
+  assert.equal(r0.folds[0].selectionScore, r1.folds[0].selectionScore);
+  assert.equal(r0.folds[0].oosTotalReturn, r1.folds[0].oosTotalReturn);
+  assert.deepEqual(r0.folds[0].postOosEmbargoDates, [dates[10]]);
 });
