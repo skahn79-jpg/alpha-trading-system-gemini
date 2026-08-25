@@ -11,6 +11,10 @@ const {
   SELECTION_TIE_BREAK,
   SELECTION_STATUS,
   SELECTION_EVALUATION_POLICY,
+  TILE_SIZE,
+  MAX_COMPLETE_TILE_COUNT,
+  padTileIndex,
+  buildTrainTiles,
   FOLD_STATUS,
   ERROR,
   AGGREGATE_DEFINITION,
@@ -318,9 +322,10 @@ function capturePipelineCalendars(runInput) {
 
   function wrap(original, kind) {
     return function patched(input) {
-      const tradeIntent = input && Array.isArray(input.tradeIntents) && input.tradeIntents[0]
-        ? deepClone(input.tradeIntents[0])
-        : null;
+      const tradeIntents = input && Array.isArray(input.tradeIntents)
+        ? deepClone(input.tradeIntents)
+        : [];
+      const tradeIntent = tradeIntents[0] || null;
       const calendarDays = input && input.calendar && Array.isArray(input.calendar.days)
         ? deepClone(input.calendar.days)
         : [];
@@ -332,6 +337,7 @@ function capturePipelineCalendars(runInput) {
         kind,
         tradeId: tradeIntent && tradeIntent.tradeId,
         tradeIntent,
+        tradeIntents,
         calendarDays,
         candleDates,
         pipelineStatus: result && result.pipelineStatus,
@@ -1049,8 +1055,8 @@ test("GATE5O-P12 OOS mutation cannot change selectedCandidateId", () => {
   const input1 = buildSelectionInput();
   const r1 = runWalkForwardTrainParameterSelection(deepClone(input1));
   const input2 = deepClone(input1);
-  // mutate OOS-only candles (indices 6..8 for fold1 with train=6 oos=3)
-  for (let i = 6; i < 9; i += 1) {
+  // mutate last-fold OOS-only candles (indices 9..11). 6..8 is fold0 OOS but fold1 train tile 2.
+  for (let i = 9; i < 12; i += 1) {
     input2.pipelineBase.dataset.candles[i].close = 1;
     input2.pipelineBase.dataset.candles[i].high = 2;
     input2.pipelineBase.dataset.candles[i].low = 1;
@@ -1440,7 +1446,7 @@ test("GATE5O-R1-E01 Train→OOS mixed; firstFailure is Train", () => {
   try {
     pipelineMod.runSyntheticPerformancePipeline = function patched(input) {
       const tid = input.tradeIntents[0].tradeId;
-      if (String(tid).startsWith("WF-0001:") && String(tid).endsWith(":train")) {
+      if (String(tid).startsWith("WF-0001:") && String(tid).includes(":train:")) {
         return {
           pipelineStatus: "BLOCKED_PERFORMANCE_STAGE",
           errors: [{ code: "TRAIN_ROOT_WF1" }],
@@ -1501,7 +1507,7 @@ test("GATE5O-R1-E02 OOS→Train mixed; firstFailure is OOS", () => {
     };
     pipelineMod.runSyntheticPerformancePipeline = function patched(input) {
       const tid = input.tradeIntents[0].tradeId;
-      if (String(tid).startsWith("WF-0002:") && String(tid).endsWith(":train")) {
+      if (String(tid).startsWith("WF-0002:") && String(tid).includes(":train:")) {
         return {
           pipelineStatus: "BLOCKED_PERFORMANCE_STAGE",
           errors: [{ code: "TRAIN_ROOT_LATER" }],
@@ -1529,7 +1535,7 @@ test("GATE5O-R1-E03 multi Train; first Train root wins", () => {
   try {
     pipelineMod.runSyntheticPerformancePipeline = function patched(input) {
       const tid = String(input.tradeIntents[0].tradeId);
-      if (tid.startsWith("WF-0001:") && tid.endsWith(":train")) {
+      if (tid.startsWith("WF-0001:") && tid.includes(":train:")) {
         return {
           pipelineStatus: "BLOCKED_PERFORMANCE_STAGE",
           errors: [{ code: "TRAIN_ROOT_A" }],
@@ -1537,7 +1543,7 @@ test("GATE5O-R1-E03 multi Train; first Train root wins", () => {
           totalReturn: null,
         };
       }
-      if (tid.startsWith("WF-0002:") && tid.endsWith(":train")) {
+      if (tid.startsWith("WF-0002:") && tid.includes(":train:")) {
         return {
           pipelineStatus: "BLOCKED_PERFORMANCE_STAGE",
           errors: [{ code: "TRAIN_ROOT_B" }],
@@ -1604,7 +1610,7 @@ test("GATE5O-R1-E05 later root only in fold2 diagnostics", () => {
   try {
     pipelineMod.runSyntheticPerformancePipeline = function patched(input) {
       const tid = String(input.tradeIntents[0].tradeId);
-      if (tid.startsWith("WF-0001:") && tid.endsWith(":train")) {
+      if (tid.startsWith("WF-0001:") && tid.includes(":train:")) {
         return {
           pipelineStatus: "BLOCKED_PERFORMANCE_STAGE",
           errors: [{ code: "TRAIN_ROOT_FIRST" }],
@@ -1644,7 +1650,7 @@ test("GATE5O-R1-E06 firstFailure deterministic", () => {
   function install() {
     pipelineMod.runSyntheticPerformancePipeline = function patched(input) {
       const tid = String(input.tradeIntents[0].tradeId);
-      if (tid.startsWith("WF-0001:") && tid.endsWith(":train")) {
+      if (tid.startsWith("WF-0001:") && tid.includes(":train:")) {
         return {
           pipelineStatus: "BLOCKED_PERFORMANCE_STAGE",
           errors: [{ code: "DET_TRAIN" }],
@@ -1928,7 +1934,7 @@ test("GATE5O-R1-X08 trainTotalReturn from performance", () => {
   const fold = result.folds[0];
   for (const ev of fold.candidateEvaluations) {
     const cap = captures.find(
-      (c) => c.kind === "train" && c.tradeId === `WF-0001:${ev.candidateId}:train`,
+      (c) => c.kind === "train" && c.tradeId === `WF-0001:${ev.candidateId}:train:T01`,
     );
     assert.equal(cap != null, true);
     assert.equal(ev.trainTotalReturn, cap.totalReturn);
@@ -1948,29 +1954,29 @@ test("GATE5O-R1-SM01 trainWindowSize>3; exitDate is bar2", () => {
   const trainDates = dates.slice(0, 9);
   const trainCap = captures.find((c) => c.kind === "train" && String(c.tradeId).startsWith("WF-0001:"));
   assert.equal(trainCap.tradeIntent.exitDate, trainDates[2]);
-  assert.equal(result.folds[0].selectionEvaluationTradingDayCount, 3);
+  assert.equal(result.folds[0].selectionEvaluationTradingDayCount, 9);
+  assert.equal(result.folds[0].selectionTradeCount, 3);
+  assert.equal(result.folds[0].selectionEvaluationEnd, trainDates[8]);
+  assert.equal(result.folds[0].selectionDroppedTailTradingDayCount, 0);
   assert.equal(result.folds[0].trainTradingDayCount, 9);
 });
 
-test("GATE5O-R1-SM02 bar4..N extreme mutation → selection unchanged", () => {
-  // Two folds required; mutate fold1 train bars index 3..8 (bar4..N).
-  // Fold1 selection uses only bars 0..2 → fold0 selectedCandidateId/score unchanged.
-  const dates = generateWeekdayDates("2101-03-01", 15);
+test("GATE5O-R1-SM02 dropped tail extreme mutation → selection unchanged", () => {
+  // trainWindowSize 10 → 3 complete tiles (idx 0..8) + dropped tail idx 9.
+  const dates = generateWeekdayDates("2101-03-01", 16);
   const baseInput = buildSelectionInput({
     tradingDates: dates,
-    trainWindowSize: 9,
+    trainWindowSize: 10,
     oosWindowSize: 3,
     stepSize: 3,
   });
   const r1 = runWalkForwardTrainParameterSelection(deepClone(baseInput));
   const mutated = deepClone(baseInput);
-  for (let i = 3; i <= 8; i += 1) {
-    // Extreme highs/closes but keep open≈10000 so default SL/TP remain valid vs entry.
-    mutated.pipelineBase.dataset.candles[i].open = 10000;
-    mutated.pipelineBase.dataset.candles[i].high = 50000;
-    mutated.pipelineBase.dataset.candles[i].low = 9900;
-    mutated.pipelineBase.dataset.candles[i].close = 45000;
-  }
+  const tail = 9;
+  mutated.pipelineBase.dataset.candles[tail].open = 10000;
+  mutated.pipelineBase.dataset.candles[tail].high = 50000;
+  mutated.pipelineBase.dataset.candles[tail].low = 9900;
+  mutated.pipelineBase.dataset.candles[tail].close = 45000;
   mutated.pipelineBase.dataset.contentChecksum = computeDatasetContentChecksum(
     mutated.pipelineBase.dataset,
   );
@@ -1991,11 +1997,11 @@ test("GATE5O-R1-SM04 evaluationEnd literal", () => {
   const input = buildSelectionInput();
   const result = runWalkForwardTrainParameterSelection(input);
   const fold = result.folds[0];
-  assert.equal(fold.selectionEvaluationEnd, input.tradingDates[2]);
-  assert.notEqual(fold.selectionEvaluationEnd, fold.trainEnd);
+  assert.equal(fold.selectionEvaluationEnd, input.tradingDates[5]);
+  assert.equal(fold.selectionEvaluationEnd, fold.trainEnd);
 });
 
-test("GATE5O-R1-SM05 evaluationTradingDayCount = 3", () => {
+test("GATE5O-R1-SM05 evaluationTradingDayCount = complete tiles * 3", () => {
   const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
     trainWindowSize: 9,
     tradingDates: generateWeekdayDates("2101-03-01", 15),
@@ -2003,12 +2009,13 @@ test("GATE5O-R1-SM05 evaluationTradingDayCount = 3", () => {
     stepSize: 3,
   }));
   for (const fold of result.folds) {
-    assert.equal(fold.selectionEvaluationTradingDayCount, 3);
+    assert.equal(fold.selectionEvaluationTradingDayCount, 9);
+    assert.equal(fold.selectionTradeCount, 3);
   }
 });
 
 test("GATE5O-R1-SM06 evaluationPolicy exact constant", () => {
-  assert.equal(SELECTION_EVALUATION_POLICY, "FIXED_FIRST_THREE_TRADING_BARS");
+  assert.equal(SELECTION_EVALUATION_POLICY, "NONOVERLAPPING_THREE_BAR_TILES");
   const result = runWalkForwardTrainParameterSelection(buildSelectionInput());
   for (const fold of result.folds) {
     assert.equal(fold.selectionEvaluationPolicy, SELECTION_EVALUATION_POLICY);
@@ -2100,7 +2107,7 @@ test("GATE5O-R2A-A train-first then OOS-later keeps exact official errors", () =
   try {
     pipelineMod.runSyntheticPerformancePipeline = function patched(input) {
       const tradeId = String(input.tradeIntents[0].tradeId);
-      if (tradeId.startsWith("WF-0001:") && tradeId.endsWith(":train")) {
+      if (tradeId.startsWith("WF-0001:") && tradeId.includes(":train:")) {
         return {
           pipelineStatus: "BLOCKED_PERFORMANCE_STAGE",
           errors: [{ code: "R2A_TRAIN_ROOT" }],
@@ -2163,7 +2170,7 @@ test("GATE5O-R2A-B OOS-first then Train-later keeps exact official errors", () =
     };
     pipelineMod.runSyntheticPerformancePipeline = function patched(input) {
       const tradeId = String(input.tradeIntents[0].tradeId);
-      if (tradeId.startsWith("WF-0002:") && tradeId.endsWith(":train")) {
+      if (tradeId.startsWith("WF-0002:") && tradeId.includes(":train:")) {
         return {
           pipelineStatus: "BLOCKED_PERFORMANCE_STAGE",
           errors: [{ code: "R2A_TRAIN_LATER" }],
@@ -2442,4 +2449,275 @@ test("GATE5O-R2A-K empty source days synthesize exact train and OOS calendars", 
   const oosCapture = captures.find((row) => row.kind === "oos" && row.tradeId === "WF-0001");
   assert.deepEqual(trainCapture.calendarDays, expectedDays(trainDates));
   assert.deepEqual(oosCapture.calendarDays, expectedDays(oosDates));
+});
+
+// ─── GATE 5P — Full Train-Window Selection Scoring ─────────────────────
+
+test("GATE5P-P01 padTileIndex T01..T99 and T100", () => {
+  assert.equal(padTileIndex(1), "T01");
+  assert.equal(padTileIndex(9), "T09");
+  assert.equal(padTileIndex(10), "T10");
+  assert.equal(padTileIndex(99), "T99");
+  assert.equal(padTileIndex(100), "T100");
+  assert.equal(TILE_SIZE, 3);
+  assert.equal(MAX_COMPLETE_TILE_COUNT, 100);
+});
+
+test("GATE5P-P02 buildTrainTiles index-only slice; leftover dropped", () => {
+  const dates = [
+    "2101-03-01",
+    "2101-03-02",
+    "2101-03-03",
+    "2101-03-08",
+    "2101-03-09",
+    "2101-03-10",
+    "2101-03-15",
+  ];
+  const built = buildTrainTiles(dates);
+  assert.equal(built.tiles.length, 2);
+  assert.deepEqual(built.tiles[0], ["2101-03-01", "2101-03-02", "2101-03-03"]);
+  assert.deepEqual(built.tiles[1], ["2101-03-08", "2101-03-09", "2101-03-10"]);
+  assert.deepEqual(built.droppedDates, ["2101-03-15"]);
+});
+
+test("GATE5P-P03 window sizes 3/4/5/6 tile and tail metadata", () => {
+  const cases = [
+    { size: 3, tiles: 1, evalDays: 3, dropped: 0 },
+    { size: 4, tiles: 1, evalDays: 3, dropped: 1 },
+    { size: 5, tiles: 1, evalDays: 3, dropped: 2 },
+    { size: 6, tiles: 2, evalDays: 6, dropped: 0 },
+  ];
+  for (const c of cases) {
+    const dates = generateWeekdayDates("2101-03-01", c.size + 6);
+    const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
+      tradingDates: dates,
+      trainWindowSize: c.size,
+      oosWindowSize: 3,
+      stepSize: 3,
+    }));
+    assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+    const fold = result.folds[0];
+    assert.equal(fold.selectionEvaluationPolicy, "NONOVERLAPPING_THREE_BAR_TILES");
+    assert.equal(fold.selectionTradeCount, c.tiles);
+    assert.equal(fold.selectionEvaluationTradingDayCount, c.evalDays);
+    assert.equal(fold.selectionDroppedTailTradingDayCount, c.dropped);
+    assert.equal(fold.selectionDroppedTailDates.length, c.dropped);
+    assert.equal(fold.selectionEvaluationStart, dates[0]);
+    assert.equal(fold.selectionEvaluationEnd, dates[c.tiles * 3 - 1]);
+    if (c.dropped === 0) {
+      assert.deepEqual(fold.selectionDroppedTailDates, []);
+    } else {
+      assert.deepEqual(fold.selectionDroppedTailDates, dates.slice(c.tiles * 3, c.size));
+    }
+  }
+});
+
+test("GATE5P-P04 unique tradeIds through max complete tiles", () => {
+  const n = MAX_COMPLETE_TILE_COUNT * TILE_SIZE;
+  const dates = [];
+  for (let i = 0; i < n; i += 1) dates.push("T" + String(i).padStart(4, "0"));
+  const built = buildTrainTiles(dates);
+  assert.equal(built.tiles.length, MAX_COMPLETE_TILE_COUNT);
+  assert.equal(built.droppedDates.length, 0);
+  const ids = built.tiles.map((_, k) => "WF-0001:P001:train:" + padTileIndex(k + 1));
+  assert.equal(new Set(ids).size, ids.length);
+  assert.equal(ids[0], "WF-0001:P001:train:T01");
+  assert.equal(ids[98], "WF-0001:P001:train:T99");
+  assert.equal(ids[99], "WF-0001:P001:train:T100");
+});
+
+test("GATE5P-P05 train pipeline uses tiled intents T01..; OOS remains single winner trade", () => {
+  const dates = generateWeekdayDates("2101-03-01", 12);
+  const { result, captures } = capturePipelineCalendars(buildSelectionInput({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 3,
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  const trainCap = captures.find((c) => c.kind === "train" && String(c.tradeId).startsWith("WF-0001:"));
+  assert.equal(trainCap.tradeIntents.length, 2);
+  assert.equal(trainCap.tradeIntents[0].tradeId, "WF-0001:P001:train:T01");
+  assert.equal(trainCap.tradeIntents[1].tradeId, "WF-0001:P001:train:T02");
+  assert.equal(trainCap.tradeIntents[0].entryDate, dates[1]);
+  assert.equal(trainCap.tradeIntents[0].exitDate, dates[2]);
+  assert.equal(trainCap.tradeIntents[0].exitDateMode, "LATEST_ALLOWED");
+  assert.equal(trainCap.tradeIntents[1].entryDate, dates[4]);
+  assert.equal(trainCap.tradeIntents[1].exitDate, dates[5]);
+  const oosCap = captures.find((c) => c.kind === "oos" && c.tradeId === "WF-0001");
+  assert.equal(oosCap.tradeIntents.length, 1);
+  assert.equal(oosCap.tradeIntents[0].tradeId, "WF-0001");
+});
+
+test("GATE5P-P06 zero complete tiles fail-closed", () => {
+  const dates = generateWeekdayDates("2101-03-01", 12);
+  const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
+    tradingDates: dates,
+    trainWindowSize: 2,
+    oosWindowSize: 3,
+    stepSize: 3,
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(result.selectionStatus, SELECTION_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.TRAIN_CANDIDATE_EVALUATION_FAILED), true);
+  assert.equal(result.officialFolds.length, 0);
+  assert.equal(result.meanOosTotalReturn, null);
+  assert.equal(result.folds[0].selectedParameters, null);
+  assert.equal(result.folds[0].selectionScore, null);
+});
+
+test("GATE5P-P07 overflow finite trades → nonfinite totalReturn fail-closed", () => {
+  const pipelineMod = require("../lib/backtest/synthetic-pipeline");
+  const originalPerf = pipelineMod.runSyntheticPerformancePipeline;
+  try {
+    pipelineMod.runSyntheticPerformancePipeline = function patched(input) {
+      const inner = originalPerf(input);
+      return {
+        ...inner,
+        pipelineStatus: PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS,
+        totalReturn: Number.POSITIVE_INFINITY,
+      };
+    };
+    const result = runWalkForwardTrainParameterSelection(buildSelectionInput());
+    assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+    assert.equal(result.selectionStatus, SELECTION_STATUS.BLOCKED);
+    assert.equal(hasCode(result, ERROR.TRAIN_SELECTION_NONFINITE), true);
+    assert.equal(result.errors[0].code, ERROR.TRAIN_SELECTION_NONFINITE);
+    assert.equal(result.officialFolds.length, 0);
+    assert.equal(result.meanOosTotalReturn, null);
+    assert.equal(result.folds[0].selectedParameters, null);
+    assert.equal(result.folds[0].selectionScore, null);
+    assert.equal(result.folds[0].candidateEvaluations[0].status, "BLOCKED");
+    assert.equal(Number.isFinite(result.folds[0].selectionScore), false);
+  } finally {
+    pipelineMod.runSyntheticPerformancePipeline = originalPerf;
+  }
+});
+
+test("GATE5P-P08 multi-fail permutation keeps first official root", () => {
+  const pipelineMod = require("../lib/backtest/synthetic-pipeline");
+  const originalPerf = pipelineMod.runSyntheticPerformancePipeline;
+  function install() {
+    pipelineMod.runSyntheticPerformancePipeline = function patched(input) {
+      const tid = String(input.tradeIntents[0].tradeId);
+      if (tid.includes(":P002:")) {
+        return {
+          pipelineStatus: "BLOCKED_PERFORMANCE_STAGE",
+          errors: [{ code: "ROOT_P002" }],
+          errorCodes: ["ROOT_P002"],
+          totalReturn: null,
+        };
+      }
+      if (tid.includes(":P001:")) {
+        return {
+          pipelineStatus: "BLOCKED_PERFORMANCE_STAGE",
+          errors: [{ code: "ROOT_P001" }],
+          errorCodes: ["ROOT_P001"],
+          totalReturn: null,
+        };
+      }
+      return originalPerf(input);
+    };
+  }
+  const dates = generateWeekdayDates("2101-03-01", 12);
+  const shared = {
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 3,
+    parameterCandidates: [
+      { id: "P002", stopLossPrice: 9000, takeProfitPrice: 11200 },
+      { id: "P001", stopLossPrice: 9500, takeProfitPrice: 11000 },
+    ],
+  };
+  try {
+    install();
+    const r1 = runWalkForwardTrainParameterSelection(buildSelectionInput(shared));
+    const r2 = runWalkForwardTrainParameterSelection(buildSelectionInput({
+      ...shared,
+      parameterCandidates: shared.parameterCandidates.slice().reverse(),
+    }));
+    assert.equal(r1.errors[0].cause, "ROOT_P001");
+    assert.equal(r2.errors[0].cause, "ROOT_P001");
+    assert.equal(r1.failedStage, r2.failedStage);
+    assert.equal(r1.errors[0].code, ERROR.TRAIN_CANDIDATE_EVALUATION_FAILED);
+  } finally {
+    pipelineMod.runSyntheticPerformancePipeline = originalPerf;
+  }
+});
+
+test("GATE5P-P09 multi-tile first-root is candidate pipeline failure", () => {
+  const pipelineMod = require("../lib/backtest/synthetic-pipeline");
+  const originalPerf = pipelineMod.runSyntheticPerformancePipeline;
+  try {
+    pipelineMod.runSyntheticPerformancePipeline = function patched(input) {
+      const intents = input.tradeIntents || [];
+      if (intents.length >= 2 && String(intents[0].tradeId).includes(":train:")) {
+        return {
+          pipelineStatus: "BLOCKED_PERFORMANCE_STAGE",
+          errors: [{ code: "MULTI_TILE_ROOT" }],
+          errorCodes: ["MULTI_TILE_ROOT"],
+          totalReturn: null,
+        };
+      }
+      return originalPerf(input);
+    };
+    const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
+      trainWindowSize: 6,
+      tradingDates: generateWeekdayDates("2101-03-01", 12),
+    }));
+    assert.equal(result.failedStage, "TRAIN_SELECTION");
+    assert.equal(result.errors[0].cause, "MULTI_TILE_ROOT");
+    assert.equal(hasCode(result, ERROR.TRAIN_CANDIDATE_EVALUATION_FAILED), true);
+  } finally {
+    pipelineMod.runSyntheticPerformancePipeline = originalPerf;
+  }
+});
+
+test("GATE5P-P10 complete-tile mutation can change score; dropped tail cannot", () => {
+  const dates = generateWeekdayDates("2101-03-01", 16);
+  const base = buildSelectionInput({
+    tradingDates: dates,
+    trainWindowSize: 10,
+    oosWindowSize: 3,
+    stepSize: 3,
+  });
+  const r0 = runWalkForwardTrainParameterSelection(deepClone(base));
+  const tailMut = deepClone(base);
+  tailMut.pipelineBase.dataset.candles[9].high = 50000;
+  tailMut.pipelineBase.dataset.candles[9].close = 45000;
+  tailMut.pipelineBase.dataset.contentChecksum = computeDatasetContentChecksum(tailMut.pipelineBase.dataset);
+  const rTail = runWalkForwardTrainParameterSelection(tailMut);
+  assert.equal(r0.folds[0].selectedCandidateId, rTail.folds[0].selectedCandidateId);
+  assert.equal(r0.folds[0].selectionScore, rTail.folds[0].selectionScore);
+
+  const tileMut = deepClone(base);
+  // tile 1 entry (idx 1, MARKET_OPEN) — TP already fills on original exit high, so change entry fill.
+  tileMut.pipelineBase.dataset.candles[1].open = 8000;
+  tileMut.pipelineBase.dataset.candles[1].high = 8100;
+  tileMut.pipelineBase.dataset.candles[1].low = 7900;
+  tileMut.pipelineBase.dataset.candles[1].close = 8050;
+  tileMut.pipelineBase.dataset.contentChecksum = computeDatasetContentChecksum(tileMut.pipelineBase.dataset);
+  const rTile = runWalkForwardTrainParameterSelection(tileMut);
+  assert.notEqual(rTile.folds[0].selectionScore, r0.folds[0].selectionScore);
+});
+
+test("GATE5P-P11 winner-only OOS not tiled", () => {
+  const { result, captures } = capturePipelineCalendars(buildSelectionInput({
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    tradingDates: generateWeekdayDates("2101-03-01", 12),
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  const oosCaps = captures.filter((c) => c.kind === "oos");
+  for (const cap of oosCaps) {
+    assert.equal(cap.tradeIntents.length, 1);
+    assert.equal(String(cap.tradeId).includes(":train:"), false);
+  }
+});
+
+test("GATE5P-P12 lifecycle default exit mode remains EXACT", () => {
+  const life = require("../lib/backtest/multi-trade-lifecycle");
+  assert.equal(life.EXIT_DATE_MODE.EXACT, "EXACT");
+  assert.equal(life.EXIT_DATE_MODE.LATEST_ALLOWED, "LATEST_ALLOWED");
 });
