@@ -11,6 +11,7 @@ const {
   LIFECYCLE_STATUS,
   POSITION_STATE,
   ERROR_CODE,
+  EXIT_DATE_MODE,
   runSyntheticMultiTradeLifecycle,
 } = lifecycle;
 
@@ -1425,4 +1426,164 @@ test("GATE5K-R16 early SL before exitDate → EXIT_DATE_MISMATCH", () => {
   assert.equal(result.lifecycleStatus, LIFECYCLE_STATUS.BLOCKED);
   assert.equal(hasCode(result, ERROR_CODE.EXIT_DATE_MISMATCH), true);
   assert.deepEqual(result.closedTrades, []);
+});
+
+test("GATE5O-R1 LATEST_ALLOWED early SL before exitDate → COMPLETED", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const dataset = buildDataset(calendar, [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10000, high: 10100, low: 9800, close: 10000 },
+    { tradingDate: t[2], open: 10000, high: 10100, low: 9000, close: 9600 },
+    { tradingDate: t[3], open: 10800, high: 11200, low: 10700, close: 11100 },
+  ]);
+  const cost = {
+    policyEngineVersion: POLICY_ENGINE_VERSION,
+    brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+    currency: CURRENCY.KRW,
+    policies: [makePolicy()],
+  };
+  const result = runSyntheticMultiTradeLifecycle({
+    dataset,
+    calendar,
+    calendarValidation: { requiredFrom: calendar.coverage.from, requiredTo: calendar.coverage.to },
+    cost,
+    tradeIntents: [{
+      tradeId: "T1",
+      quantity: 10,
+      entryDate: t[1],
+      exitDate: t[3],
+      exitDateMode: EXIT_DATE_MODE.LATEST_ALLOWED,
+      entryIntent: {
+        orderType: "MARKET_OPEN",
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: t[1],
+        limitPrice: null,
+      },
+      exitPolicy: { stopLossPrice: 9500, takeProfitPrice: 11000, intrabarConflictPolicy: "STOP_FIRST" },
+    }],
+    calculationMode: "SYNTHETIC_UNIT_TEST_ONLY",
+  });
+  assert.equal(result.lifecycleStatus, LIFECYCLE_STATUS.COMPLETED);
+  assert.equal(result.closedTrades[0].exitDate, t[2]);
+  assert.equal(result.closedTrades[0].exitPrice, 9500);
+});
+
+test("GATE5O-R1 EXACT (default/missing) still EXIT_DATE_MISMATCH on early SL", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const dataset = buildDataset(calendar, [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10000, high: 10100, low: 9800, close: 10000 },
+    { tradingDate: t[2], open: 10000, high: 10100, low: 9000, close: 9600 },
+    { tradingDate: t[3], open: 10800, high: 11200, low: 10700, close: 11100 },
+  ]);
+  const cost = {
+    policyEngineVersion: POLICY_ENGINE_VERSION,
+    brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+    currency: CURRENCY.KRW,
+    policies: [makePolicy()],
+  };
+  const result = runSyntheticMultiTradeLifecycle({
+    dataset,
+    calendar,
+    calendarValidation: { requiredFrom: calendar.coverage.from, requiredTo: calendar.coverage.to },
+    cost,
+    tradeIntents: [{
+      tradeId: "T1",
+      quantity: 10,
+      entryDate: t[1],
+      exitDate: t[3],
+      entryIntent: {
+        orderType: "MARKET_OPEN",
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: t[1],
+        limitPrice: null,
+      },
+      exitPolicy: { stopLossPrice: 9500, takeProfitPrice: 11000, intrabarConflictPolicy: "STOP_FIRST" },
+    }],
+    calculationMode: "SYNTHETIC_UNIT_TEST_ONLY",
+  });
+  assert.equal(result.lifecycleStatus, LIFECYCLE_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR_CODE.EXIT_DATE_MISMATCH), true);
+});
+
+test("GATE5O-R1 invalid exitDateMode → INVALID_INPUT", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const dataset = buildDataset(calendar, [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10000, high: 10500, low: 9800, close: 10200 },
+    { tradingDate: t[2], open: 10800, high: 11200, low: 10700, close: 11100 },
+  ]);
+  const cost = {
+    policyEngineVersion: POLICY_ENGINE_VERSION,
+    brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+    currency: CURRENCY.KRW,
+    policies: [makePolicy()],
+  };
+  const result = runSyntheticMultiTradeLifecycle({
+    dataset,
+    calendar,
+    calendarValidation: { requiredFrom: calendar.coverage.from, requiredTo: calendar.coverage.to },
+    cost,
+    tradeIntents: [{
+      tradeId: "T1",
+      quantity: 10,
+      entryDate: t[1],
+      exitDate: t[2],
+      exitDateMode: "INVALID_MODE",
+      entryIntent: {
+        orderType: "MARKET_OPEN",
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: t[1],
+        limitPrice: null,
+      },
+      exitPolicy: { stopLossPrice: 9500, takeProfitPrice: 11000, intrabarConflictPolicy: "STOP_FIRST" },
+    }],
+    calculationMode: "SYNTHETIC_UNIT_TEST_ONLY",
+  });
+  assert.equal(result.lifecycleStatus, LIFECYCLE_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR_CODE.INVALID_INPUT), true);
+});
+
+test("GATE5O-R1 LATEST_ALLOWED no SL/TP → market exit at exitDate close COMPLETED", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const dataset = buildDataset(calendar, [
+    { tradingDate: t[0], open: 9800, high: 9900, low: 9700, close: 9850 },
+    { tradingDate: t[1], open: 10000, high: 10100, low: 9900, close: 10050 },
+    { tradingDate: t[2], open: 10000, high: 10100, low: 9900, close: 10080 },
+    { tradingDate: t[3], open: 10100, high: 10200, low: 10000, close: 10150 },
+  ]);
+  const cost = {
+    policyEngineVersion: POLICY_ENGINE_VERSION,
+    brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+    currency: CURRENCY.KRW,
+    policies: [makePolicy()],
+  };
+  const result = runSyntheticMultiTradeLifecycle({
+    dataset,
+    calendar,
+    calendarValidation: { requiredFrom: calendar.coverage.from, requiredTo: calendar.coverage.to },
+    cost,
+    tradeIntents: [{
+      tradeId: "T1",
+      quantity: 10,
+      entryDate: t[1],
+      exitDate: t[3],
+      exitDateMode: EXIT_DATE_MODE.LATEST_ALLOWED,
+      entryIntent: {
+        orderType: "MARKET_OPEN",
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: t[1],
+        limitPrice: null,
+      },
+      exitPolicy: { stopLossPrice: 100, takeProfitPrice: 999999, intrabarConflictPolicy: "STOP_FIRST" },
+    }],
+    calculationMode: "SYNTHETIC_UNIT_TEST_ONLY",
+  });
+  assert.equal(result.lifecycleStatus, LIFECYCLE_STATUS.COMPLETED);
+  assert.equal(result.closedTrades[0].exitDate, t[3]);
+  assert.equal(result.closedTrades[0].exitPrice, 10150);
 });
