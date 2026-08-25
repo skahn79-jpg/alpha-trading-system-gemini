@@ -1458,7 +1458,7 @@ test("GATE5O-R1-E01 Train→OOS mixed; firstFailure is Train", () => {
     };
     pipelineMod.runSyntheticBenchmarkPipeline = function patched(input) {
       const tid = input.tradeIntents[0].tradeId;
-      if (tid === "WF-0002") {
+      if (String(tid).startsWith("WF-0002:oos:")) {
         return {
           pipelineStatus: "BLOCKED_BENCHMARK_STAGE",
           errors: [{ code: "OOS_ROOT_WF2" }],
@@ -1493,7 +1493,7 @@ test("GATE5O-R1-E02 OOS→Train mixed; firstFailure is OOS", () => {
   try {
     pipelineMod.runSyntheticBenchmarkPipeline = function patched(input) {
       const tid = input.tradeIntents[0].tradeId;
-      if (tid === "WF-0001") {
+      if (String(tid).startsWith("WF-0001:oos:")) {
         return {
           pipelineStatus: "BLOCKED_BENCHMARK_STAGE",
           errors: [{ code: "OOS_ROOT_WF1" }],
@@ -1570,7 +1570,7 @@ test("GATE5O-R1-E04 multi OOS; first OOS root wins", () => {
   try {
     pipelineMod.runSyntheticBenchmarkPipeline = function patched(input) {
       const tid = input.tradeIntents[0].tradeId;
-      if (tid === "WF-0001") {
+      if (String(tid).startsWith("WF-0001:oos:")) {
         return {
           pipelineStatus: "BLOCKED_BENCHMARK_STAGE",
           errors: [{ code: "OOS_ROOT_A" }],
@@ -1580,7 +1580,7 @@ test("GATE5O-R1-E04 multi OOS; first OOS root wins", () => {
           alpha: null,
         };
       }
-      if (tid === "WF-0002") {
+      if (String(tid).startsWith("WF-0002:oos:")) {
         return {
           pipelineStatus: "BLOCKED_BENCHMARK_STAGE",
           errors: [{ code: "OOS_ROOT_B" }],
@@ -1621,7 +1621,7 @@ test("GATE5O-R1-E05 later root only in fold2 diagnostics", () => {
       return originalPerf(input);
     };
     pipelineMod.runSyntheticBenchmarkPipeline = function patched(input) {
-      if (input.tradeIntents[0].tradeId === "WF-0002") {
+      if (String(input.tradeIntents[0].tradeId).startsWith("WF-0002:oos:")) {
         return {
           pipelineStatus: "BLOCKED_BENCHMARK_STAGE",
           errors: [{ code: "OOS_ROOT_LATER" }],
@@ -1661,7 +1661,7 @@ test("GATE5O-R1-E06 firstFailure deterministic", () => {
       return originalPerf(input);
     };
     pipelineMod.runSyntheticBenchmarkPipeline = function patched(input) {
-      if (input.tradeIntents[0].tradeId === "WF-0002") {
+      if (String(input.tradeIntents[0].tradeId).startsWith("WF-0002:oos:")) {
         return {
           pipelineStatus: "BLOCKED_BENCHMARK_STAGE",
           errors: [{ code: "DET_OOS" }],
@@ -1784,7 +1784,7 @@ test("GATE5O-R1-C06 OOS calendar same contract", () => {
   ]);
   const { result, captures } = capturePipelineCalendars(input);
   assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
-  const oosCap = captures.find((c) => c.kind === "oos" && c.tradeId === "WF-0001");
+  const oosCap = captures.find((c) => c.kind === "oos" && c.tradeId === "WF-0001:oos:T01");
   assert.equal(oosCap != null, true);
   const row = oosCap.calendarDays.find((d) => d.tradingDate === injectDate);
   if (row != null) {
@@ -2118,7 +2118,7 @@ test("GATE5O-R2A-A train-first then OOS-later keeps exact official errors", () =
       return originalPerf(input);
     };
     pipelineMod.runSyntheticBenchmarkPipeline = function patched(input) {
-      if (input.tradeIntents[0].tradeId === "WF-0002") {
+      if (String(input.tradeIntents[0].tradeId).startsWith("WF-0002:oos:")) {
         return {
           pipelineStatus: "BLOCKED_BENCHMARK_STAGE",
           errors: [{ code: "R2A_OOS_LATER" }],
@@ -2156,7 +2156,7 @@ test("GATE5O-R2A-B OOS-first then Train-later keeps exact official errors", () =
   const originalBench = pipelineMod.runSyntheticBenchmarkPipeline;
   try {
     pipelineMod.runSyntheticBenchmarkPipeline = function patched(input) {
-      if (input.tradeIntents[0].tradeId === "WF-0001") {
+      if (String(input.tradeIntents[0].tradeId).startsWith("WF-0001:oos:")) {
         return {
           pipelineStatus: "BLOCKED_BENCHMARK_STAGE",
           errors: [{ code: "R2A_OOS_FIRST", foldId: "WF-0001" }],
@@ -2213,7 +2213,7 @@ test("GATE5O-R2A-C first failure snapshot isolates pipeline error references", (
   };
   try {
     pipelineMod.runSyntheticBenchmarkPipeline = function patched(input) {
-      if (input.tradeIntents[0].tradeId === "WF-0001") {
+      if (String(input.tradeIntents[0].tradeId).startsWith("WF-0001:oos:")) {
         return {
           pipelineStatus: "BLOCKED_BENCHMARK_STAGE",
           errors: [sharedRoot],
@@ -2326,7 +2326,7 @@ test("GATE5O-R2A-G OOS calendar equals canonical OOS dates in order", () => {
   ]);
   const { result, captures } = capturePipelineCalendars(input);
   assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
-  const capture = captures.find((row) => row.kind === "oos" && row.tradeId === "WF-0001");
+  const capture = captures.find((row) => row.kind === "oos" && row.tradeId === "WF-0001:oos:T01");
   assert.deepEqual(capture.calendarDays.map((day) => day.tradingDate), canonicalOosDates);
 });
 
@@ -2446,7 +2446,7 @@ test("GATE5O-R2A-K empty source days synthesize exact train and OOS calendars", 
   const trainCapture = captures.find(
     (row) => row.kind === "train" && String(row.tradeId).startsWith("WF-0001:"),
   );
-  const oosCapture = captures.find((row) => row.kind === "oos" && row.tradeId === "WF-0001");
+  const oosCapture = captures.find((row) => row.kind === "oos" && row.tradeId === "WF-0001:oos:T01");
   assert.deepEqual(trainCapture.calendarDays, expectedDays(trainDates));
   assert.deepEqual(oosCapture.calendarDays, expectedDays(oosDates));
 });
@@ -2544,9 +2544,9 @@ test("GATE5P-P05 train pipeline uses tiled intents T01..; OOS remains single win
   assert.equal(trainCap.tradeIntents[0].exitDateMode, "LATEST_ALLOWED");
   assert.equal(trainCap.tradeIntents[1].entryDate, dates[4]);
   assert.equal(trainCap.tradeIntents[1].exitDate, dates[5]);
-  const oosCap = captures.find((c) => c.kind === "oos" && c.tradeId === "WF-0001");
+  const oosCap = captures.find((c) => c.kind === "oos" && c.tradeId === "WF-0001:oos:T01");
   assert.equal(oosCap.tradeIntents.length, 1);
-  assert.equal(oosCap.tradeIntents[0].tradeId, "WF-0001");
+  assert.equal(oosCap.tradeIntents[0].tradeId, "WF-0001:oos:T01");
 });
 
 test("GATE5P-P06 zero complete tiles fail-closed", () => {
@@ -2720,4 +2720,150 @@ test("GATE5P-P12 lifecycle default exit mode remains EXACT", () => {
   const life = require("../lib/backtest/multi-trade-lifecycle");
   assert.equal(life.EXIT_DATE_MODE.EXACT, "EXACT");
   assert.equal(life.EXIT_DATE_MODE.LATEST_ALLOWED, "LATEST_ALLOWED");
+});
+
+// ─── GATE 5Q — Full OOS-Window Scoring ────────────────────────────────
+
+test("GATE5Q-P01 oosWindow 3/4/5/6 tile and tail metadata", () => {
+  const cases = [
+    { oos: 3, step: 3, tiles: 1, dropped: 0 },
+    { oos: 4, step: 4, tiles: 1, dropped: 1 },
+    { oos: 5, step: 5, tiles: 1, dropped: 2 },
+    { oos: 6, step: 6, tiles: 2, dropped: 0 },
+  ];
+  for (const c of cases) {
+    const dates = generateWeekdayDates("2101-03-01", 6 + c.oos + c.step + 3);
+    const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
+      tradingDates: dates,
+      trainWindowSize: 6,
+      oosWindowSize: c.oos,
+      stepSize: c.step,
+    }));
+    assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+    const fold = result.folds[0];
+    const oosDates = dates.slice(6, 6 + c.oos);
+    assert.equal(fold.oosTradeCount, c.tiles);
+    assert.equal(fold.oosEvaluationTradingDayCount, c.tiles * 3);
+    assert.equal(fold.oosDroppedTailTradingDayCount, c.dropped);
+    assert.equal(fold.oosEvaluationStart, oosDates[0]);
+    assert.equal(fold.oosEvaluationEnd, oosDates[c.tiles * 3 - 1]);
+    if (c.dropped === 0) {
+      assert.deepEqual(fold.oosDroppedTailDates, []);
+    } else {
+      assert.deepEqual(fold.oosDroppedTailDates, oosDates.slice(c.tiles * 3));
+    }
+  }
+});
+
+test("GATE5Q-P02 OOS tile tradeIds T01.. and frozen winner params on every tile", () => {
+  const dates = generateWeekdayDates("2101-03-01", 21);
+  const { result, captures } = capturePipelineCalendars(buildSelectionInput({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 6,
+    stepSize: 6,
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  const oosCap = captures.find((c) => c.kind === "oos" && String(c.tradeId).startsWith("WF-0001:oos:"));
+  assert.equal(oosCap.tradeIntents.length, 2);
+  assert.equal(oosCap.tradeIntents[0].tradeId, "WF-0001:oos:T01");
+  assert.equal(oosCap.tradeIntents[1].tradeId, "WF-0001:oos:T02");
+  const winner = result.folds[0].selectedParameters;
+  for (const intent of oosCap.tradeIntents) {
+    assert.equal(intent.exitPolicy.stopLossPrice, winner.stopLossPrice);
+    assert.equal(intent.exitPolicy.takeProfitPrice, winner.takeProfitPrice);
+    assert.equal(intent.exitDateMode, "LATEST_ALLOWED");
+  }
+});
+
+test("GATE5Q-P03 dropped OOS tail mutation does not change OOS metrics; complete tile can", () => {
+  const dates = generateWeekdayDates("2101-03-01", 24);
+  const base = buildSelectionInput({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 7,
+    stepSize: 7,
+  });
+  const r0 = runWalkForwardTrainParameterSelection(deepClone(base));
+  assert.equal(r0.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  const oosStart = 6;
+  const tailMut = deepClone(base);
+  const tailIdx = oosStart + 6; // leftover after 2 complete tiles
+  tailMut.pipelineBase.dataset.candles[tailIdx].high = 50000;
+  tailMut.pipelineBase.dataset.candles[tailIdx].close = 45000;
+  tailMut.pipelineBase.dataset.contentChecksum = computeDatasetContentChecksum(tailMut.pipelineBase.dataset);
+  const rTail = runWalkForwardTrainParameterSelection(tailMut);
+  assert.equal(r0.folds[0].selectedCandidateId, rTail.folds[0].selectedCandidateId);
+  assert.equal(r0.folds[0].oosTotalReturn, rTail.folds[0].oosTotalReturn);
+
+  const tileMut = deepClone(base);
+  const entryIdx = oosStart + 1; // first OOS tile entry (MARKET_OPEN)
+  tileMut.pipelineBase.dataset.candles[entryIdx].open = 8000;
+  tileMut.pipelineBase.dataset.candles[entryIdx].high = 8100;
+  tileMut.pipelineBase.dataset.candles[entryIdx].low = 7900;
+  tileMut.pipelineBase.dataset.candles[entryIdx].close = 8050;
+  tileMut.pipelineBase.dataset.contentChecksum = computeDatasetContentChecksum(tileMut.pipelineBase.dataset);
+  const rTile = runWalkForwardTrainParameterSelection(tileMut);
+  assert.notEqual(rTile.folds[0].oosTotalReturn, r0.folds[0].oosTotalReturn);
+  assert.equal(rTile.folds[0].selectedCandidateId, r0.folds[0].selectedCandidateId);
+});
+
+test("GATE5Q-P04 overflow finite OOS trades → nonfinite metrics fail-closed", () => {
+  const pipelineMod = require("../lib/backtest/synthetic-pipeline");
+  const originalBench = pipelineMod.runSyntheticBenchmarkPipeline;
+  try {
+    pipelineMod.runSyntheticBenchmarkPipeline = function patched(input) {
+      const inner = originalBench(input);
+      return {
+        ...inner,
+        pipelineStatus: PIPELINE_STATUS.COMPLETED_BENCHMARK_ALPHA,
+        totalReturn: Number.POSITIVE_INFINITY,
+      };
+    };
+    const result = runWalkForwardTrainParameterSelection(buildSelectionInput());
+    assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+    assert.equal(result.errors[0].code, ERROR.OOS_EVALUATION_NONFINITE);
+    assert.equal(result.officialFolds.length, 0);
+    assert.equal(result.meanOosTotalReturn, null);
+    assert.equal(result.folds[0].oosTotalReturn, null);
+    assert.equal(result.folds[0].selectedCandidateId != null, true);
+  } finally {
+    pipelineMod.runSyntheticBenchmarkPipeline = originalBench;
+  }
+});
+
+test("GATE5Q-P05 zero OOS tiles fail-closed with OOS_FOLD_FAILED; selection recorded", () => {
+  const dates = generateWeekdayDates("2101-03-01", 12);
+  const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
+    tradingDates: dates,
+    trainWindowSize: 4,
+    oosWindowSize: 2,
+    stepSize: 2,
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.OOS_FOLD_FAILED), true);
+  assert.equal(result.errors[0].code, ERROR.OOS_FOLD_FAILED);
+  assert.equal(result.folds[0].selectedCandidateId != null, true);
+  assert.equal(result.folds[0].selectionScore != null, true);
+  assert.equal(result.folds[0].oosTradeCount, 0);
+});
+
+test("GATE5Q-P06 Train selection unchanged vs tiled OOS", () => {
+  const dates = generateWeekdayDates("2101-03-01", 21);
+  const small = runWalkForwardTrainParameterSelection(buildSelectionInput({
+    tradingDates: dates.slice(0, 12),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 3,
+  }));
+  const wide = runWalkForwardTrainParameterSelection(buildSelectionInput({
+    tradingDates: dates,
+    trainWindowSize: 6,
+    oosWindowSize: 6,
+    stepSize: 6,
+  }));
+  assert.equal(small.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(wide.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(small.folds[0].selectedCandidateId, wide.folds[0].selectedCandidateId);
+  assert.equal(small.folds[0].selectionScore, wide.folds[0].selectionScore);
 });
