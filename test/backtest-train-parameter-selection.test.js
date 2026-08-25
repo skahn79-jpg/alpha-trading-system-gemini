@@ -102,6 +102,16 @@ function generateWeekdayDates(start, count) {
   return out;
 }
 
+function generateConsecutiveDates(start, count) {
+  const out = [];
+  let cur = start;
+  while (out.length < count) {
+    out.push(cur);
+    cur = addDaysYmd(cur, 1);
+  }
+  return out;
+}
+
 function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -162,10 +172,7 @@ function integratedCandle(tradingDate, overrides) {
 }
 
 function profitableCandleRow(tradingDate, idx) {
-  const phase = idx % 3;
-  if (phase === 0) return { tradingDate, open: 9800, high: 9900, low: 9700, close: 9850 };
-  if (phase === 1) return { tradingDate, open: 10000, high: 10500, low: 9800, close: 10200 };
-  return { tradingDate, open: 10800, high: 11200, low: 10700, close: 11100 };
+  return { tradingDate, open: 10000, high: 10500, low: 9800, close: 10200 };
 }
 
 function buildDatasetForDates(tradingDates, overrides) {
@@ -385,7 +392,9 @@ function buildSelectionInput(overrides) {
   const preserveStepSize = extras.preserveStepSize === true;
   const trainWindowSize = extras.trainWindowSize != null ? extras.trainWindowSize : 6;
   const oosWindowSize = extras.oosWindowSize != null ? extras.oosWindowSize : 3;
-  const requiredStep = blockedStepSize(trainWindowSize, oosWindowSize, extras.embargoTradingDayCount);
+  const embargoTradingDayCount = extras.embargoTradingDayCount != null ? extras.embargoTradingDayCount : 1;
+  const horizonType = extras.horizonType != null ? extras.horizonType : "ULTRA_SHORT";
+  const requiredStep = blockedStepSize(trainWindowSize, oosWindowSize, embargoTradingDayCount);
   let stepSize = extras.stepSize != null ? extras.stepSize : requiredStep;
   if (!preserveStepSize && stepSize === oosWindowSize) {
     stepSize = requiredStep;
@@ -418,6 +427,8 @@ function buildSelectionInput(overrides) {
     trainWindowSize,
     oosWindowSize,
     stepSize,
+    embargoTradingDayCount,
+    horizonType,
     initialCapital: extras.initialCapital != null ? extras.initialCapital : 1000000,
     benchmarkSeries: extras.benchmarkSeries || buildBenchmarkSeries(
       extras.benchmarkDates || tradingDates,
@@ -979,7 +990,7 @@ test("GATE5O-P01 KOSPI success completed", () => {
 
 
 test("GATE5O-P02 KOSDAQ success", () => {
-  const dates = generateWeekdayDates("2101-03-01", 18);
+  const dates = generateWeekdayDates("2101-03-01", 22);
   const market = SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ;
   const input = buildSelectionInput({
     market,
@@ -1338,6 +1349,8 @@ test("GATE5O-P33 OOS fold fail after selection still records selectedCandidateId
     trainWindowSize: input.trainWindowSize,
     oosWindowSize: input.oosWindowSize,
     stepSize: input.stepSize,
+    embargoTradingDayCount: input.embargoTradingDayCount,
+    horizonType: input.horizonType,
   });
   input.benchmarkSeries = input.benchmarkSeries.filter((row) => row.tradingDate !== windows.windows[0].oosStart);
   const result = runWalkForwardTrainParameterSelection(input);
@@ -1788,7 +1801,10 @@ test("GATE5O-R1-C05 source calendar immutable", () => {
 
 test("GATE5O-R1-C06 OOS calendar same contract", () => {
   const input = buildSelectionInput();
-  const oosDates = input.tradingDates.slice(6, 9);
+  const oosDates = input.tradingDates.slice(
+    input.trainWindowSize + input.embargoTradingDayCount,
+    input.trainWindowSize + input.embargoTradingDayCount + input.oosWindowSize,
+  );
   // Prefer a weekend inside OOS coverage; otherwise any non-member near the window.
   let injectDate = findWeekendBetween([oosDates[0], oosDates[oosDates.length - 1]]);
   if (injectDate == null) {
@@ -1961,12 +1977,12 @@ test("GATE5O-R1-X08 trainTotalReturn from performance", () => {
 });
 
 test("GATE5O-R1-SM01 trainWindowSize>3; exitDate is bar2", () => {
-  const dates = generateWeekdayDates("2101-03-01", 24);
+  const dates = generateWeekdayDates("2101-03-01", 28);
   const input = buildSelectionInput({
     tradingDates: dates,
     trainWindowSize: 9,
     oosWindowSize: 3,
-    stepSize: 12,
+    stepSize: 14,
   });
   const { result, captures } = capturePipelineCalendars(input);
   assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
@@ -2010,9 +2026,9 @@ test("GATE5O-R1-SM04 evaluationEnd literal", () => {
 test("GATE5O-R1-SM05 evaluationTradingDayCount = complete tiles * 3", () => {
   const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
     trainWindowSize: 9,
-    tradingDates: generateWeekdayDates("2101-03-01", 24),
+    tradingDates: generateWeekdayDates("2101-03-01", 28),
     oosWindowSize: 3,
-    stepSize: 12,
+    stepSize: 14,
   }));
   for (const fold of result.folds) {
     assert.equal(fold.selectionEvaluationTradingDayCount, 9);
@@ -2322,8 +2338,8 @@ test("GATE5O-R2A-F missing canonical row is synthesized with exact membership", 
 test("GATE5O-R2A-G OOS calendar equals canonical OOS dates in order", () => {
   const input = buildSelectionInput();
   const canonicalOosDates = input.tradingDates.slice(
-    input.trainWindowSize,
-    input.trainWindowSize + input.oosWindowSize,
+    input.trainWindowSize + input.embargoTradingDayCount,
+    input.trainWindowSize + input.embargoTradingDayCount + input.oosWindowSize,
   );
   let extraDate = addDaysYmd(input.tradingDates[input.tradingDates.length - 1], 1);
   while (isWeekendYmd(extraDate)) extraDate = addDaysYmd(extraDate, 1);
@@ -2342,7 +2358,7 @@ test("GATE5O-R2A-H calendar rows outside fold train set cannot affect selection"
   const changedInput = deepClone(baselineInput);
   const foldTrainDates = changedInput.tradingDates.slice(0, changedInput.trainWindowSize);
   const gapDate = findWeekendBetween(foldTrainDates);
-  const oosDate = changedInput.tradingDates[changedInput.trainWindowSize];
+  const oosDate = changedInput.tradingDates[changedInput.trainWindowSize + changedInput.embargoTradingDayCount];
   let futureDate = addDaysYmd(
     changedInput.tradingDates[changedInput.tradingDates.length - 1],
     10,
@@ -2438,8 +2454,8 @@ test("GATE5O-R2A-K empty source days synthesize exact train and OOS calendars", 
   assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
   const trainDates = input.tradingDates.slice(0, input.trainWindowSize);
   const oosDates = input.tradingDates.slice(
-    input.trainWindowSize,
-    input.trainWindowSize + input.oosWindowSize,
+    input.trainWindowSize + input.embargoTradingDayCount,
+    input.trainWindowSize + input.embargoTradingDayCount + input.oosWindowSize,
   );
   const expectedDays = (dates) => dates.map((date) => ({
     tradingDate: date,
@@ -2504,12 +2520,12 @@ test("GATE5P-P03 window sizes 3/6 success empty tails; 4/5 fail-closed", () => {
     { size: 6, tiles: 2, evalDays: 6 },
   ];
   for (const c of cases) {
-    const dates = generateWeekdayDates("2101-03-01", 2 * (c.size + 3));
+    const dates = generateWeekdayDates("2101-03-01", 2 * (c.size + 5));
     const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
       tradingDates: dates,
       trainWindowSize: c.size,
       oosWindowSize: 3,
-      stepSize: c.size + 3,
+      stepSize: c.size + 5,
     }));
     assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
     const fold = result.folds[0];
@@ -2538,7 +2554,7 @@ test("GATE5P-P04 unique tradeIds through max complete tiles", () => {
 });
 
 test("GATE5P-P05 train pipeline uses tiled intents T01..; OOS remains single winner trade", () => {
-  const dates = generateWeekdayDates("2101-03-01", 18);
+  const dates = generateWeekdayDates("2101-03-01", 22);
   const { result, captures } = capturePipelineCalendars(buildSelectionInput({
     tradingDates: dates,
     trainWindowSize: 6,
@@ -2628,7 +2644,7 @@ test("GATE5P-P08 multi-fail permutation keeps first official root", () => {
       return originalPerf(input);
     };
   }
-  const dates = generateWeekdayDates("2101-03-01", 18);
+  const dates = generateWeekdayDates("2101-03-01", 22);
   const shared = {
     tradingDates: dates,
     trainWindowSize: 6,
@@ -2673,7 +2689,7 @@ test("GATE5P-P09 multi-tile first-root is candidate pipeline failure", () => {
     };
     const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
       trainWindowSize: 6,
-      tradingDates: generateWeekdayDates("2101-03-01", 18),
+      tradingDates: generateWeekdayDates("2101-03-01", 22),
     }));
     assert.equal(result.failedStage, "TRAIN_SELECTION");
     assert.equal(result.errors[0].cause, "MULTI_TILE_ROOT");
@@ -2693,12 +2709,12 @@ test("GATE5P-P10 complete-tile mutation can change score; leftover train size re
   assert.equal(leftover.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
   assert.equal(leftover.errors[0].field, "trainWindowSize");
 
-  const dates = generateWeekdayDates("2101-03-01", 24);
+  const dates = generateWeekdayDates("2101-03-01", 28);
   const base = buildSelectionInput({
     tradingDates: dates,
     trainWindowSize: 9,
     oosWindowSize: 3,
-    stepSize: 12,
+    stepSize: 14,
   });
   const r0 = runWalkForwardTrainParameterSelection(deepClone(base));
   assert.equal(r0.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
@@ -2717,7 +2733,7 @@ test("GATE5P-P11 winner-only OOS not tiled", () => {
   const { result, captures } = capturePipelineCalendars(buildSelectionInput({
     trainWindowSize: 6,
     oosWindowSize: 3,
-    tradingDates: generateWeekdayDates("2101-03-01", 18),
+    tradingDates: generateWeekdayDates("2101-03-01", 22),
   }));
   assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
   const oosCaps = captures.filter((c) => c.kind === "oos");
@@ -2753,16 +2769,16 @@ test("GATE5Q-P01 oosWindow 3/6 success empty tails; 4/5 fail-closed", () => {
     { oos: 6, tiles: 2 },
   ];
   for (const c of cases) {
-    const dates = generateWeekdayDates("2101-03-01", 2 * (6 + c.oos));
+    const dates = generateWeekdayDates("2101-03-01", 2 * (8 + c.oos));
     const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
       tradingDates: dates,
       trainWindowSize: 6,
       oosWindowSize: c.oos,
-      stepSize: 6 + c.oos,
+      stepSize: 8 + c.oos,
     }));
     assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
     const fold = result.folds[0];
-    const oosDates = dates.slice(6, 6 + c.oos);
+    const oosDates = dates.slice(7, 7 + c.oos);
     assert.equal(fold.oosTradeCount, c.tiles);
     assert.equal(fold.oosEvaluationTradingDayCount, c.tiles * 3);
     assert.equal(fold.oosDroppedTailTradingDayCount, 0);
@@ -2773,12 +2789,12 @@ test("GATE5Q-P01 oosWindow 3/6 success empty tails; 4/5 fail-closed", () => {
 });
 
 test("GATE5Q-P02 OOS tile tradeIds T01.. and frozen winner params on every tile", () => {
-  const dates = generateWeekdayDates("2101-03-01", 24);
+  const dates = generateWeekdayDates("2101-03-01", 28);
   const { result, captures } = capturePipelineCalendars(buildSelectionInput({
     tradingDates: dates,
     trainWindowSize: 6,
     oosWindowSize: 6,
-    stepSize: 12,
+    stepSize: 14,
   }));
   assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
   const oosCap = captures.find((c) => c.kind === "oos" && String(c.tradeId).startsWith("WF-0001:oos:"));
@@ -2803,17 +2819,17 @@ test("GATE5Q-P03 leftover oos=7 rejected; complete tile mutation can change OOS 
   assert.equal(leftover.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
   assert.equal(leftover.errors[0].field, "oosWindowSize");
 
-  const dates = generateWeekdayDates("2101-03-01", 24);
+  const dates = generateWeekdayDates("2101-03-01", 28);
   const base = buildSelectionInput({
     tradingDates: dates,
     trainWindowSize: 6,
     oosWindowSize: 6,
-    stepSize: 12,
+    stepSize: 14,
   });
   const r0 = runWalkForwardTrainParameterSelection(deepClone(base));
   assert.equal(r0.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
   assert.equal(r0.folds[0].oosDroppedTailTradingDayCount, 0);
-  const oosStart = 6;
+  const oosStart = 7;
   const tileMut = deepClone(base);
   const entryIdx = oosStart + 1;
   tileMut.pipelineBase.dataset.candles[entryIdx].open = 8000;
@@ -2867,16 +2883,16 @@ test("GATE5Q-P05 oosWindowSize 2 fail-closed at config before zero-tile", () => 
 test("GATE5Q-P06 Train selection unchanged vs tiled OOS", () => {
   const dates = generateWeekdayDates("2101-03-01", 24);
   const small = runWalkForwardTrainParameterSelection(buildSelectionInput({
-    tradingDates: dates.slice(0, 18),
+    tradingDates: dates.slice(0, 22),
     trainWindowSize: 6,
     oosWindowSize: 3,
-    stepSize: 9,
+    stepSize: 11,
   }));
   const wide = runWalkForwardTrainParameterSelection(buildSelectionInput({
-    tradingDates: dates,
+    tradingDates: generateWeekdayDates("2101-03-01", 28),
     trainWindowSize: 6,
     oosWindowSize: 6,
-    stepSize: 12,
+    stepSize: 14,
   }));
   assert.equal(small.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
   assert.equal(wide.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
@@ -2887,19 +2903,19 @@ test("GATE5Q-P06 Train selection unchanged vs tiled OOS", () => {
 
 // ─── GATE 5R — Embargo isolation ───────────────────────────────────────
 
-test("GATE5R-P01 embargo=0 selection matches omitted embargo", () => {
-  const dates = generateWeekdayDates("2101-03-01", 18);
-  const a = runWalkForwardTrainParameterSelection(buildSelectionInput({ tradingDates: dates }));
+test("GATE5R-P01 omitted embargo and explicit 0 fail-closed under PURGE_MIN", () => {
+  const dates = generateWeekdayDates("2101-03-01", 22);
+  const omitted = buildSelectionInput({ tradingDates: dates });
+  delete omitted.embargoTradingDayCount;
+  const a = runWalkForwardTrainParameterSelection(omitted);
   const b = runWalkForwardTrainParameterSelection(buildSelectionInput({
     tradingDates: dates,
     embargoTradingDayCount: 0,
   }));
-  assert.equal(a.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
-  assert.equal(b.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
-  assert.equal(a.folds[0].selectedCandidateId, b.folds[0].selectedCandidateId);
-  assert.equal(a.folds[0].selectionScore, b.folds[0].selectionScore);
-  assert.equal(a.folds[0].oosTotalReturn, b.folds[0].oosTotalReturn);
-  assert.deepEqual(a.folds[0].embargoDates, []);
+  assert.equal(a.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(b.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(a.errors[0].field, "embargoTradingDayCount");
+  assert.equal(b.errors[0].field, "embargoTradingDayCount");
 });
 
 test("GATE5R-P02 embargo bar mutation does not change train or OOS scores", () => {
@@ -2938,18 +2954,18 @@ test("GATE5R-P03 invalid embargo fail-closed", () => {
 
 
 test("GATE5S-P01 previous-fold OOS mutation does not change next-fold train selection", () => {
-  const dates = generateWeekdayDates("2101-03-01", 18);
+  const dates = generateWeekdayDates("2101-03-01", 22);
   const base = buildSelectionInput({
     tradingDates: dates,
     trainWindowSize: 6,
     oosWindowSize: 3,
-    stepSize: 9,
+    stepSize: 11,
   });
   const r0 = runWalkForwardTrainParameterSelection(deepClone(base));
   assert.equal(r0.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
   assert.equal(r0.folds.length, 2);
   const mutated = deepClone(base);
-  const oos0 = 6;
+  const oos0 = 7;
   mutated.pipelineBase.dataset.candles[oos0].high = 50000;
   mutated.pipelineBase.dataset.candles[oos0].close = 45000;
   mutated.pipelineBase.dataset.contentChecksum = computeDatasetContentChecksum(mutated.pipelineBase.dataset);
