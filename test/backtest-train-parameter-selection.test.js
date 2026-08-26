@@ -3635,3 +3635,51 @@ test("GATE6G-S03 two-tile selection OOS MAX_VALUE still OOS_EVALUATION_NONFINITE
   assert.equal(result.errors[0].field, "oosMetrics");
   assertOfficialLeakageFreeze(result);
 });
+
+test("GATE6H-S01 source pins shared makeBacktestError and drops local makeError", () => {
+  const src = fs.readFileSync(SEL_PATH, "utf8");
+  assert.equal(src.includes('require("./make-error")'), true);
+  assert.equal(src.includes("makeBacktestError"), true);
+  assert.equal(src.includes("function makeError"), false);
+});
+
+test("GATE6H-S02 one-tile MAX_VALUE OOS overflow keeps severity ERROR and meanOosTotalReturn", () => {
+  const result = withSelectionOosMetrics(
+    () => ({ totalReturn: Number.MAX_VALUE, benchmarkReturn: 0.01, alpha: 0.01 }),
+    () => runWalkForwardTrainParameterSelection(buildSelectionInput({
+      tradingDates: generateWeekdayDates("2101-03-01", 22),
+      trainWindowSize: 6,
+      oosWindowSize: 3,
+      stepSize: 11,
+    })),
+  );
+  assert.equal(hasCode(result, ERROR.WALK_FORWARD_AGGREGATE_NONFINITE), true);
+  assert.equal(result.errors[0].field, "meanOosTotalReturn");
+  assert.equal(result.errors[0].severity, "ERROR");
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6H-S03 two-tile selection OOS overflow keeps severity ERROR and oosMetrics", () => {
+  const result = withSelectionOosMetrics(
+    () => ({ totalReturn: Number.MAX_VALUE, benchmarkReturn: 0.01, alpha: 0.01 }),
+    () => runWalkForwardTrainParameterSelection(sixBarSelectionInput()),
+  );
+  assert.equal(hasCode(result, ERROR.OOS_EVALUATION_NONFINITE), true);
+  assert.equal(result.errors[0].field, "oosMetrics");
+  assert.equal(result.errors[0].severity, "ERROR");
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6H-S04 selection extras cause/candidateId/tradeId still present", () => {
+  const src = fs.readFileSync(SEL_PATH, "utf8");
+  assert.equal(src.includes("cause: tradeResult.error.code"), true);
+  assert.equal(src.includes("cause: rootErr.code") || src.includes("cause: build.error.code"), true);
+  assert.equal(src.includes("{ field: \"periodDates\", tradeId }"), true);
+  const r = selectWinnerFromTrainEvaluations([
+    { candidateId: "P001", trainTotalReturn: 0.1, status: "BLOCKED" },
+  ]);
+  assert.equal(r.ok, false);
+  assert.equal(r.error.code, ERROR.TRAIN_CANDIDATE_EVALUATION_FAILED);
+  assert.equal(r.error.candidateId, "P001");
+  assert.equal(r.error.severity, "ERROR");
+});

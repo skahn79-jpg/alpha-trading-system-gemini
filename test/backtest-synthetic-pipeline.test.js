@@ -1760,6 +1760,8 @@ test("GATE5H-P50 허용 파일 외 변경 없음", () => {
     "src/nlth.js",
     "lib/backtest/finite-tile-mean.js",
     "test/finite-tile-mean.test.js",
+    "lib/backtest/make-error.js",
+    "test/backtest-make-error.test.js",
   ]);
   for (const name of names) {
     assert.equal(allowed.has(name), true, name);
