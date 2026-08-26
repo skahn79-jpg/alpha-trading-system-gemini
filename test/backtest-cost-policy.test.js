@@ -17,6 +17,7 @@ const {
   calculateSyntheticTradeCost,
   createCostResult,
   makeSafeCostError,
+  SAFE_ERROR_KEYS,
   ERROR,
   ROUNDING_MODE,
   CALCULATION_MODE,
@@ -1139,4 +1140,79 @@ test("makeSafeCostError 추가: severity 기본 ERROR", () => {
 test("makeSafeCostError 추가: WARNING severity 허용", () => {
   const err = makeSafeCostError({ code: ERROR.INVALID_INPUT, severity: "WARNING" });
   assert.equal(err.severity, "WARNING");
+});
+
+test("GATE6Q-G01 source pins shared makeBacktestError adapter", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/cost-policy.js"),
+    "utf8"
+  );
+  assert.equal(src.includes('require("./make-error")'), true);
+  assert.equal(src.includes("makeBacktestError"), true);
+  assert.equal(src.includes("function makeError"), false);
+  assert.equal(src.includes("const err = makeBacktestError(raw.code, extra)"), true);
+  assert.equal(src.includes("if (raw.code == null)"), true);
+  assert.equal(src.includes("err.severity = raw.severity != null ? raw.severity : \"ERROR\""), true);
+  assert.equal(src.includes("for (const key of SAFE_ERROR_KEYS)"), true);
+  assert.equal(src.includes("return { severity: \"ERROR\" }"), true);
+});
+
+test("GATE6Q-G02 unknown field keeps cost extras and stays inside SAFE_ERROR_KEYS", () => {
+  const result = validateCostPolicy(makePolicy({ extraField: 1 }));
+  assert.equal(result.ok, false);
+  const err = result.errors.find((e) => e.code === ERROR.UNKNOWN_FIELD);
+  assert.equal(err.field, "extraField");
+  assert.equal(err.severity, "ERROR");
+  const allowed = new Set(SAFE_ERROR_KEYS);
+  for (const key of Object.keys(err)) {
+    assert.equal(allowed.has(key), true, key);
+  }
+});
+
+test("GATE6Q-G03 non-object input keeps severity ERROR without a code key", () => {
+  const err = makeSafeCostError(null);
+  assert.deepEqual(err, { severity: "ERROR" });
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "code"), false);
+});
+
+test("GATE6Q-G04 adapter copies cost extras and drops cause tradeId stage", () => {
+  const err = makeSafeCostError({
+    code: ERROR.UNKNOWN_FIELD,
+    field: "extraField",
+    policyId: "synthetic-cost-kospi-v1",
+    policyVersion: "1.0.0",
+    brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+    currency: CURRENCY.KRW,
+    taxType: "SEC",
+    cause: "TRAIN_ROOT_A",
+    tradeId: "T1",
+    stage: "DATA",
+  });
+  assert.equal(err.field, "extraField");
+  assert.equal(err.policyId, "synthetic-cost-kospi-v1");
+  assert.equal(err.policyVersion, "1.0.0");
+  assert.equal(err.brokerChannel, BROKER_CHANNEL.SYNTHETIC_ONLINE);
+  assert.equal(err.currency, CURRENCY.KRW);
+  assert.equal(err.taxType, "SEC");
+  assert.equal(err.severity, "ERROR");
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "cause"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "tradeId"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "stage"), false);
+});
+
+test("GATE6Q-G05 missing or null code omits the code key", () => {
+  const missing = makeSafeCostError({ field: "policyId" });
+  assert.equal(Object.prototype.hasOwnProperty.call(missing, "code"), false);
+  assert.equal(missing.severity, "ERROR");
+  const nulled = makeSafeCostError({ code: null, field: "policyId" });
+  assert.equal(Object.prototype.hasOwnProperty.call(nulled, "code"), false);
+  assert.equal(nulled.field, "policyId");
+});
+
+test("GATE6Q-G06 non-null non-string severity is preserved", () => {
+  const empty = makeSafeCostError({ code: ERROR.INVALID_INPUT, severity: "" });
+  assert.equal(empty.code, ERROR.INVALID_INPUT);
+  assert.equal(empty.severity, "");
+  const numeric = makeSafeCostError({ code: ERROR.INVALID_INPUT, severity: 0 });
+  assert.equal(numeric.severity, 0);
 });

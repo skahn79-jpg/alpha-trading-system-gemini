@@ -83,15 +83,22 @@ test("GATE6I-U01 freeze known extras stay exact and unknown extras stay dropped"
     calendarVersion: "1.0.0",
     dayStatus: "OPEN",
     sessionStatus: "REGULAR",
+    policyId: "pol",
+    policyVersion: "1",
+    brokerChannel: "SYNTHETIC_ONLINE",
+    currency: "KRW",
+    taxType: "SEC",
     sequence: 1,
   });
   assert.deepEqual(Object.keys(err).sort(), [
+    "brokerChannel",
     "calendarId",
     "calendarVersion",
     "candidateId",
     "cause",
     "code",
     "contentChecksum",
+    "currency",
     "datasetId",
     "datasetVersion",
     "dayStatus",
@@ -100,12 +107,15 @@ test("GATE6I-U01 freeze known extras stay exact and unknown extras stay dropped"
     "index",
     "market",
     "metadataHash",
+    "policyId",
+    "policyVersion",
     "reason",
     "recordIndex",
     "sessionStatus",
     "severity",
     "stage",
     "symbol",
+    "taxType",
     "tradeId",
     "tradeIndex",
     "tradingDate",
@@ -123,6 +133,11 @@ test("GATE6I-U01 freeze known extras stay exact and unknown extras stay dropped"
   assert.equal(err.calendarVersion, "1.0.0");
   assert.equal(err.dayStatus, "OPEN");
   assert.equal(err.sessionStatus, "REGULAR");
+  assert.equal(err.policyId, "pol");
+  assert.equal(err.policyVersion, "1");
+  assert.equal(err.brokerChannel, "SYNTHETIC_ONLINE");
+  assert.equal(err.currency, "KRW");
+  assert.equal(err.taxType, "SEC");
   assert.equal(Object.prototype.hasOwnProperty.call(err, "sequence"), false);
   assert.equal(err.severity, "ERROR");
 });
@@ -172,16 +187,23 @@ test("GATE6O-U01 freeze known extras stay the 6N set and null candidateId still 
     calendarVersion: "1.0.0",
     dayStatus: "OPEN",
     sessionStatus: "REGULAR",
+    policyId: "pol",
+    policyVersion: "1",
+    brokerChannel: "SYNTHETIC_ONLINE",
+    currency: "KRW",
+    taxType: "SEC",
     sequence: 1,
     leaked: "nope",
   });
   assert.deepEqual(Object.keys(err).sort(), [
+    "brokerChannel",
     "calendarId",
     "calendarVersion",
     "candidateId",
     "cause",
     "code",
     "contentChecksum",
+    "currency",
     "datasetId",
     "datasetVersion",
     "dayStatus",
@@ -190,12 +212,15 @@ test("GATE6O-U01 freeze known extras stay the 6N set and null candidateId still 
     "index",
     "market",
     "metadataHash",
+    "policyId",
+    "policyVersion",
     "reason",
     "recordIndex",
     "sessionStatus",
     "severity",
     "stage",
     "symbol",
+    "taxType",
     "tradeId",
     "tradeIndex",
     "tradingDate",
