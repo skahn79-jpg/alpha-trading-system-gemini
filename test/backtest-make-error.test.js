@@ -108,7 +108,6 @@ test("GATE6I-U03 freeze does not expand makeError into other modules", () => {
     "data-validation.js",
     "leakage-guard.js",
     "multi-trade-lifecycle.js",
-    "portfolio-ledger.js",
   ]) {
     const src = fs.readFileSync(path.join(root, name), "utf8");
     assert.equal(src.includes("function makeError"), true, name);

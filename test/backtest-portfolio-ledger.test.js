@@ -948,3 +948,32 @@ test("GATE5K-R08 exit-date marketValue and unrealizedPnl are 0", () => {
   assert.equal(snap.marketValue, 0);
   assert.equal(snap.unrealizedPnl, 0);
 });
+
+test("GATE6K-L01 source pins shared makeBacktestError and no local makeError", () => {
+  const src = require("node:fs").readFileSync(
+    require("node:path").join(__dirname, "..", "lib", "backtest", "portfolio-ledger.js"),
+    "utf8",
+  );
+  assert.equal(src.includes('require("./make-error")'), true);
+  assert.equal(src.includes("makeBacktestError"), true);
+  assert.equal(src.includes("function makeError"), false);
+});
+
+test("GATE6K-L02 invalid quantity keeps tradeId and severity ERROR", () => {
+  const fx = oneTradeFixture({ trade: { quantity: 0, entryCommission: 0, entryCost: 0, exitCommission: 0, sellTaxTotal: 0, exitCost: 0, netPnl: 0 } });
+  fx.input.closedTrades[0].quantity = 0;
+  const result = runPortfolioLedger(fx.input);
+  assert.equal(hasCode(result, ERROR.INVALID_QUANTITY), true);
+  assert.equal(result.errors[0].field, "quantity");
+  assert.equal(result.errors[0].tradeId, "T1");
+  assert.equal(result.errors[0].severity, "ERROR");
+});
+
+test("GATE6K-L03 insufficient cash keeps tradeId/tradingDate and severity ERROR", () => {
+  const fx = oneTradeFixture({ initialCapital: 1 });
+  const result = runPortfolioLedger(fx.input);
+  assert.equal(hasCode(result, ERROR.INSUFFICIENT_CASH), true);
+  assert.equal(result.errors[0].tradeId, "T1");
+  assert.equal(typeof result.errors[0].tradingDate, "string");
+  assert.equal(result.errors[0].severity, "ERROR");
+});
