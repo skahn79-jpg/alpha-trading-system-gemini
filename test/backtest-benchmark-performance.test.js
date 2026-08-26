@@ -623,3 +623,19 @@ test("GATE5M-B60 alpha definition constant preserved", () => {
   assert.equal(result.alphaDefinition, ALPHA_DEFINITION);
   assert.equal(ALPHA_DEFINITION, "TOTAL_RETURN_DIFFERENCE");
 });
+
+test("GATE6J-B01 source pins shared makeBacktestError and no local makeError", () => {
+  const src = fs.readFileSync(SRC_PATH, "utf8");
+  assert.equal(src.includes('require("./make-error")'), true);
+  assert.equal(src.includes("makeBacktestError"), true);
+  assert.equal(src.includes("function makeError"), false);
+});
+
+test("GATE6J-B02 blocked performanceStatus keeps field and severity ERROR", () => {
+  const result = calculateBenchmarkPerformance(buildValidInput({
+    performanceStatus: "BLOCKED",
+  }));
+  assert.equal(hasCode(result, ERROR.PERFORMANCE_NOT_COMPLETED), true);
+  assert.equal(result.errors[0].field, "performanceStatus");
+  assert.equal(result.errors[0].severity, "ERROR");
+});

@@ -939,3 +939,19 @@ test("GATE5L-R10 closedTrades empty array is NO_CLOSED_TRADES not BLOCKED", () =
   assert.equal(result.winRate, null);
   assert.equal(result.winRateStatus, METRIC_STATUS.NO_CLOSED_TRADES);
 });
+
+test("GATE6J-P01 source pins shared makeBacktestError and no local makeError", () => {
+  const src = fs.readFileSync(SRC_PATH, "utf8");
+  assert.equal(src.includes('require("./make-error")'), true);
+  assert.equal(src.includes("makeBacktestError"), true);
+  assert.equal(src.includes("function makeError"), false);
+});
+
+test("GATE6J-P02 blocked portfolioStatus keeps field and severity ERROR", () => {
+  const result = calculatePerformanceMetrics(buildCompletedInput({
+    portfolioStatus: "NOT_DONE",
+  }));
+  assert.equal(hasCode(result, ERROR.PORTFOLIO_NOT_COMPLETED), true);
+  assert.equal(result.errors[0].field, "portfolioStatus");
+  assert.equal(result.errors[0].severity, "ERROR");
+});
