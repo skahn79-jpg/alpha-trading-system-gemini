@@ -3563,3 +3563,30 @@ test("GATE6E-S01 fold aggregate uses finite-tile-mean helper", () => {
   assert.equal(src.includes("sumTotal += fold.totalReturn"), false);
 });
 
+test("GATE6F-S01 selection fold aggregate overflow field matches walk-forward meanOosTotalReturn", () => {
+  const result = withSelectionOosMetrics(
+    () => ({ totalReturn: Number.MAX_VALUE, benchmarkReturn: 0.01, alpha: 0.01 }),
+    () => runWalkForwardTrainParameterSelection(buildSelectionInput({
+      tradingDates: generateWeekdayDates("2101-03-01", 22),
+      trainWindowSize: 6,
+      oosWindowSize: 3,
+      stepSize: 11,
+    })),
+  );
+  assert.equal(hasCode(result, ERROR.WALK_FORWARD_AGGREGATE_NONFINITE), true);
+  assert.equal(hasCode(result, ERROR.OOS_EVALUATION_NONFINITE), false);
+  assert.equal(result.errors[0].field, "meanOosTotalReturn");
+  assert.equal(result.meanOosTotalReturn, null);
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6F-S02 selection source no longer uses sum* aggregate fields", () => {
+  const src = fs.readFileSync(SEL_PATH, "utf8");
+  assert.equal(src.includes("sumTotalReturn"), false);
+  assert.equal(src.includes("sumBenchmarkReturn"), false);
+  assert.equal(src.includes("aggregateBlockedResult(\"sumAlpha\")"), false);
+  assert.equal(src.includes('aggregateBlockedResult("meanOosTotalReturn")'), true);
+  assert.equal(src.includes('aggregateBlockedResult("meanOosBenchmarkReturn")'), true);
+  assert.equal(src.includes('aggregateBlockedResult("meanOosAlpha")'), true);
+});
+

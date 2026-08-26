@@ -2365,3 +2365,34 @@ test("GATE6E-U01 helper still has no official aggregate error code", () => {
   assert.equal(helperSrc.includes("WALK_FORWARD_AGGREGATE_NONFINITE"), false);
 });
 
+test("GATE6F-W01 fold aggregate overflow field is meanOosTotalReturn", () => {
+  const result = withPatchedPipeline(
+    () => ({ totalReturn: Number.MAX_VALUE, benchmarkReturn: 0.01, alpha: 0.01 }),
+    () => runWalkForwardValidation(buildWalkForwardInput()),
+  );
+  assert.equal(hasCode(result, ERROR.WALK_FORWARD_AGGREGATE_NONFINITE), true);
+  assert.equal(result.errors[0].field, "meanOosTotalReturn");
+  assert.equal(result.meanOosTotalReturn, null);
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6F-W02 fold aggregate benchmark overflow field is meanOosBenchmarkReturn", () => {
+  const result = withPatchedPipeline(
+    () => ({ totalReturn: 0.01, benchmarkReturn: Number.MAX_VALUE, alpha: 0.01 }),
+    () => runWalkForwardValidation(buildWalkForwardInput()),
+  );
+  assert.equal(hasCode(result, ERROR.WALK_FORWARD_AGGREGATE_NONFINITE), true);
+  assert.equal(result.errors[0].field, "meanOosBenchmarkReturn");
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6F-W03 fold aggregate alpha overflow field is meanOosAlpha", () => {
+  const result = withPatchedPipeline(
+    () => ({ totalReturn: 0.01, benchmarkReturn: 0.01, alpha: Number.MAX_VALUE }),
+    () => runWalkForwardValidation(buildWalkForwardInput()),
+  );
+  assert.equal(hasCode(result, ERROR.WALK_FORWARD_AGGREGATE_NONFINITE), true);
+  assert.equal(result.errors[0].field, "meanOosAlpha");
+  assertOfficialLeakageFreeze(result);
+});
+
