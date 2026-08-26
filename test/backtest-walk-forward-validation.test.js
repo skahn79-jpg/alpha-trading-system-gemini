@@ -2338,3 +2338,9 @@ test("GATE6B-W11 large finite tile pair remains COMPLETED", () => {
   assert.equal(Number.isFinite(result.meanOosTotalReturn), true);
   assertOfficialLeakageFreeze(result);
 });
+
+test("GATE6D-W01 standalone walk-forward requires finite-tile-mean helper", () => {
+  const src = fs.readFileSync(WF_PATH, "utf8");
+  assert.equal(src.includes('require("./finite-tile-mean")'), true);
+  assert.equal(src.includes("assertFiniteEqualWeightedMean"), true);
+});

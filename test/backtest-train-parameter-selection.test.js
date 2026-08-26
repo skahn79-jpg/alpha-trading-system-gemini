@@ -3545,3 +3545,9 @@ test("GATE6C-W07 omitted embargo still FAIL", () => {
   assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
   assertOfficialLeakageFreeze(result);
 });
+
+test("GATE6D-S01 selection requires finite-tile-mean helper", () => {
+  const src = fs.readFileSync(SEL_PATH, "utf8");
+  assert.equal(src.includes('require("./finite-tile-mean")'), true);
+  assert.equal(src.includes("assertFiniteEqualWeightedMean"), true);
+});
