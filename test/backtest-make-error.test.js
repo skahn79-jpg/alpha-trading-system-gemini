@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const { makeBacktestError } = require("../lib/backtest/make-error");
+const { assertFiniteEqualWeightedMean } = require("../lib/backtest/finite-tile-mean");
 
 const SRC_PATH = path.join(__dirname, "..", "lib", "backtest", "make-error.js");
 
@@ -146,4 +147,112 @@ test("GATE6I-U03 freeze does not expand makeError into other modules", () => {
   assert.equal(src.includes("function makeError"), false);
   assert.equal(src.includes('require("./make-error")'), true);
   assert.equal(src.includes("makeBacktestError"), true);
+});
+
+test("GATE6O-U01 freeze known extras stay the 6N set and null candidateId still copies", () => {
+  const err = makeBacktestError("ANY_CODE", {
+    field: "meanOosTotalReturn",
+    foldId: "WF-0001",
+    tradingDate: "2101-03-01",
+    reason: "DUPLICATE",
+    index: 2,
+    cause: "TRAIN_ROOT_A",
+    candidateId: null,
+    tradeId: "T1",
+    recordIndex: 9,
+    symbol: "AAA",
+    tradeIndex: 0,
+    stage: "DATA",
+    market: "SYNTHETIC_KOSPI",
+    datasetId: "ds",
+    datasetVersion: "1",
+    contentChecksum: "abc",
+    metadataHash: "def",
+    calendarId: "cal",
+    calendarVersion: "1.0.0",
+    dayStatus: "OPEN",
+    sessionStatus: "REGULAR",
+    sequence: 1,
+    leaked: "nope",
+  });
+  assert.deepEqual(Object.keys(err).sort(), [
+    "calendarId",
+    "calendarVersion",
+    "candidateId",
+    "cause",
+    "code",
+    "contentChecksum",
+    "datasetId",
+    "datasetVersion",
+    "dayStatus",
+    "field",
+    "foldId",
+    "index",
+    "market",
+    "metadataHash",
+    "reason",
+    "recordIndex",
+    "sessionStatus",
+    "severity",
+    "stage",
+    "symbol",
+    "tradeId",
+    "tradeIndex",
+    "tradingDate",
+  ]);
+  assert.equal(err.candidateId, null);
+  assert.equal(err.severity, "ERROR");
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "sequence"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "leaked"), false);
+});
+
+test("GATE6O-U02 freeze helper still has no official codes", () => {
+  const src = fs.readFileSync(SRC_PATH, "utf8");
+  assert.equal(src.includes("OOS_FOLD_FAILED"), false);
+  assert.equal(src.includes("TRAIN_SELECTION_NONFINITE"), false);
+  assert.equal(src.includes("OOS_EVALUATION_NONFINITE"), false);
+  assert.equal(src.includes("WALK_FORWARD_AGGREGATE_NONFINITE"), false);
+  assert.equal(src.includes("LEAKAGE_ERROR"), false);
+  assert.equal(src.includes("INVALID_INPUT"), false);
+  assert.equal(src.includes("ERROR_CODE"), false);
+  assert.equal(src.includes("module.exports"), true);
+  assert.equal(src.includes("makeBacktestError"), true);
+  assert.equal(src.includes("GATE 6O freeze"), true);
+});
+
+test("GATE6O-U03 no private makeError remains in lib/backtest", () => {
+  const root = path.join(__dirname, "..", "lib", "backtest");
+  const files = fs.readdirSync(root).filter((name) => name.endsWith(".js")).sort();
+  for (const name of files) {
+    const src = fs.readFileSync(path.join(root, name), "utf8");
+    assert.equal(src.includes("function makeError"), false, name);
+  }
+  const folded = [
+    "walk-forward-validation.js",
+    "train-parameter-selection.js",
+    "performance-metrics.js",
+    "benchmark-performance.js",
+    "portfolio-ledger.js",
+    "leakage-guard.js",
+    "multi-trade-lifecycle.js",
+    "data-validation.js",
+  ];
+  for (const name of folded) {
+    const src = fs.readFileSync(path.join(root, name), "utf8");
+    assert.equal(src.includes('require("./make-error")'), true, name);
+    assert.equal(src.includes("makeBacktestError"), true, name);
+  }
+});
+
+test("GATE6O-U04 finite-tile-mean still has no reason or stage", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "lib", "backtest", "finite-tile-mean.js"), "utf8");
+  assert.equal(src.includes("No reason/stage"), true);
+  const ok = assertFiniteEqualWeightedMean([1, 2, 3]);
+  assert.deepEqual(Object.keys(ok).sort(), ["mean", "n", "ok", "sum"]);
+  assert.equal(Object.prototype.hasOwnProperty.call(ok, "reason"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(ok, "stage"), false);
+  const bad = assertFiniteEqualWeightedMean([1, Number.NaN]);
+  assert.equal(bad.ok, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(bad, "reason"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(bad, "stage"), false);
 });
