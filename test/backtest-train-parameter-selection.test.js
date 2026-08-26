@@ -3590,3 +3590,48 @@ test("GATE6F-S02 selection source no longer uses sum* aggregate fields", () => {
   assert.equal(src.includes('aggregateBlockedResult("meanOosAlpha")'), true);
 });
 
+test("GATE6G-S01 freeze source pins helper for tile means and fold aggregate", () => {
+  const src = fs.readFileSync(SEL_PATH, "utf8");
+  assert.equal(src.includes('require("./finite-tile-mean")'), true);
+  assert.equal(src.includes("assertFiniteEqualWeightedMean"), true);
+  assert.equal(src.includes("folds.map((fold) => fold.totalReturn)"), true);
+  assert.equal(src.includes("folds.map((fold) => fold.benchmarkReturn)"), true);
+  assert.equal(src.includes("folds.map((fold) => fold.alpha)"), true);
+  assert.equal(src.includes("let sumTotal = 0"), false);
+  assert.equal(src.includes("sumTotal += fold.totalReturn"), false);
+  assert.equal(src.includes("sumTotal + fold.totalReturn"), false);
+  assert.equal(src.includes("sumTotalReturn"), false);
+  assert.equal(src.includes("sumBenchmarkReturn"), false);
+  assert.equal(src.includes('aggregateBlockedResult("meanOosTotalReturn")'), true);
+  assert.equal(src.includes('aggregateBlockedResult("meanOosBenchmarkReturn")'), true);
+  assert.equal(src.includes('aggregateBlockedResult("meanOosAlpha")'), true);
+});
+
+test("GATE6G-S02 one-tile MAX_VALUE OOS still aggregate identity meanOosTotalReturn", () => {
+  const result = withSelectionOosMetrics(
+    () => ({ totalReturn: Number.MAX_VALUE, benchmarkReturn: 0.01, alpha: 0.01 }),
+    () => runWalkForwardTrainParameterSelection(buildSelectionInput({
+      tradingDates: generateWeekdayDates("2101-03-01", 22),
+      trainWindowSize: 6,
+      oosWindowSize: 3,
+      stepSize: 11,
+    })),
+  );
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.WALK_FORWARD_AGGREGATE_NONFINITE), true);
+  assert.equal(hasCode(result, ERROR.OOS_EVALUATION_NONFINITE), false);
+  assert.equal(result.errors[0].field, "meanOosTotalReturn");
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6G-S03 two-tile selection OOS MAX_VALUE still OOS_EVALUATION_NONFINITE field oosMetrics", () => {
+  const result = withSelectionOosMetrics(
+    () => ({ totalReturn: Number.MAX_VALUE, benchmarkReturn: 0.01, alpha: 0.01 }),
+    () => runWalkForwardTrainParameterSelection(sixBarSelectionInput()),
+  );
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.OOS_EVALUATION_NONFINITE), true);
+  assert.equal(hasCode(result, ERROR.WALK_FORWARD_AGGREGATE_NONFINITE), false);
+  assert.equal(result.errors[0].field, "oosMetrics");
+  assertOfficialLeakageFreeze(result);
+});

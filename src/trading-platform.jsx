@@ -1,4 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ProChartCanvas from "./pro-chart-canvas.jsx";
 
 /**
  * ALPHA TRADING SYSTEM — 통합 확장 버전
@@ -960,7 +961,7 @@ const styles = `
 .forecast-stat-low{color:#ff9d3d;font-weight:600}
 .forecast-stat-note{color:#8fa6bd;flex:1 1 100%}
 .forecast-stat-error{color:#ff4466;font-size:12px}
-.chart-svg-wrap{position:relative}
+.chart-svg-wrap{position:relative;height:100%}
 .pro-chart-svg{cursor:grab;touch-action:pan-y;user-select:none}
 .pro-chart-svg.dragging{cursor:grabbing}
 @media(max-width:900px){
@@ -1494,7 +1495,7 @@ const styles = `
 
 /* === Pro Chart Layout: Candle + Volume + RSI === */
 .chart-box.pro-chart-box{
-  height:var(--chart-height,650px)!important;
+  height:var(--chart-height,720px)!important;
   border-radius:10px;
   background:#0a0f1e!important;
   border:1px solid #1e3445;
@@ -11453,213 +11454,23 @@ const loadExtendedGogo = async (trigger = "manual") => {
             />
             <span className="chart-window-label">{chartData.length}봉 표시 / 전체 {fullChartData.length}봉</span>
           </div>
-          <div className="chart-drag-hint">차트 위에서 마우스로 드래그하면 과거/최근 구간으로 이동하고, 마우스 휠로 확대·축소할 수 있습니다.</div>
+          <div className="chart-drag-hint">차트에서 드래그하면 이동, 휠로 확대·축소(Shift+휠은 가격축), 툴바로 줄긋기를 할 수 있습니다. 그림은 종목별로 저장됩니다.</div>
 
           <div className={`chart-box pro-chart-box ${chartFullscreen ? "chart-box-fullscreen" : ""}`}>
             {chartFullscreen && <button className="chart-back-btn" onClick={() => setChartFullscreen(false)}>돌아가기</button>}
-            {hoverCandle && (
-              <div className="chart-tooltip" style={{ left: "74px", top: "18px" }}>
-                <b>{hoverCandle.date}</b><br />
-                시가: {fmtPrice(hoverCandle.open)} / 고가: {fmtPrice(hoverCandle.high)}<br />
-                저가: {fmtPrice(hoverCandle.low)} / 종가: {fmtPrice(hoverCandle.close)}<br />
-                거래량: {fmtPrice(hoverCandle.volume)}
-              </div>
-            )}
             <div className="chart-svg-wrap">
-            <svg
-              className={`chart-svg pro-chart-svg${isDragging ? " dragging" : ""}`}
-              viewBox={`0 0 ${width} ${height}`}
-              preserveAspectRatio="xMidYMid meet"
-              style={{ fontFamily: "var(--paperlogy-font)" }}
-              onPointerDown={handleChartPointerDown}
-              onPointerMove={handleChartPointerMove}
-              onPointerUp={endChartDrag}
-              onPointerCancel={endChartDrag}
-              onPointerLeave={(e) => { endChartDrag(e); setHoverIndex(null); }}
-              onWheel={handleChartWheel}
-            >
-              <defs>
-                <marker id="arrowHead" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
-                  <path d="M0,0 L0,6 L7,3 z" fill="#00ff88" />
-                </marker>
-              </defs>
-
-              <rect x="0" y="0" width={width} height={height} fill="#0a0f1e" />
-              <rect x="5" y="8" width={width - 10} height={main.y + main.h - 8 + 24} rx="10" className="pro-panel-bg" />
-              <rect x="5" y={vol.y - 22} width={width - 10} height={vol.h + 42} rx="10" className="pro-panel-bg" />
-              <rect x="5" y={rsiPanel.y - 22} width={width - 10} height={rsiPanel.h + 42} rx="10" className="pro-panel-bg" />
-
-              {[0, 1, 2, 3, 4].map((g) => {
-                const y = main.y + (main.h / 4) * g;
-                const price = chartMaxP - (rangeP / 4) * g;
-                return (
-                  <g key={`main-grid-${g}`}>
-                    <line x1={main.x} y1={y} x2={main.x + main.w} y2={y} className="pro-grid" />
-                    <text x={main.x - 12} y={y + 5} textAnchor="end" className="axis-label">{fmtPrice(price)}</text>
-                  </g>
-                );
-              })}
-
-              <path d={bollPath("upper")} className="line-boll" />
-              <path d={bollPath("lower")} className="line-boll" />
-              <path d={maPath(ma5)} className="line-ma5" />
-              <path d={maPath(ma20)} className="line-ma20" />
-
-              {srInfo?.supportZone && (
-                <>
-                  <rect x={main.x} y={yFor(srInfo.supportZone[1])} width={main.w} height={Math.max(3, yFor(srInfo.supportZone[0]) - yFor(srInfo.supportZone[1]))} className="sr-zone-support" />
-                  <line x1={main.x} y1={yFor(srInfo.support.price)} x2={main.x + main.w} y2={yFor(srInfo.support.price)} className="support-line" />
-                </>
-              )}
-              {srInfo?.resistanceZone && (
-                <>
-                  <rect x={main.x} y={yFor(srInfo.resistanceZone[1])} width={main.w} height={Math.max(3, yFor(srInfo.resistanceZone[0]) - yFor(srInfo.resistanceZone[1]))} className="sr-zone-resistance" />
-                  <line x1={main.x} y1={yFor(srInfo.resistance.price)} x2={main.x + main.w} y2={yFor(srInfo.resistance.price)} className="resistance-line" />
-                </>
-              )}
-              {boxInfo?.upper && <rect x={main.x} y={yFor(boxInfo.upper)} width={main.w} height={Math.max(4, yFor(boxInfo.lower) - yFor(boxInfo.upper))} className="box-zone" />}
-
-              {forecastCone?.predictedHigh != null && forecastCone?.predictedLow != null && (
-                <>
-                  <rect
-                    x={main.x}
-                    y={yFor(forecastCone.predictedHigh)}
-                    width={main.w}
-                    height={Math.max(2, yFor(forecastCone.predictedLow) - yFor(forecastCone.predictedHigh))}
-                    className="forecast-cone-zone"
-                  />
-                  <line x1={main.x} y1={yFor(forecastCone.predictedHigh)} x2={main.x + main.w} y2={yFor(forecastCone.predictedHigh)} className="forecast-high-line" />
-                  <line x1={main.x} y1={yFor(forecastCone.predictedLow)} x2={main.x + main.w} y2={yFor(forecastCone.predictedLow)} className="forecast-low-line" />
-                </>
-              )}
-              {aiForecast?.high != null && (
-                <line x1={main.x} y1={yFor(aiForecast.high)} x2={main.x + main.w} y2={yFor(aiForecast.high)} className="ai-forecast-high-line" />
-              )}
-              {aiForecast?.low != null && (
-                <line x1={main.x} y1={yFor(aiForecast.low)} x2={main.x + main.w} y2={yFor(aiForecast.low)} className="ai-forecast-low-line" />
-              )}
-
-              {chartData.map((d, i) => {
-                const x = xFor(i);
-                const candleW = Math.max(2, Math.min(9, step * 0.62));
-                const yOpen = yFor(d.open);
-                const yClose = yFor(d.close);
-                const yHigh = yFor(d.high);
-                const yLow = yFor(d.low);
-                const up = Number(d.close) >= Number(d.open);
-                return (
-                  <g key={`${d.date}-${i}`}>
-                    <line x1={x} y1={yHigh} x2={x} y2={yLow} className="wick" />
-                    <rect x={x - candleW / 2} y={Math.min(yOpen, yClose)} width={candleW} height={Math.max(1.5, Math.abs(yClose - yOpen))} className={up ? "candle-up" : "candle-down"} />
-                  </g>
-                );
-              })}
-
-              {psychPatterns.slice(-6).map((p, i) => {
-                const idx = Math.max(0, Math.min(chartData.length - 1, p.index));
-                const x = xFor(idx);
-                const y = p.sentiment === "bullish" ? yFor(chartData[idx]?.low) + 13 : yFor(chartData[idx]?.high) - 13;
-                return p.sentiment === "bullish" ? (
-                  <path key={`psych-pattern-${i}`} d={`M ${x} ${y - 9} L ${x - 6} ${y + 3} L ${x + 6} ${y + 3} Z`} className="pattern-marker-up" />
-                ) : (
-                  <path key={`psych-pattern-${i}`} d={`M ${x} ${y + 9} L ${x - 6} ${y - 3} L ${x + 6} ${y - 3} Z`} className="pattern-marker-down" />
-                );
-              })}
-
-              {volumeBreak && <line x1={main.x} y1={yFor(volumeBreak.prevHigh)} x2={main.x + main.w} y2={yFor(volumeBreak.prevHigh)} className="volume-break-line" />}
-
-              {showGogo && isGogoOk && trendStart && trendEnd && (
-                <>
-                  <line x1={trendStart.x} y1={trendStart.y} x2={trendEnd.x} y2={trendEnd.y} className="line-trend" />
-                  <circle cx={trendStart.x} cy={trendStart.y} r="5" fill="#ff4466" />
-                  <circle cx={xFor(selectedHigh2.index)} cy={yFor(selectedHigh2.price)} r="5" fill="#ff4466" />
-                  <circle cx={trendEnd.x} cy={trendEnd.y} r="5" fill={gogoSignal.checks.isBreakout ? "#00ff88" : "#ff4466"} />
-                </>
-              )}
-
-              {triangleInfo && (
-                <>
-                  <line
-                    x1={xFor(triangleInfo.upperStart.index)} y1={yFor(triangleInfo.upperStart.price)}
-                    x2={xFor(triangleInfo.upperEnd.index)} y2={yFor(triangleInfo.upperEnd.price)}
-                    className="resistance-line"
-                  />
-                  <line
-                    x1={xFor(triangleInfo.lowerStart.index)} y1={yFor(triangleInfo.lowerStart.price)}
-                    x2={xFor(triangleInfo.lowerEnd.index)} y2={yFor(triangleInfo.lowerEnd.price)}
-                    className="support-line"
-                  />
-                  <circle cx={xFor(triangleInfo.upperEnd.index)} cy={yFor(triangleInfo.upperEnd.price)} r="5" fill={triangleInfo.isBreakoutUp ? "#00ff88" : "#9b5cff"} />
-                  <circle cx={xFor(triangleInfo.lowerEnd.index)} cy={yFor(triangleInfo.lowerEnd.price)} r="5" fill={triangleInfo.isBreakoutDown ? "#ff4466" : "#ffd447"} />
-                </>
-              )}
-
-              {visualSignals.slice(0, 5).map((s, i) => {
-                const sx = xFor(Math.max(0, Math.min(chartData.length - 1, s.index)));
-                const sy = yFor(s.price);
-                return (
-                  <g key={`${s.label}-${i}`}>
-                    <circle cx={sx} cy={sy} r="5" fill={s.color} />
-                    <text x={Math.min(width - 130, sx + 8)} y={Math.max(main.y + 16, sy - 10)} fill={s.color} className="sig-label">{s.label}</text>
-                  </g>
-                );
-              })}
-
-              <rect x="18" y="18" width="350" height="30" rx="8" className="pro-legend-bg" />
-              <text x="30" y="39" className="pro-section-title" fill="#f5a400">■ MA5</text>
-              <text x="95" y="39" className="pro-section-title" fill="#06b6d4">■ MA20</text>
-              <text x="170" y="39" className="pro-section-title" fill="#8b5cf6">■ 볼린저밴드</text>
-              <text x="285" y="39" className="pro-section-title">패턴 {psychPatterns.length}개 감지</text>
-
-              <text x="30" y={vol.y - 8} className="pro-section-title">거래량</text>
-              <text x={main.x - 12} y={vol.y + 12} textAnchor="end" className="axis-label">{`${Math.round(maxVol / 10000).toLocaleString()}만`}</text>
-              <line x1={vol.x} y1={yVol(avgVol)} x2={vol.x + vol.w} y2={yVol(avgVol)} className="volume-avg-line" />
-              {chartData.map((d, i) => {
-                const x = xFor(i);
-                const barW = Math.max(1.5, Math.min(9, step * 0.62));
-                const barH = vol.y + vol.h - yVol(d.volume || 0);
-                const up = Number(d.close) >= Number(d.open);
-                return <rect key={`vol-${d.date}-${i}`} x={x - barW / 2} y={vol.y + vol.h - barH} width={barW} height={Math.max(1, barH)} className={up ? "volume-bar-up" : "volume-bar-down"} />;
-              })}
-
-              <text x="30" y={rsiPanel.y - 8} className="pro-section-title">RSI (14) — {psych.rsiValue}</text>
-              {[70, 50, 30].map((level) => (
-                <g key={`rsi-guide-${level}`}>
-                  <line x1={rsiPanel.x} y1={yRsi(level)} x2={rsiPanel.x + rsiPanel.w} y2={yRsi(level)} className={level === 70 ? "rsi-guide-red" : level === 30 ? "rsi-guide-green" : "rsi-guide-mid"} />
-                  <text x={rsiPanel.x - 12} y={yRsi(level) + 5} textAnchor="end" className="axis-label">{level}</text>
-                </g>
-              ))}
-              <path d={rsiPath} className="rsi-line" />
-
-              {hoverIndex != null && chartData[hoverIndex] && (
-                <>
-                  <line x1={xFor(hoverIndex)} y1={main.y} x2={xFor(hoverIndex)} y2={rsiPanel.y + rsiPanel.h} className="chart-cross-line" />
-                  <line x1={main.x} y1={yFor(chartData[hoverIndex].close)} x2={main.x + main.w} y2={yFor(chartData[hoverIndex].close)} className="chart-cross-line" />
-                </>
-              )}
-
-              {axisLabels.map(({ d, i }, idx) => {
-                const x = xFor(i);
-                const anchor = i === 0 ? "start" : i === chartData.length - 1 ? "end" : "middle";
-                const tx = i === 0 ? x + 2 : i === chartData.length - 1 ? x - 2 : x;
-                return (
-                  <g key={`axis-${i}`}>
-                    <line x1={x} y1={rsiPanel.y + rsiPanel.h + 4} x2={x} y2={rsiPanel.y + rsiPanel.h + 10} stroke="#254357" strokeWidth="1" />
-                    <text x={tx} y={rsiPanel.y + rsiPanel.h + 24} textAnchor={anchor} className="x-axis-label">{formatAxisDate(d.date)}</text>
-                    {(i === 0 || i === chartData.length - 1) && <text x={tx} y={rsiPanel.y + rsiPanel.h + 40} textAnchor={anchor} className="x-axis-year">{formatAxisYear(d.date)}</text>}
-                  </g>
-                );
-              })}
-            </svg>
+              <ProChartCanvas
+                candles={fullChartData}
+                drawKey={`alpha-draw:${selected?.code || selected?.symbol || "none"}:${period}`}
+                onHoverIndex={setHoverIndex}
+                isCrypto={selected?.type === "crypto" || isCryptoSymbol(selected?.code) || isCryptoSymbol(selected?.symbol)}
+              />
             </div>
           </div>
           <div className="chart-caption">
-            <span>노란선: MA5</span>
-            <span>파란선: MA20</span>
-            <span>보라선: 볼린저밴드</span>
-            <span>노란 점선: 지지선</span>
-            <span>보라 점선: 저항선</span>
-            <span>빨간 점선: 고고저 추세선</span>
+            <span>이평 SMA50/100/200 · 볼린저 · 슈퍼트렌드 · 매물대</span>
+            <span>코인: 파이사이클 · 4년주기 · CVDD · BTI</span>
+            <span>하단 오실레이터 전환 · 줄긋기는 종목별 저장</span>
           </div>
           <div className="chart-period-note">
             차트 하단 기간 표시는 <b>년.월</b> 기준입니다. 왼쪽은 과거, 오른쪽은 최신 시세입니다. 확대/축소 및 이전/최근 이동 시 표시 구간의 기간도 함께 변경됩니다.

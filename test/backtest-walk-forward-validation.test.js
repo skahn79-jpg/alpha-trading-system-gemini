@@ -2396,3 +2396,57 @@ test("GATE6F-W03 fold aggregate alpha overflow field is meanOosAlpha", () => {
   assertOfficialLeakageFreeze(result);
 });
 
+test("GATE6G-W01 freeze source pins helper for tile means and fold aggregate", () => {
+  const src = fs.readFileSync(WF_PATH, "utf8");
+  assert.equal(src.includes('require("./finite-tile-mean")'), true);
+  assert.equal(src.includes("assertFiniteEqualWeightedMean"), true);
+  assert.equal(src.includes("folds.map((fold) => fold.totalReturn)"), true);
+  assert.equal(src.includes("folds.map((fold) => fold.benchmarkReturn)"), true);
+  assert.equal(src.includes("folds.map((fold) => fold.alpha)"), true);
+  assert.equal(src.includes("let sumTotal = 0"), false);
+  assert.equal(src.includes("sumTotal += fold.totalReturn"), false);
+  assert.equal(src.includes("sumTotal + fold.totalReturn"), false);
+  assert.equal(src.includes("sumTotalReturn"), false);
+  assert.equal(src.includes("sumBenchmarkReturn"), false);
+  assert.equal(src.includes('aggregateBlockedResult("meanOosTotalReturn")'), true);
+  assert.equal(src.includes('aggregateBlockedResult("meanOosBenchmarkReturn")'), true);
+  assert.equal(src.includes('aggregateBlockedResult("meanOosAlpha")'), true);
+});
+
+test("GATE6G-W02 22-date embargo=1 success still pins official flags false", () => {
+  const result = runWalkForwardValidation(buildWalkForwardInput({
+    tradingDates: generateWeekdayDates("2101-03-01", 22),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
+    embargoTradingDayCount: 1,
+    horizonType: "ULTRA_SHORT",
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6G-W03 one-tile MAX_VALUE still aggregate identity meanOosTotalReturn", () => {
+  const result = withPatchedPipeline(
+    () => ({ totalReturn: Number.MAX_VALUE, benchmarkReturn: 0.01, alpha: 0.01 }),
+    () => runWalkForwardValidation(buildWalkForwardInput()),
+  );
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.WALK_FORWARD_AGGREGATE_NONFINITE), true);
+  assert.equal(hasCode(result, ERROR.OOS_FOLD_FAILED), false);
+  assert.equal(result.errors[0].field, "meanOosTotalReturn");
+  assert.equal(result.meanOosTotalReturn, null);
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6G-W04 two-tile MAX_VALUE still OOS_FOLD_FAILED field oosMetrics", () => {
+  const result = withTileMetrics(
+    () => ({ totalReturn: Number.MAX_VALUE, benchmarkReturn: 0.01, alpha: 0.01 }),
+    () => runWalkForwardValidation(sixBarWalkForwardInput()),
+  );
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.OOS_FOLD_FAILED), true);
+  assert.equal(hasCode(result, ERROR.WALK_FORWARD_AGGREGATE_NONFINITE), false);
+  assert.equal(result.errors[0].field, "oosMetrics");
+  assertOfficialLeakageFreeze(result);
+});

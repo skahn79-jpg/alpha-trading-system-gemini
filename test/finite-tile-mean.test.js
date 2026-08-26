@@ -55,3 +55,14 @@ test("GATE6D-U08 helper has no official error codes", () => {
   assert.equal(src.includes("OOS_EVALUATION_NONFINITE"), false);
   assert.equal(src.includes("LEAKAGE_ERROR"), false);
 });
+
+test("GATE6G-U01 freeze helper has no official codes or reason/stage API", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "lib", "backtest", "finite-tile-mean.js"), "utf8");
+  assert.equal(src.includes("OOS_FOLD_FAILED"), false);
+  assert.equal(src.includes("TRAIN_SELECTION_NONFINITE"), false);
+  assert.equal(src.includes("OOS_EVALUATION_NONFINITE"), false);
+  assert.equal(src.includes("WALK_FORWARD_AGGREGATE_NONFINITE"), false);
+  assert.equal(src.includes("LEAKAGE_ERROR"), false);
+  assert.equal(src.includes("reason:"), false);
+  assert.equal(src.includes("stage:"), false);
+});

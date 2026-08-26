@@ -1748,6 +1748,18 @@ test("GATE5H-P50 허용 파일 외 변경 없음", () => {
     "test/backtest-walk-forward-validation.test.js",
     "lib/backtest/train-parameter-selection.js",
     "test/backtest-train-parameter-selection.test.js",
+    "src/trading-platform.jsx",
+    "src/pro-chart-canvas.jsx",
+    "src/nchart.js",
+    "src/ndraw.js",
+    "src/nindicators.js",
+    "src/ncvdd.js",
+    "src/nbti.js",
+    "src/nbubble.js",
+    "src/nbbp.js",
+    "src/nlth.js",
+    "lib/backtest/finite-tile-mean.js",
+    "test/finite-tile-mean.test.js",
   ]);
   for (const name of names) {
     assert.equal(allowed.has(name), true, name);
