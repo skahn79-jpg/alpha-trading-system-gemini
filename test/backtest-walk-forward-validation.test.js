@@ -2344,3 +2344,24 @@ test("GATE6D-W01 standalone walk-forward requires finite-tile-mean helper", () =
   assert.equal(src.includes('require("./finite-tile-mean")'), true);
   assert.equal(src.includes("assertFiniteEqualWeightedMean"), true);
 });
+
+test("GATE6E-W01 fold aggregate uses finite-tile-mean helper", () => {
+  const src = fs.readFileSync(WF_PATH, "utf8");
+  assert.equal(src.includes('require("./finite-tile-mean")'), true);
+  assert.equal(src.includes("assertFiniteEqualWeightedMean"), true);
+  assert.equal(src.includes("folds.map((fold) => fold.totalReturn)"), true);
+  assert.equal(src.includes("folds.map((fold) => fold.benchmarkReturn)"), true);
+  assert.equal(src.includes("folds.map((fold) => fold.alpha)"), true);
+  assert.equal(src.includes("let sumTotal = 0"), false);
+  assert.equal(src.includes("sumTotal += fold.totalReturn"), false);
+  assert.equal(src.includes("sumTotal + fold.totalReturn"), false);
+});
+
+test("GATE6E-U01 helper still has no official aggregate error code", () => {
+  const helperSrc = fs.readFileSync(
+    path.join(__dirname, "..", "lib", "backtest", "finite-tile-mean.js"),
+    "utf8",
+  );
+  assert.equal(helperSrc.includes("WALK_FORWARD_AGGREGATE_NONFINITE"), false);
+});
+

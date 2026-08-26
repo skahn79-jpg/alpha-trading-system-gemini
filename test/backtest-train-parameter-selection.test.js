@@ -3551,3 +3551,15 @@ test("GATE6D-S01 selection requires finite-tile-mean helper", () => {
   assert.equal(src.includes('require("./finite-tile-mean")'), true);
   assert.equal(src.includes("assertFiniteEqualWeightedMean"), true);
 });
+
+test("GATE6E-S01 fold aggregate uses finite-tile-mean helper", () => {
+  const src = fs.readFileSync(SEL_PATH, "utf8");
+  assert.equal(src.includes('require("./finite-tile-mean")'), true);
+  assert.equal(src.includes("assertFiniteEqualWeightedMean"), true);
+  assert.equal(src.includes("folds.map((fold) => fold.totalReturn)"), true);
+  assert.equal(src.includes("folds.map((fold) => fold.benchmarkReturn)"), true);
+  assert.equal(src.includes("folds.map((fold) => fold.alpha)"), true);
+  assert.equal(src.includes("let sumTotal = 0"), false);
+  assert.equal(src.includes("sumTotal += fold.totalReturn"), false);
+});
+
