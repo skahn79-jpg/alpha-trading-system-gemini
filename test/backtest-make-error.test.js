@@ -73,7 +73,11 @@ test("GATE6I-U01 freeze known extras stay exact and unknown extras stay dropped"
     symbol: "AAA",
     datasetId: "ds",
     tradeIndex: 0,
-    stage: "TRAIN",
+    stage: "DATA",
+    market: "SYNTHETIC_KOSPI",
+    calendarId: "cal",
+    dayStatus: "OPEN",
+    sessionStatus: "REGULAR",
     sequence: 1,
   });
   assert.deepEqual(Object.keys(err).sort(), [
@@ -83,18 +87,25 @@ test("GATE6I-U01 freeze known extras stay exact and unknown extras stay dropped"
     "field",
     "foldId",
     "index",
+    "market",
     "reason",
     "recordIndex",
     "severity",
+    "stage",
     "symbol",
     "tradeId",
+    "tradeIndex",
     "tradingDate",
   ]);
   assert.equal(err.recordIndex, 9);
   assert.equal(err.symbol, "AAA");
+  assert.equal(err.tradeIndex, 0);
+  assert.equal(err.stage, "DATA");
+  assert.equal(err.market, "SYNTHETIC_KOSPI");
   assert.equal(Object.prototype.hasOwnProperty.call(err, "datasetId"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(err, "tradeIndex"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(err, "stage"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "calendarId"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "dayStatus"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "sessionStatus"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(err, "sequence"), false);
   assert.equal(err.severity, "ERROR");
 });
@@ -114,7 +125,6 @@ test("GATE6I-U03 freeze does not expand makeError into other modules", () => {
   const root = path.join(__dirname, "..", "lib", "backtest");
   for (const name of [
     "data-validation.js",
-    "multi-trade-lifecycle.js",
   ]) {
     const src = fs.readFileSync(path.join(root, name), "utf8");
     assert.equal(src.includes("function makeError"), true, name);

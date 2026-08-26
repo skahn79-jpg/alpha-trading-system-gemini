@@ -1587,3 +1587,95 @@ test("GATE5O-R1 LATEST_ALLOWED no SL/TP → market exit at exitDate close COMPLE
   assert.equal(result.closedTrades[0].exitDate, t[3]);
   assert.equal(result.closedTrades[0].exitPrice, 10150);
 });
+
+test("GATE6M-G01 source pins shared makeBacktestError and no local makeError", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "lib", "backtest", "multi-trade-lifecycle.js"), "utf8");
+  assert.equal(src.includes('require("./make-error")'), true);
+  assert.equal(src.includes("makeBacktestError"), true);
+  assert.equal(src.includes("function makeError"), false);
+  assert.equal(src.includes("{ field: null }"), false);
+});
+
+test("GATE6M-G02 null input has no field key and severity ERROR", () => {
+  const result = runSyntheticMultiTradeLifecycle(null);
+  assert.equal(result.lifecycleStatus, LIFECYCLE_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR_CODE.INVALID_INPUT), true);
+  const err = result.errors[0];
+  assert.equal(err.code, ERROR_CODE.INVALID_INPUT);
+  assert.equal(err.severity, "ERROR");
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "field"), false);
+});
+
+test("GATE6M-G03 duplicate tradeId keeps tradeIndex tradeId and severity ERROR", () => {
+  const fx = build2TradeKospiFixture();
+  const intents = [
+    { ...fx.tradeIntents[0] },
+    { ...fx.tradeIntents[1], tradeId: "T1" },
+  ];
+  const result = runSyntheticMultiTradeLifecycle({
+    dataset: fx.dataset, calendar: fx.calendar,
+    calendarValidation: fx.calendarValidation, cost: fx.cost,
+    tradeIntents: intents, calculationMode: fx.calculationMode,
+  });
+  assert.equal(hasCode(result, ERROR_CODE.DUPLICATE_TRADE_ID), true);
+  const err = result.errors.find((e) => e.code === ERROR_CODE.DUPLICATE_TRADE_ID);
+  assert.equal(err.field, "tradeId");
+  assert.equal(err.tradeId, "T1");
+  assert.equal(err.tradeIndex, 1);
+  assert.equal(err.severity, "ERROR");
+});
+
+test("GATE6M-G04 DATA_STAGE_FAILED keeps stage DATA and severity ERROR", () => {
+  const kospiCalendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const kosdaqCalendar = buildCalendar({
+    start: "2101-03-01",
+    dayCount: 14,
+    market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ,
+    calendarId: "synthetic-calendar-kosdaq-v1",
+  });
+  const t = tradingDatesOf(kospiCalendar);
+  const candleRows = [
+    { tradingDate: t[0] }, { tradingDate: t[1] }, { tradingDate: t[2] },
+  ];
+  const dataset = buildDataset(kospiCalendar, candleRows);
+  const cost = {
+    policyEngineVersion: POLICY_ENGINE_VERSION,
+    brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+    currency: CURRENCY.KRW,
+    policies: [makePolicy()],
+  };
+  const tradeIntents = [
+    {
+      tradeId: "T1", quantity: 10, entryDate: t[1], exitDate: t[2],
+      entryIntent: { orderType: "MARKET_OPEN", signalTradingDate: t[0], earliestExecutionTradingDate: t[1], limitPrice: null },
+      exitPolicy: { stopLossPrice: 9500, takeProfitPrice: 11000, intrabarConflictPolicy: "STOP_FIRST" },
+    },
+  ];
+  const result = runSyntheticMultiTradeLifecycle({
+    dataset,
+    calendar: kosdaqCalendar,
+    calendarValidation: { requiredFrom: kosdaqCalendar.coverage.from, requiredTo: kosdaqCalendar.coverage.to },
+    cost,
+    tradeIntents,
+    calculationMode: "SYNTHETIC_UNIT_TEST_ONLY",
+  });
+  assert.equal(hasCode(result, ERROR_CODE.DATA_STAGE_FAILED), true);
+  const err = result.errors.find((e) => e.code === ERROR_CODE.DATA_STAGE_FAILED);
+  assert.equal(err.stage, "DATA");
+  assert.equal(err.severity, "ERROR");
+});
+
+test("GATE6M-G05 production market extra stays present with severity ERROR", () => {
+  const fx = build2TradeKospiFixture();
+  const dataset = { ...fx.dataset, markets: ["KOSPI"] };
+  const result = runSyntheticMultiTradeLifecycle({
+    dataset, calendar: fx.calendar,
+    calendarValidation: fx.calendarValidation, cost: fx.cost,
+    tradeIntents: fx.tradeIntents, calculationMode: fx.calculationMode,
+  });
+  assert.equal(hasCode(result, ERROR_CODE.PRODUCTION_MARKET_NOT_ALLOWED), true);
+  const err = result.errors.find((e) => e.code === ERROR_CODE.PRODUCTION_MARKET_NOT_ALLOWED);
+  assert.equal(err.market, "KOSPI");
+  assert.equal(err.field, "dataset.markets");
+  assert.equal(err.severity, "ERROR");
+});
