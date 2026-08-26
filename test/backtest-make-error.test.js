@@ -72,24 +72,36 @@ test("GATE6I-U01 freeze known extras stay exact and unknown extras stay dropped"
     recordIndex: 9,
     symbol: "AAA",
     datasetId: "ds",
+    datasetVersion: "1",
+    contentChecksum: "abc",
+    metadataHash: "def",
     tradeIndex: 0,
     stage: "DATA",
     market: "SYNTHETIC_KOSPI",
     calendarId: "cal",
+    calendarVersion: "1.0.0",
     dayStatus: "OPEN",
     sessionStatus: "REGULAR",
     sequence: 1,
   });
   assert.deepEqual(Object.keys(err).sort(), [
+    "calendarId",
+    "calendarVersion",
     "candidateId",
     "cause",
     "code",
+    "contentChecksum",
+    "datasetId",
+    "datasetVersion",
+    "dayStatus",
     "field",
     "foldId",
     "index",
     "market",
+    "metadataHash",
     "reason",
     "recordIndex",
+    "sessionStatus",
     "severity",
     "stage",
     "symbol",
@@ -102,10 +114,14 @@ test("GATE6I-U01 freeze known extras stay exact and unknown extras stay dropped"
   assert.equal(err.tradeIndex, 0);
   assert.equal(err.stage, "DATA");
   assert.equal(err.market, "SYNTHETIC_KOSPI");
-  assert.equal(Object.prototype.hasOwnProperty.call(err, "datasetId"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(err, "calendarId"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(err, "dayStatus"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(err, "sessionStatus"), false);
+  assert.equal(err.datasetId, "ds");
+  assert.equal(err.datasetVersion, "1");
+  assert.equal(err.contentChecksum, "abc");
+  assert.equal(err.metadataHash, "def");
+  assert.equal(err.calendarId, "cal");
+  assert.equal(err.calendarVersion, "1.0.0");
+  assert.equal(err.dayStatus, "OPEN");
+  assert.equal(err.sessionStatus, "REGULAR");
   assert.equal(Object.prototype.hasOwnProperty.call(err, "sequence"), false);
   assert.equal(err.severity, "ERROR");
 });
@@ -121,13 +137,13 @@ test("GATE6I-U02 freeze helper still has no official codes", () => {
   assert.equal(src.includes("makeBacktestError"), true);
 });
 
+
 test("GATE6I-U03 freeze does not expand makeError into other modules", () => {
   const root = path.join(__dirname, "..", "lib", "backtest");
-  for (const name of [
-    "data-validation.js",
-  ]) {
-    const src = fs.readFileSync(path.join(root, name), "utf8");
-    assert.equal(src.includes("function makeError"), true, name);
-    assert.equal(src.includes('require("./make-error")'), false, name);
-  }
+  const remaining = [];
+  assert.deepEqual(remaining, []);
+  const src = fs.readFileSync(path.join(root, "data-validation.js"), "utf8");
+  assert.equal(src.includes("function makeError"), false);
+  assert.equal(src.includes('require("./make-error")'), true);
+  assert.equal(src.includes("makeBacktestError"), true);
 });

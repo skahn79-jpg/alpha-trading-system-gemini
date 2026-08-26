@@ -1602,3 +1602,29 @@ test("GATE5I-D25 normalized + legacy candle 포함 시 calendar 단계 이전 �
   assert.equal(result.schemaValid, false);
   assert.equal(hasCode(result, ERROR.LEGACY_MARKET_NOT_ALLOWED_IN_NORMALIZED_VALIDATION), true);
 });
+
+test("GATE6N-G01 source pins shared makeBacktestError and no local makeError", () => {
+  const src = fs.readFileSync(DATA_VALIDATION_PATH, "utf8");
+  assert.equal(src.includes('require("./make-error")'), true);
+  assert.equal(src.includes("makeBacktestError"), true);
+  assert.equal(src.includes("function makeError"), false);
+  assert.equal(src.includes("{ field: null }"), false);
+});
+
+test("GATE6N-G02 null dataset has no field key and severity ERROR", () => {
+  const result = validateTest(null);
+  assert.equal(result.schemaValid, false);
+  assert.equal(hasCode(result, ERROR.INVALID_INPUT), true);
+  const err = result.errors.find((e) => e.code === ERROR.INVALID_INPUT);
+  assert.equal(err.severity, "ERROR");
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "field"), false);
+});
+
+test("GATE6N-G03 unknown field keeps datasetId field and severity ERROR", () => {
+  const result = validateTest(validEnvelope({ extraField: 1 }));
+  assert.equal(hasCode(result, ERROR.UNKNOWN_FIELD), true);
+  const err = result.errors.find((e) => e.code === ERROR.UNKNOWN_FIELD);
+  assert.equal(err.field, "extraField");
+  assert.equal(err.datasetId, "synthetic-daily-v1");
+  assert.equal(err.severity, "ERROR");
+});
