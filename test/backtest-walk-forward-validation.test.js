@@ -2492,3 +2492,45 @@ test("GATE6H-W04 22-date embargo=1 success still pins official flags false", () 
   assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
   assertOfficialLeakageFreeze(result);
 });
+
+test("GATE6I-W01 freeze source pins shared makeBacktestError and no local makeError", () => {
+  const src = fs.readFileSync(WF_PATH, "utf8");
+  assert.equal(src.includes('require("./make-error")'), true);
+  assert.equal(src.includes("makeBacktestError"), true);
+  assert.equal(src.includes("function makeError"), false);
+});
+
+test("GATE6I-W02 freeze one-tile MAX_VALUE still severity ERROR field meanOosTotalReturn", () => {
+  const result = withPatchedPipeline(
+    () => ({ totalReturn: Number.MAX_VALUE, benchmarkReturn: 0.01, alpha: 0.01 }),
+    () => runWalkForwardValidation(buildWalkForwardInput()),
+  );
+  assert.equal(hasCode(result, ERROR.WALK_FORWARD_AGGREGATE_NONFINITE), true);
+  assert.equal(result.errors[0].field, "meanOosTotalReturn");
+  assert.equal(result.errors[0].severity, "ERROR");
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6I-W03 freeze two-tile MAX_VALUE still severity ERROR field oosMetrics", () => {
+  const result = withTileMetrics(
+    () => ({ totalReturn: Number.MAX_VALUE, benchmarkReturn: 0.01, alpha: 0.01 }),
+    () => runWalkForwardValidation(sixBarWalkForwardInput()),
+  );
+  assert.equal(hasCode(result, ERROR.OOS_FOLD_FAILED), true);
+  assert.equal(result.errors[0].field, "oosMetrics");
+  assert.equal(result.errors[0].severity, "ERROR");
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6I-W04 freeze 22-date embargo=1 success still pins official flags false", () => {
+  const result = runWalkForwardValidation(buildWalkForwardInput({
+    tradingDates: generateWeekdayDates("2101-03-01", 22),
+    trainWindowSize: 6,
+    oosWindowSize: 3,
+    stepSize: 11,
+    embargoTradingDayCount: 1,
+    horizonType: "ULTRA_SHORT",
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assertOfficialLeakageFreeze(result);
+});

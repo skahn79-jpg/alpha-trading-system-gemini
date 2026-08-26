@@ -58,3 +58,62 @@ test("GATE6H-U04 helper has no official error codes", () => {
   assert.equal(src.includes("WALK_FORWARD_AGGREGATE_NONFINITE"), false);
   assert.equal(src.includes("LEAKAGE_ERROR"), false);
 });
+
+test("GATE6I-U01 freeze known extras stay exact and unknown extras stay dropped", () => {
+  const err = makeBacktestError("ANY_CODE", {
+    field: "meanOosTotalReturn",
+    foldId: "WF-0001",
+    tradingDate: "2101-03-01",
+    reason: "DUPLICATE",
+    index: 2,
+    cause: "TRAIN_ROOT_A",
+    candidateId: "P001",
+    tradeId: "T1",
+    recordIndex: 9,
+    symbol: "AAA",
+    datasetId: "ds",
+    tradeIndex: 0,
+    stage: "TRAIN",
+    sequence: 1,
+  });
+  assert.deepEqual(Object.keys(err).sort(), [
+    "candidateId",
+    "cause",
+    "code",
+    "field",
+    "foldId",
+    "index",
+    "reason",
+    "severity",
+    "tradeId",
+    "tradingDate",
+  ]);
+  assert.equal(err.severity, "ERROR");
+});
+
+test("GATE6I-U02 freeze helper still has no official codes", () => {
+  const src = fs.readFileSync(SRC_PATH, "utf8");
+  assert.equal(src.includes("OOS_FOLD_FAILED"), false);
+  assert.equal(src.includes("TRAIN_SELECTION_NONFINITE"), false);
+  assert.equal(src.includes("OOS_EVALUATION_NONFINITE"), false);
+  assert.equal(src.includes("WALK_FORWARD_AGGREGATE_NONFINITE"), false);
+  assert.equal(src.includes("LEAKAGE_ERROR"), false);
+  assert.equal(src.includes("module.exports"), true);
+  assert.equal(src.includes("makeBacktestError"), true);
+});
+
+test("GATE6I-U03 freeze does not expand makeError into other modules", () => {
+  const root = path.join(__dirname, "..", "lib", "backtest");
+  for (const name of [
+    "data-validation.js",
+    "leakage-guard.js",
+    "multi-trade-lifecycle.js",
+    "portfolio-ledger.js",
+    "performance-metrics.js",
+    "benchmark-performance.js",
+  ]) {
+    const src = fs.readFileSync(path.join(root, name), "utf8");
+    assert.equal(src.includes("function makeError"), true, name);
+    assert.equal(src.includes('require("./make-error")'), false, name);
+  }
+});
