@@ -1734,6 +1734,8 @@ test("GATE5H-P50 허용 파일 외 변경 없음", () => {
     "lib/backtest/data-validation.js",
     "test/backtest-execution-model.test.js",
     "test/backtest-data-validation.test.js",
+    "lib/backtest/calendar-validation.js",
+    "test/backtest-calendar-validation.test.js",
     "lib/backtest/synthetic-pipeline.js",
     "test/backtest-synthetic-pipeline.test.js",
     "lib/backtest/multi-trade-lifecycle.js",
@@ -2240,6 +2242,8 @@ test("GATE5J-P21 GATE5H-P50 허용 파일 세트 업데이트 확인", () => {
     "lib/backtest/data-validation.js",
     "test/backtest-execution-model.test.js",
     "test/backtest-data-validation.test.js",
+    "lib/backtest/calendar-validation.js",
+    "test/backtest-calendar-validation.test.js",
     "lib/backtest/synthetic-pipeline.js",
     "test/backtest-synthetic-pipeline.test.js",
     "lib/backtest/multi-trade-lifecycle.js",
@@ -2267,6 +2271,8 @@ test("GATE5J-P21 GATE5H-P50 허용 파일 세트 업데이트 확인", () => {
   assert.equal(allowed.has("test/backtest-walk-forward-validation.test.js"), true);
   assert.equal(allowed.has("lib/backtest/train-parameter-selection.js"), true);
   assert.equal(allowed.has("test/backtest-train-parameter-selection.test.js"), true);
+  assert.equal(allowed.has("lib/backtest/calendar-validation.js"), true);
+  assert.equal(allowed.has("test/backtest-calendar-validation.test.js"), true);
 });
 
 test("GATE5J-P22 single-trade 계약 변경 없음 — PIPELINE_VERSION 불변", () => {

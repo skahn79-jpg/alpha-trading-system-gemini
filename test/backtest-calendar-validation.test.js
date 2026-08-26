@@ -28,6 +28,7 @@ const {
   validateEvaluationRange,
   createCalendarValidationResult,
   makeSafeCalendarError,
+  SAFE_ERROR_KEYS,
 } = require("../lib/backtest/calendar-validation");
 
 const MODULE_PATH = path.join(__dirname, "..", "lib", "backtest", "calendar-validation.js");
@@ -888,4 +889,73 @@ test("70. 안전: 모듈 소스에 주문·체결 관련 참조가 없다", () =
   assert.equal(/order/i.test(source), false);
   assert.equal(/submit/i.test(source), false);
   assert.equal(/broker/i.test(source), false);
+});
+
+test("GATE6P-G01 source pins shared makeBacktestError adapter", () => {
+  const src = fs.readFileSync(MODULE_PATH, "utf8");
+  assert.equal(src.includes('require("./make-error")'), true);
+  assert.equal(src.includes("makeBacktestError"), true);
+  assert.equal(src.includes("function makeError"), false);
+  assert.equal(src.includes("const err = makeBacktestError(raw.code, extra)"), true);
+  assert.equal(src.includes("if (raw.code == null)"), true);
+  assert.equal(src.includes("err.severity = raw.severity != null ? raw.severity : \"ERROR\""), true);
+  assert.equal(src.includes("for (const key of SAFE_ERROR_KEYS)"), true);
+  assert.equal(src.includes("return { severity: \"ERROR\" }"), true);
+});
+
+test("GATE6P-G02 unknown field keeps calendar extras and stays inside SAFE_ERROR_KEYS", () => {
+  const calendar = buildCalendar({ dayCount: 5 });
+  calendar.holidayName = "SYNTHETIC_HOLIDAY";
+  const result = validateCalendarEnvelope(calendar, { mode: "TEST" });
+  assert.equal(result.ok, false);
+  const err = result.errors.find((e) => e.code === ERROR.UNKNOWN_FIELD);
+  assert.equal(err.field, "holidayName");
+  assert.equal(err.calendarId, "synthetic-calendar-unit");
+  assert.equal(err.severity, "ERROR");
+  const allowed = new Set(SAFE_ERROR_KEYS);
+  for (const key of Object.keys(err)) {
+    assert.equal(allowed.has(key), true, key);
+  }
+});
+
+test("GATE6P-G03 non-object input keeps severity ERROR without a code key", () => {
+  const err = makeSafeCalendarError(null);
+  assert.deepEqual(err, { severity: "ERROR" });
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "code"), false);
+});
+
+test("GATE6P-G04 adapter drops extras outside calendar SAFE_ERROR_KEYS", () => {
+  const err = makeSafeCalendarError({
+    code: ERROR.UNKNOWN_FIELD,
+    field: "holidayName",
+    calendarId: "synthetic-calendar-unit",
+    cause: "TRAIN_ROOT_A",
+    tradeId: "T1",
+    stage: "DATA",
+    foldId: "WF-0001",
+  });
+  assert.equal(err.field, "holidayName");
+  assert.equal(err.calendarId, "synthetic-calendar-unit");
+  assert.equal(err.severity, "ERROR");
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "cause"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "tradeId"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "stage"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "foldId"), false);
+});
+
+test("GATE6P-G05 missing or null code omits the code key", () => {
+  const missing = makeSafeCalendarError({ field: "calendarId" });
+  assert.equal(Object.prototype.hasOwnProperty.call(missing, "code"), false);
+  assert.equal(missing.severity, "ERROR");
+  const nulled = makeSafeCalendarError({ code: null, field: "calendarId" });
+  assert.equal(Object.prototype.hasOwnProperty.call(nulled, "code"), false);
+  assert.equal(nulled.field, "calendarId");
+});
+
+test("GATE6P-G06 non-null non-string severity is preserved", () => {
+  const empty = makeSafeCalendarError({ code: ERROR.UNKNOWN_FIELD, severity: "" });
+  assert.equal(empty.code, ERROR.UNKNOWN_FIELD);
+  assert.equal(empty.severity, "");
+  const numeric = makeSafeCalendarError({ code: ERROR.UNKNOWN_FIELD, severity: 0 });
+  assert.equal(numeric.severity, 0);
 });
