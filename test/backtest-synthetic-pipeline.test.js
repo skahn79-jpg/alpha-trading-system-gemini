@@ -20,6 +20,7 @@ const {
   mergeSafeStageErrors,
   createSyntheticPipelineResult,
   makeSafePipelineError,
+  SAFE_ERROR_KEYS,
   mapCandleForExecution,
   isDataStagePassed,
   isNoEntryExecution,
@@ -3392,4 +3393,82 @@ test("GATE5M-R03 overflow benchmark series fail-closed at BENCHMARK stage", () =
   assert.equal(result.benchmarkReturn, null);
   assert.equal(result.alpha, null);
   assert.equal(Number.isFinite(result.totalReturn), true);
+});
+
+test("GATE6S-G01 source pins shared makeBacktestError adapter", () => {
+  const src = fs.readFileSync(PIPELINE_PATH, "utf8");
+  assert.equal(src.includes('require("./make-error")'), true);
+  assert.equal(src.includes("makeBacktestError"), true);
+  assert.equal(src.includes("function makeError"), false);
+  assert.equal(src.includes("const err = makeBacktestError(raw.code, extra)"), true);
+  assert.equal(src.includes("if (raw.code == null)"), true);
+  assert.equal(src.includes("err.severity = raw.severity != null ? raw.severity : \"ERROR\""), true);
+  assert.equal(src.includes("for (const key of SAFE_ERROR_KEYS)"), true);
+  assert.equal(src.includes("return { severity: \"ERROR\" }"), true);
+});
+
+test("GATE6S-G02 unknown field stays inside SAFE_ERROR_KEYS", () => {
+  const result = validateSyntheticPipelineInput(validPipelineInput({ extraField: 1 }));
+  assert.equal(result.ok, false);
+  const err = result.errors.find((e) => e.code === ERROR.UNKNOWN_FIELD);
+  assert.equal(err.field, "extraField");
+  assert.equal(err.severity, "ERROR");
+  const allowed = new Set(SAFE_ERROR_KEYS);
+  for (const key of Object.keys(err)) {
+    assert.equal(allowed.has(key), true, key);
+  }
+});
+
+test("GATE6S-G03 non-object input keeps severity ERROR without a code key", () => {
+  const err = makeSafePipelineError(null);
+  assert.deepEqual(err, { severity: "ERROR" });
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "code"), false);
+});
+
+test("GATE6S-G04 adapter copies pipeline extras and drops cause candidateId foldId sequence", () => {
+  const err = makeSafePipelineError({
+    code: ERROR.UNKNOWN_FIELD,
+    field: "extraField",
+    stage: STAGE.PIPELINE,
+    tradeId: "T1",
+    tradeIndex: 0,
+    policyId: "synthetic-cost-kospi-v1",
+    modelVersion: MODEL_VERSION,
+    orderType: ORDER_TYPE.MARKET_OPEN,
+    cause: "TRAIN_ROOT_A",
+    candidateId: "P001",
+    foldId: "WF-0001",
+    sequence: 1,
+  });
+  assert.equal(err.field, "extraField");
+  assert.equal(err.stage, STAGE.PIPELINE);
+  assert.equal(err.tradeId, "T1");
+  assert.equal(err.tradeIndex, 0);
+  assert.equal(err.policyId, "synthetic-cost-kospi-v1");
+  assert.equal(err.modelVersion, MODEL_VERSION);
+  assert.equal(err.orderType, ORDER_TYPE.MARKET_OPEN);
+  assert.equal(err.severity, "ERROR");
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "cause"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "candidateId"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "foldId"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "sequence"), false);
+});
+
+test("GATE6S-G05 missing or null code omits the code key", () => {
+  const missing = makeSafePipelineError({ field: "dataset" });
+  assert.equal(Object.prototype.hasOwnProperty.call(missing, "code"), false);
+  assert.equal(missing.severity, "ERROR");
+  const nulled = makeSafePipelineError({ code: null, field: "dataset" });
+  assert.equal(Object.prototype.hasOwnProperty.call(nulled, "code"), false);
+  assert.equal(nulled.field, "dataset");
+});
+
+test("GATE6S-G06 empty-string and WARNING severity are preserved", () => {
+  const empty = makeSafePipelineError({ code: ERROR.INVALID_INPUT, severity: "" });
+  assert.equal(empty.code, ERROR.INVALID_INPUT);
+  assert.equal(empty.severity, "");
+  const warn = makeSafePipelineError({ code: ERROR.INVALID_INPUT, severity: "WARNING" });
+  assert.equal(warn.severity, "WARNING");
+  const numeric = makeSafePipelineError({ code: ERROR.INVALID_INPUT, severity: 0 });
+  assert.equal(numeric.severity, 0);
 });
