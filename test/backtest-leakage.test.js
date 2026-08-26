@@ -285,3 +285,29 @@ test("Missing PIT field does not use current time", () => {
   const nowYear = String(new Date().getFullYear());
   assert.equal(dumped.includes(nowYear) && nowYear !== "2100", false);
 });
+
+test("GATE6L-G01 source pins shared makeBacktestError and no local makeError", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "lib", "backtest", "leakage-guard.js"), "utf8");
+  assert.equal(src.includes('require("./make-error")'), true);
+  assert.equal(src.includes("makeBacktestError"), true);
+  assert.equal(src.includes("function makeError"), false);
+});
+
+test("GATE6L-G02 lookahead keeps recordIndex symbol and severity ERROR", () => {
+  const result = assertFeatureWindowNoLookAhead({
+    featureWindow: [
+      { symbol: "SYNTH001", tradingDate: "2100-01-04" },
+      { symbol: "SYNTH001", tradingDate: "2100-01-05" },
+    ],
+    featureAsOfTradingDate: "2100-01-04",
+    targetTradingDate: "2100-01-06",
+  });
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, LEAKAGE_ERROR.LOOKAHEAD_CANDLE_PRESENT), true);
+  const err = result.errors.find((e) => e.code === LEAKAGE_ERROR.LOOKAHEAD_CANDLE_PRESENT);
+  assert.equal(err.field, "tradingDate");
+  assert.equal(err.recordIndex, 1);
+  assert.equal(err.symbol, "SYNTH001");
+  assert.equal(err.tradingDate, "2100-01-05");
+  assert.equal(err.severity, "ERROR");
+});

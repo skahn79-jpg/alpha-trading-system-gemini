@@ -84,10 +84,18 @@ test("GATE6I-U01 freeze known extras stay exact and unknown extras stay dropped"
     "foldId",
     "index",
     "reason",
+    "recordIndex",
     "severity",
+    "symbol",
     "tradeId",
     "tradingDate",
   ]);
+  assert.equal(err.recordIndex, 9);
+  assert.equal(err.symbol, "AAA");
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "datasetId"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "tradeIndex"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "stage"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "sequence"), false);
   assert.equal(err.severity, "ERROR");
 });
 
@@ -106,7 +114,6 @@ test("GATE6I-U03 freeze does not expand makeError into other modules", () => {
   const root = path.join(__dirname, "..", "lib", "backtest");
   for (const name of [
     "data-validation.js",
-    "leakage-guard.js",
     "multi-trade-lifecycle.js",
   ]) {
     const src = fs.readFileSync(path.join(root, name), "utf8");
