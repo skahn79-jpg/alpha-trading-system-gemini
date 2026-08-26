@@ -291,3 +291,133 @@ test("GATE6O-U04 finite-tile-mean still has no reason or stage", () => {
   assert.equal(Object.prototype.hasOwnProperty.call(bad, "reason"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(bad, "stage"), false);
 });
+
+test("GATE6T-U01 freeze known extras stay the 6R set and null candidateId still copies", () => {
+  const err = makeBacktestError("ANY_CODE", {
+    field: "meanOosTotalReturn",
+    foldId: "WF-0001",
+    tradingDate: "2101-03-01",
+    reason: "DUPLICATE",
+    index: 2,
+    cause: "TRAIN_ROOT_A",
+    candidateId: null,
+    tradeId: "T1",
+    recordIndex: 9,
+    symbol: "AAA",
+    tradeIndex: 0,
+    stage: "DATA",
+    market: "SYNTHETIC_KOSPI",
+    datasetId: "ds",
+    datasetVersion: "1",
+    contentChecksum: "abc",
+    metadataHash: "def",
+    calendarId: "cal",
+    calendarVersion: "1.0.0",
+    dayStatus: "OPEN",
+    sessionStatus: "REGULAR",
+    policyId: "pol",
+    policyVersion: "1",
+    brokerChannel: "SYNTHETIC_ONLINE",
+    currency: "KRW",
+    taxType: "SEC",
+    modelVersion: "daily-bar-execution-v0.1",
+    orderType: "MARKET_OPEN",
+    sequence: 1,
+    leaked: "nope",
+  });
+  assert.deepEqual(Object.keys(err).sort(), [
+    "brokerChannel",
+    "calendarId",
+    "calendarVersion",
+    "candidateId",
+    "cause",
+    "code",
+    "contentChecksum",
+    "currency",
+    "datasetId",
+    "datasetVersion",
+    "dayStatus",
+    "field",
+    "foldId",
+    "index",
+    "market",
+    "metadataHash",
+    "modelVersion",
+    "orderType",
+    "policyId",
+    "policyVersion",
+    "reason",
+    "recordIndex",
+    "sessionStatus",
+    "severity",
+    "stage",
+    "symbol",
+    "taxType",
+    "tradeId",
+    "tradeIndex",
+    "tradingDate",
+  ]);
+  assert.equal(err.candidateId, null);
+  assert.equal(err.severity, "ERROR");
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "sequence"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "leaked"), false);
+});
+
+test("GATE6T-U02 freeze helper still has no official codes", () => {
+  const src = fs.readFileSync(SRC_PATH, "utf8");
+  assert.equal(src.includes("OOS_FOLD_FAILED"), false);
+  assert.equal(src.includes("TRAIN_SELECTION_NONFINITE"), false);
+  assert.equal(src.includes("OOS_EVALUATION_NONFINITE"), false);
+  assert.equal(src.includes("WALK_FORWARD_AGGREGATE_NONFINITE"), false);
+  assert.equal(src.includes("LEAKAGE_ERROR"), false);
+  assert.equal(src.includes("INVALID_INPUT"), false);
+  assert.equal(src.includes("ERROR_CODE"), false);
+  assert.equal(src.includes("module.exports"), true);
+  assert.equal(src.includes("makeBacktestError"), true);
+  assert.equal(src.includes("GATE 6O freeze"), true);
+  assert.equal(src.includes("GATE 6T freeze"), true);
+});
+
+test("GATE6T-U03 four makeSafe adapters require the helper and no private makeError remains", () => {
+  const root = path.join(__dirname, "..", "lib", "backtest");
+  const files = fs.readdirSync(root).filter((name) => name.endsWith(".js")).sort();
+  const found = [];
+  for (const name of files) {
+    const src = fs.readFileSync(path.join(root, name), "utf8");
+    assert.equal(src.includes("function makeError"), false, name);
+    const matches = src.match(/function makeSafe[A-Za-z]+/g) || [];
+    for (const match of matches) {
+      found.push(`${name}:${match}`);
+    }
+  }
+  assert.deepEqual(found, [
+    "calendar-validation.js:function makeSafeCalendarError",
+    "cost-policy.js:function makeSafeCostError",
+    "execution-model.js:function makeSafeExecutionError",
+    "synthetic-pipeline.js:function makeSafePipelineError",
+  ]);
+  const adapters = [
+    "calendar-validation.js",
+    "cost-policy.js",
+    "execution-model.js",
+    "synthetic-pipeline.js",
+  ];
+  for (const name of adapters) {
+    const src = fs.readFileSync(path.join(root, name), "utf8");
+    assert.equal(src.includes('require("./make-error")'), true, name);
+    assert.equal(src.includes("const err = makeBacktestError(raw.code, extra)"), true, name);
+  }
+});
+
+test("GATE6T-U04 finite-tile-mean still has no reason or stage", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "lib", "backtest", "finite-tile-mean.js"), "utf8");
+  assert.equal(src.includes("No reason/stage"), true);
+  const ok = assertFiniteEqualWeightedMean([1, 2, 3]);
+  assert.deepEqual(Object.keys(ok).sort(), ["mean", "n", "ok", "sum"]);
+  assert.equal(Object.prototype.hasOwnProperty.call(ok, "reason"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(ok, "stage"), false);
+  const bad = assertFiniteEqualWeightedMean([1, Number.NaN]);
+  assert.equal(bad.ok, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(bad, "reason"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(bad, "stage"), false);
+});
