@@ -17,6 +17,7 @@ const {
   resolveIntrabarConflict,
   createExecutionResult,
   makeSafeExecutionError,
+  SAFE_ERROR_KEYS,
   ERROR,
   STATUS,
   ENTRY_STATUS,
@@ -1275,4 +1276,79 @@ test("GATE5H-E26 차단 경로에서도 알려진 시장 유지", () => {
   assert.equal(result.ok, false);
   assert.equal(hasCode(result, ERROR.NO_ELIGIBLE_ENTRY_CANDLE), true);
   assert.equal(result.market, MARKET.SYNTHETIC_KOSPI);
+});
+
+test("GATE6R-G01 source pins shared makeBacktestError adapter", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/execution-model.js"),
+    "utf8"
+  );
+  assert.equal(src.includes('require("./make-error")'), true);
+  assert.equal(src.includes("makeBacktestError"), true);
+  assert.equal(src.includes("function makeError"), false);
+  assert.equal(src.includes("const err = makeBacktestError(raw.code, extra)"), true);
+  assert.equal(src.includes("if (raw.code == null)"), true);
+  assert.equal(src.includes("err.severity = raw.severity != null ? raw.severity : \"ERROR\""), true);
+  assert.equal(src.includes("for (const key of SAFE_ERROR_KEYS)"), true);
+  assert.equal(src.includes("return { severity: \"ERROR\" }"), true);
+});
+
+test("GATE6R-G02 unknown field stays inside SAFE_ERROR_KEYS", () => {
+  const result = evaluateDailyBarExecution(validInput({ extraField: 1 }));
+  assert.equal(result.ok, false);
+  const err = result.errors.find((e) => e.code === ERROR.UNKNOWN_FIELD);
+  assert.equal(err.field, "extraField");
+  assert.equal(err.severity, "ERROR");
+  const allowed = new Set(SAFE_ERROR_KEYS);
+  for (const key of Object.keys(err)) {
+    assert.equal(allowed.has(key), true, key);
+  }
+});
+
+test("GATE6R-G03 non-object input keeps severity ERROR without a code key", () => {
+  const err = makeSafeExecutionError(null);
+  assert.deepEqual(err, { severity: "ERROR" });
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "code"), false);
+});
+
+test("GATE6R-G04 adapter copies execution extras and drops cause tradeId stage policyId", () => {
+  const err = makeSafeExecutionError({
+    code: ERROR.UNKNOWN_FIELD,
+    field: "extraField",
+    modelVersion: MODEL_VERSION,
+    orderType: ORDER_TYPE.MARKET_OPEN,
+    market: MARKET.SYNTHETIC_KOSPI,
+    cause: "TRAIN_ROOT_A",
+    tradeId: "T1",
+    stage: "DATA",
+    policyId: "pol",
+  });
+  assert.equal(err.field, "extraField");
+  assert.equal(err.modelVersion, MODEL_VERSION);
+  assert.equal(err.orderType, ORDER_TYPE.MARKET_OPEN);
+  assert.equal(err.market, MARKET.SYNTHETIC_KOSPI);
+  assert.equal(err.severity, "ERROR");
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "cause"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "tradeId"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "stage"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "policyId"), false);
+});
+
+test("GATE6R-G05 missing or null code omits the code key", () => {
+  const missing = makeSafeExecutionError({ field: "modelVersion" });
+  assert.equal(Object.prototype.hasOwnProperty.call(missing, "code"), false);
+  assert.equal(missing.severity, "ERROR");
+  const nulled = makeSafeExecutionError({ code: null, field: "modelVersion" });
+  assert.equal(Object.prototype.hasOwnProperty.call(nulled, "code"), false);
+  assert.equal(nulled.field, "modelVersion");
+});
+
+test("GATE6R-G06 empty-string and WARNING severity are preserved", () => {
+  const empty = makeSafeExecutionError({ code: ERROR.INVALID_INPUT, severity: "" });
+  assert.equal(empty.code, ERROR.INVALID_INPUT);
+  assert.equal(empty.severity, "");
+  const warn = makeSafeExecutionError({ code: ERROR.INVALID_INPUT, severity: "WARNING" });
+  assert.equal(warn.severity, "WARNING");
+  const numeric = makeSafeExecutionError({ code: ERROR.INVALID_INPUT, severity: 0 });
+  assert.equal(numeric.severity, 0);
 });

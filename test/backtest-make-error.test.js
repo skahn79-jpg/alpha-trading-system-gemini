@@ -88,6 +88,8 @@ test("GATE6I-U01 freeze known extras stay exact and unknown extras stay dropped"
     brokerChannel: "SYNTHETIC_ONLINE",
     currency: "KRW",
     taxType: "SEC",
+    modelVersion: "daily-bar-execution-v0.1",
+    orderType: "MARKET_OPEN",
     sequence: 1,
   });
   assert.deepEqual(Object.keys(err).sort(), [
@@ -107,6 +109,8 @@ test("GATE6I-U01 freeze known extras stay exact and unknown extras stay dropped"
     "index",
     "market",
     "metadataHash",
+    "modelVersion",
+    "orderType",
     "policyId",
     "policyVersion",
     "reason",
@@ -138,6 +142,8 @@ test("GATE6I-U01 freeze known extras stay exact and unknown extras stay dropped"
   assert.equal(err.brokerChannel, "SYNTHETIC_ONLINE");
   assert.equal(err.currency, "KRW");
   assert.equal(err.taxType, "SEC");
+  assert.equal(err.modelVersion, "daily-bar-execution-v0.1");
+  assert.equal(err.orderType, "MARKET_OPEN");
   assert.equal(Object.prototype.hasOwnProperty.call(err, "sequence"), false);
   assert.equal(err.severity, "ERROR");
 });
@@ -192,6 +198,8 @@ test("GATE6O-U01 freeze known extras stay the 6N set and null candidateId still 
     brokerChannel: "SYNTHETIC_ONLINE",
     currency: "KRW",
     taxType: "SEC",
+    modelVersion: "daily-bar-execution-v0.1",
+    orderType: "MARKET_OPEN",
     sequence: 1,
     leaked: "nope",
   });
@@ -212,6 +220,8 @@ test("GATE6O-U01 freeze known extras stay the 6N set and null candidateId still 
     "index",
     "market",
     "metadataHash",
+    "modelVersion",
+    "orderType",
     "policyId",
     "policyVersion",
     "reason",
