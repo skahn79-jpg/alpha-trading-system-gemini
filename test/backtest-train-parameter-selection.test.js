@@ -3409,3 +3409,139 @@ test("GATE6A-W03 5Z feature asOf remains signal and flags stay false", () => {
     }
   }
 });
+
+test("GATE6C-W01 two finite MAX_VALUE train tiles overflow as TRAIN_SELECTION_NONFINITE", () => {
+  const pipelineMod = require("../lib/backtest/synthetic-pipeline");
+  const originalPerf = pipelineMod.runSyntheticPerformancePipeline;
+  try {
+    pipelineMod.runSyntheticPerformancePipeline = function patched(input) {
+      const inner = originalPerf(input);
+      return {
+        ...inner,
+        pipelineStatus: PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS,
+        totalReturn: Number.MAX_VALUE,
+      };
+    };
+    const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
+      tradingDates: generateWeekdayDates("2101-03-01", 22),
+      trainWindowSize: 6,
+      oosWindowSize: 3,
+      stepSize: 11,
+    }));
+    assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+    assert.equal(hasCode(result, ERROR.TRAIN_SELECTION_NONFINITE), true);
+    assert.equal(result.errors[0].code, ERROR.TRAIN_SELECTION_NONFINITE);
+    assert.equal(result.errors[0].field, "trainTotalReturn");
+    assert.equal(result.officialFolds.length, 0);
+    assertOfficialLeakageFreeze(result);
+  } finally {
+    pipelineMod.runSyntheticPerformancePipeline = originalPerf;
+  }
+});
+
+function sixBarSelectionInput() {
+  return buildSelectionInput({
+    tradingDates: generateWeekdayDates("2101-03-01", 28),
+    trainWindowSize: 6,
+    oosWindowSize: 6,
+    stepSize: 14,
+    embargoTradingDayCount: 1,
+    horizonType: "ULTRA_SHORT",
+  });
+}
+
+function withSelectionOosMetrics(metricFactory, fn) {
+  const pipelineMod = require("../lib/backtest/synthetic-pipeline");
+  const original = pipelineMod.runSyntheticBenchmarkPipeline;
+  try {
+    let call = 0;
+    pipelineMod.runSyntheticBenchmarkPipeline = function patched(input) {
+      const base = original(input);
+      call += 1;
+      const override = metricFactory(call, base, input);
+      return {
+        ...base,
+        pipelineStatus: PIPELINE_STATUS.COMPLETED_BENCHMARK_ALPHA,
+        totalReturn: override.totalReturn,
+        benchmarkReturn: override.benchmarkReturn,
+        alpha: override.alpha,
+        errors: [],
+        errorCodes: [],
+      };
+    };
+    return fn();
+  } finally {
+    pipelineMod.runSyntheticBenchmarkPipeline = original;
+  }
+}
+
+test("GATE6C-W02 two finite MAX_VALUE selection-OOS totals overflow as OOS_EVALUATION_NONFINITE", () => {
+  const result = withSelectionOosMetrics(
+    () => ({ totalReturn: Number.MAX_VALUE, benchmarkReturn: 0.01, alpha: 0.01 }),
+    () => runWalkForwardTrainParameterSelection(sixBarSelectionInput()),
+  );
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.OOS_EVALUATION_NONFINITE), true);
+  assert.equal(hasCode(result, ERROR.WALK_FORWARD_AGGREGATE_NONFINITE), false);
+  assert.equal(result.errors[0].code, ERROR.OOS_EVALUATION_NONFINITE);
+  assert.equal(result.errors[0].field, "oosMetrics");
+  assert.equal(result.meanOosTotalReturn, null);
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6C-W03 two finite MAX_VALUE selection-OOS benchmarks overflow as OOS_EVALUATION_NONFINITE", () => {
+  const result = withSelectionOosMetrics(
+    () => ({ totalReturn: 0.01, benchmarkReturn: Number.MAX_VALUE, alpha: 0.01 }),
+    () => runWalkForwardTrainParameterSelection(sixBarSelectionInput()),
+  );
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.OOS_EVALUATION_NONFINITE), true);
+  assert.equal(result.errors[0].field, "oosMetrics");
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6C-W04 two finite MAX_VALUE selection-OOS alphas overflow as OOS_EVALUATION_NONFINITE", () => {
+  const result = withSelectionOosMetrics(
+    () => ({ totalReturn: 0.01, benchmarkReturn: 0.01, alpha: Number.MAX_VALUE }),
+    () => runWalkForwardTrainParameterSelection(sixBarSelectionInput()),
+  );
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.OOS_EVALUATION_NONFINITE), true);
+  assert.equal(result.errors[0].field, "oosMetrics");
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6C-W05 two-tile MAX_VALUE/4 selection-OOS remains COMPLETED", () => {
+  const result = withSelectionOosMetrics(
+    () => ({ totalReturn: Number.MAX_VALUE / 4, benchmarkReturn: 0.01, alpha: 0.01 }),
+    () => runWalkForwardTrainParameterSelection(sixBarSelectionInput()),
+  );
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(Number.isFinite(result.meanOosTotalReturn), true);
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6C-W06 one-tile MAX_VALUE OOS still aggregate-overflow identity", () => {
+  const result = withSelectionOosMetrics(
+    () => ({ totalReturn: Number.MAX_VALUE, benchmarkReturn: 0.01, alpha: 0.01 }),
+    () => runWalkForwardTrainParameterSelection(buildSelectionInput({
+      tradingDates: generateWeekdayDates("2101-03-01", 22),
+      trainWindowSize: 6,
+      oosWindowSize: 3,
+      stepSize: 11,
+    })),
+  );
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.WALK_FORWARD_AGGREGATE_NONFINITE), true);
+  assert.equal(hasCode(result, ERROR.OOS_EVALUATION_NONFINITE), false);
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE6C-W07 omitted embargo still FAIL", () => {
+  const input = buildSelectionInput();
+  delete input.embargoTradingDayCount;
+  const result = runWalkForwardTrainParameterSelection(input);
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assertOfficialLeakageFreeze(result);
+});
