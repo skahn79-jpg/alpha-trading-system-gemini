@@ -444,3 +444,21 @@ test("lib/backtest 소스에 주문·네트워크 경로가 없다", () => {
     );
   }
 });
+
+test("GATE9I-D01 schemas resultFail exact shape", () => {
+  const result = resultFail([{ code: SCHEMA_ERROR.INVALID_STRING, field: "intentId" }]);
+  assert.deepEqual(Object.keys(result).sort(), ["errors", "ok", "status"]);
+  assert.equal(result.ok, false);
+  assert.equal(result.status, SCHEMA_ERROR.INVALID_STRING);
+  assert.equal(result.errors.length, 1);
+  assert.equal(result.errors[0].field, "intentId");
+  const src = fs.readFileSync(path.join(__dirname, "..", "lib", "backtest", "schemas.js"), "utf8");
+  assert.equal(src.includes("GATE 9I freeze"), true);
+  assert.equal(src.includes("Do not add errorCodes."), true);
+});
+
+test("GATE9I-D02 resultFail has no errorCodes", () => {
+  const result = resultFail([{ code: SCHEMA_ERROR.INVALID_STRING, field: "intentId" }]);
+  assert.equal(Object.hasOwn(result, "errorCodes"), false);
+  assert.equal("errorCodes" in result, false);
+});

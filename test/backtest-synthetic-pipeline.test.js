@@ -3769,3 +3769,80 @@ test("GATE8W-V01 freeze pins pipeline base spread-first", () => {
   assert.equal(pipeTest.includes("GATE8V-C01"), true);
   assert.equal(pipeTest.includes("GATE8V-C02"), true);
 });
+
+test("GATE9I-A01 pipeline COMPLETED exact key/nullability contract", () => {
+  const expectedKeys = Object.keys(createSyntheticPipelineResult({})).sort();
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  const again = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+  assert.equal(Object.hasOwn(result, "ok"), false);
+  assert.equal("failedStage" in result, true);
+  assert.equal(result.failedStage, null);
+  assert.equal("entryAmount" in result, true);
+  assert.equal(typeof result.entryAmount === "number" && Number.isFinite(result.entryAmount), true);
+  assertOperationalBlocked(result);
+  assert.deepEqual(Object.keys(result).sort(), expectedKeys);
+  assert.equal(JSON.parse(JSON.stringify(result)).pipelineStatus, result.pipelineStatus);
+  assert.deepEqual(Object.keys(again).sort(), expectedKeys);
+  assert.equal(again.failedStage, null);
+  assert.deepEqual(again.errorCodes, result.errorCodes);
+});
+
+test("GATE9I-A02 pipeline BLOCKED exact key/nullability contract", () => {
+  const expectedKeys = Object.keys(createSyntheticPipelineResult({})).sort();
+  const result = runSyntheticSingleTradePipeline(null);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_PIPELINE_SCHEMA);
+  assert.equal(Object.hasOwn(result, "ok"), false);
+  assert.equal("failedStage" in result, true);
+  assert.equal(result.failedStage, STAGE.PIPELINE);
+  assert.equal(result.dataStageStatus, STAGE_STATUS.NOT_STARTED);
+  assert.equal(result.executionStageStatus, STAGE_STATUS.NOT_STARTED);
+  assert.equal(result.costStageStatus, STAGE_STATUS.NOT_STARTED);
+  assert.equal(result.entryAmount, null);
+  assert.equal(result.netProfit, null);
+  assert.equal(result.errors.length > 0, true);
+  assertOperationalBlocked(result);
+  assert.deepEqual(Object.keys(result).sort(), expectedKeys);
+});
+
+test("GATE9I-A03 pipeline COMPLETED_NO_ENTRY diagnostic semantics", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const rows = fullTradeCandles(calendar);
+  const input = validPipelineInput({
+    dataset: buildDataset(calendar, rows),
+    calendar,
+    execution: {
+      modelVersion: MODEL_VERSION,
+      side: SIDE.LONG,
+      entryIntent: {
+        orderType: ORDER_TYPE.MARKET_OPEN,
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: "2101-12-31",
+        limitPrice: null,
+      },
+      exitPolicy: {
+        stopLossPrice: 9500,
+        takeProfitPrice: 11000,
+        intrabarConflictPolicy: INTRABAR_CONFLICT_POLICY.STOP_FIRST,
+      },
+      quantity: 10,
+    },
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_NO_ENTRY);
+  assert.equal(result.pipelineStatus.startsWith("BLOCKED"), false);
+  assert.equal("failedStage" in result, true);
+  assert.equal(result.failedStage, null);
+  assert.equal(result.costStageStatus, STAGE_STATUS.NOT_STARTED);
+  assert.equal(Array.isArray(result.errors), true);
+  assert.equal(hasCode(result, EXEC_ERROR.NO_ELIGIBLE_ENTRY_CANDLE), true);
+  assert.equal(Object.hasOwn(result, "ok"), false);
+});
+
+test("GATE9I-A04 freeze pins pipeline family comment", () => {
+  const src = fs.readFileSync(PIPELINE_PATH, "utf8");
+  assert.equal(src.includes("GATE 9I freeze"), true);
+  assert.equal(src.includes("pipelineStatus"), true);
+  assert.equal(src.includes("Do not normalize this family to a generic ok or status."), true);
+});

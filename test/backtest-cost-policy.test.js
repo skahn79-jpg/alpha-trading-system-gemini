@@ -1659,3 +1659,23 @@ test("GATE9E-I15 blocked result has no stale leftover amounts", () => {
   assert.equal(result.netProfit, null);
   assertNeverEligible(result);
 });
+
+test("GATE9I-C03 cost success nullable amount shape", () => {
+  const success = calculateSyntheticTradeCost(makeTrade());
+  assert.equal(success.ok, true);
+  assert.equal(Object.hasOwn(success, "failedStage"), false);
+  assert.equal(Object.hasOwn(success, "pipelineStatus"), false);
+  assert.equal("entryAmount" in success, true);
+  assert.equal(typeof success.entryAmount === "number" && Number.isFinite(success.entryAmount), true);
+  assert.equal(success.executionStatus, EXECUTION_STATUS.NOT_EXECUTED);
+  assert.equal(success.calculationStatus, CALCULATION_STATUS.SIMULATED_CALCULATION_ONLY);
+  assert.equal(success.liveEligible, false);
+  const empty = createCostResult({ ok: true });
+  assert.equal("entryAmount" in empty, true);
+  assert.equal(empty.entryAmount, null);
+  assert.equal("netProfit" in empty, true);
+  assert.equal(empty.netProfit, null);
+  assert.equal(Object.hasOwn(empty, "failedStage"), false);
+  const src = fs.readFileSync(path.join(__dirname, "../lib/backtest/cost-policy.js"), "utf8");
+  assert.equal(src.includes("GATE 9I freeze"), true);
+});

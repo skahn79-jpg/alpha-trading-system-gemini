@@ -1435,3 +1435,19 @@ test("GATE8R-Q01 freeze pins execution extra spread-first", () => {
   assert.equal(execTest.includes("GATE8Q-C01"), true);
   assert.equal(execTest.includes("GATE8Q-C02"), true);
 });
+
+test("GATE9I-C04 execution/stage representative shape", () => {
+  const result = evaluateDailyBarExecution(validInput());
+  assert.equal(Object.hasOwn(result, "ok"), true);
+  assert.equal(Object.hasOwn(result, "status"), true);
+  assert.equal(Object.hasOwn(result, "failedStage"), false);
+  assert.equal(Object.hasOwn(result, "pipelineStatus"), false);
+  assert.equal(result.executionStatus, STATUS.NOT_EXECUTED);
+  assert.equal(result.calculationStatus, CALCULATION_STATUS.SIMULATED_CALCULATION_ONLY);
+  assert.equal(result.liveEligible, false);
+  const dropped = createExecutionResult({ ok: true, extraHack: 1 });
+  assert.equal(Object.hasOwn(dropped, "extraHack"), false);
+  assert.equal(Object.hasOwn(dropped, "ok"), true);
+  const src = fs.readFileSync(path.join(__dirname, "..", "lib", "backtest", "execution-model.js"), "utf8");
+  assert.equal(src.includes("GATE 9I freeze"), true);
+});

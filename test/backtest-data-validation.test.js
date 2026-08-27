@@ -1787,3 +1787,35 @@ test("GATE9B-A01 freeze pins leftover-class audit after 8Z", () => {
   assert.equal(costSrc.includes("9B freeze"), true);
   assert.equal(dataTest.includes("GATE8Z-Y01"), true);
 });
+
+test("GATE9I-C01 data-validation success shape", () => {
+  const result = validateTest(validEnvelope());
+  assert.equal(result.schemaValid, true);
+  assert.equal(result.ok, false);
+  assert.equal(Object.hasOwn(result, "pipelineStatus"), false);
+  assert.equal(Object.hasOwn(result, "failedStage"), false);
+  assert.equal("calendarId" in result, false);
+  assert.equal("status" in result, true);
+  assert.equal(result.calendarVerified, false);
+  assert.equal(result.datasetVerified, false);
+  assert.equal(result.liveEligible, false);
+  assert.deepEqual(result.errors, []);
+});
+
+test("GATE9I-C02 data-validation failure shape", () => {
+  const result = validateTest({});
+  assert.equal(result.ok, false);
+  assert.equal(result.schemaValid, false);
+  assert.equal(result.errors.length > 0, true);
+  assert.equal(Object.hasOwn(result, "pipelineStatus"), false);
+  assert.equal(Object.hasOwn(result, "failedStage"), false);
+  assert.equal("calendarId" in result, false);
+  assert.equal("errorCodes" in result, true);
+  assert.equal(Array.isArray(result.errorCodes), true);
+});
+
+test("GATE9I-C05 freeze pins data-validation family comment", () => {
+  const src = fs.readFileSync(DATA_VALIDATION_PATH, "utf8");
+  assert.equal(src.includes("GATE 9I freeze"), true);
+  assert.equal(src.includes("calendarId is optional-missing"), true);
+});

@@ -2899,3 +2899,45 @@ test("GATE7W-F01 freeze pins generateWalkForwardWindows fail unsliced", () => {
   assert.equal(failBlock.includes("errors,"), true);
   assert.equal(failBlock.includes("errors.slice()"), false);
 });
+
+test("GATE9I-B01 walk-forward COMPLETED family shape", () => {
+  const result = runWalkForwardValidation(buildWalkForwardInput());
+  const again = runWalkForwardValidation(buildWalkForwardInput());
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(Object.hasOwn(result, "ok"), false);
+  assert.equal(Object.hasOwn(result, "pipelineStatus"), false);
+  assert.equal("failedStage" in result, true);
+  assert.equal(result.failedStage, null);
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.errorCodes, []);
+  assert.equal(result.officialFolds, result.folds);
+  assertOfficialLeakageFreeze(result);
+  assert.deepEqual(Object.keys(again).sort(), Object.keys(result).sort());
+  assert.equal(JSON.parse(JSON.stringify(result)).walkForwardStatus, result.walkForwardStatus);
+});
+
+test("GATE9I-B02 walk-forward BLOCKED family shape", () => {
+  const result = runWalkForwardValidation(null);
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(Object.hasOwn(result, "ok"), false);
+  assert.equal(Object.hasOwn(result, "pipelineStatus"), false);
+  assert.equal("failedStage" in result, true);
+  assert.equal(result.failedStage, "WALK_FORWARD");
+  assert.equal(result.errors.length > 0, true);
+  assert.deepEqual(result.officialFolds, []);
+  assert.equal(result.meanOosTotalReturn, null);
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE9I-B03 officialFolds/folds existing freeze unchanged", () => {
+  const src = fs.readFileSync(WF_PATH, "utf8");
+  assert.equal(src.includes("7I: copy folds/officialFolds"), true);
+  assert.equal(src.includes("GATE 9I freeze"), true);
+  const folds = [{ foldId: "F1" }];
+  const completed = completedWalkForwardResult({ folds });
+  assert.equal(completed.officialFolds, completed.folds);
+  assert.notEqual(completed.folds, folds);
+  const blocked = blockedWalkForwardResult({ folds });
+  assert.deepEqual(blocked.officialFolds, []);
+  assert.notEqual(blocked.officialFolds, blocked.folds);
+});
