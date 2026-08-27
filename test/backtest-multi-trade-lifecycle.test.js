@@ -1796,3 +1796,26 @@ test("GATE8E-C02 copied cost error keeps tradeId and tradeIndex", () => {
   assert.equal(Object.prototype.hasOwnProperty.call(tagged[0], "junkKey"), false);
 });
 
+
+test("GATE8F-E01 freeze pins cost-fail makeError fold verbatim", () => {
+  const src = fs.readFileSync(LIFECYCLE_SRC_PATH, "utf8");
+  const start = src.indexOf("if (costResult.ok !== true)");
+  const end = src.indexOf("const closedTrade", start);
+  assert.equal(start >= 0, true);
+  assert.equal(end > start, true);
+  const block = src.slice(start, end);
+  const expected = `    for (const e of costErrors) {
+      errors.push(makeError(e && e.code, Object.assign({}, e, {
+        tradeId: intent.tradeId,
+        tradeIndex: originalIndex,
+      })));
+    }`;
+  assert.equal(block.includes(expected), true);
+  assert.equal(block.includes("return { ok: false, errors, closedTrade: null };"), true);
+  assert.equal(block.includes("{ ...e"), false);
+  assert.equal(block.includes("liveEligible"), false);
+  assert.equal(block.includes("paperEligible"), false);
+  assert.equal(block.includes("promotionEligible"), false);
+  assert.equal(block.includes("backtestExecutionEligible"), false);
+  assert.equal(src.includes("8F freeze"), true);
+});
