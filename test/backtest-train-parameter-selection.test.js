@@ -3812,3 +3812,31 @@ test("GATE6U-R3-S03 evaluateTrainCandidate no longer wraps with cause: rootErr.c
   assert.equal(src.includes("cause: build.error.code"), true);
   assert.equal(src.includes("cause: tradeResult.error.code"), true);
 });
+
+
+test("GATE6V-S01 freeze train nested root stays errorCodes[0]", () => {
+  const pipelineMod = require("../lib/backtest/synthetic-pipeline");
+  const originalPerf = pipelineMod.runSyntheticPerformancePipeline;
+  try {
+    pipelineMod.runSyntheticPerformancePipeline = function patched(input) {
+      const tradeId = String(input.tradeIntents[0].tradeId);
+      if (tradeId.startsWith("WF-0001:") && tradeId.includes(":train:")) {
+        return {
+          pipelineStatus: "BLOCKED_PERFORMANCE_STAGE",
+          errors: [{ code: "R2A_TRAIN_ROOT" }],
+          errorCodes: ["R2A_TRAIN_ROOT"],
+          totalReturn: null,
+        };
+      }
+      return originalPerf(input);
+    };
+    const result = runWalkForwardTrainParameterSelection(buildSelectionInput());
+    assert.equal(result.errorCodes[0], "R2A_TRAIN_ROOT");
+    const evalIdx = result.errorCodes.indexOf(ERROR.TRAIN_CANDIDATE_EVALUATION_FAILED);
+    assert.equal(evalIdx > 0, true);
+    assert.equal(result.failedStage, "TRAIN_SELECTION");
+    assertOfficialLeakageFreeze(result);
+  } finally {
+    pipelineMod.runSyntheticPerformancePipeline = originalPerf;
+  }
+});

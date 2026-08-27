@@ -477,3 +477,54 @@ test("GATE6U-R4-A01 makeSafe adapters still drop code on non-object and keep del
     assert.equal(src.includes("delete err.code"), true, name);
   }
 });
+
+
+test("GATE6V-H01 freeze helper drops object cause, copies scalar/null, is not frozen", () => {
+  const nested = { nested: 1 };
+  const dropped = makeBacktestError("ANY_CODE", { cause: nested, field: "trainTotalReturn" });
+  assert.equal(Object.prototype.hasOwnProperty.call(dropped, "cause"), false);
+  assert.equal(dropped.field, "trainTotalReturn");
+  nested.nested = 99;
+  assert.equal(Object.prototype.hasOwnProperty.call(dropped, "cause"), false);
+
+  const withNull = makeBacktestError("ANY_CODE", { field: null });
+  assert.equal(withNull.field, null);
+  assert.equal(Object.isFrozen(dropped), false);
+  dropped.severity = "ERROR";
+  delete dropped.code;
+  assert.equal(Object.prototype.hasOwnProperty.call(dropped, "code"), false);
+
+  const src = fs.readFileSync(SRC_PATH, "utf8");
+  assert.equal(src.includes("GATE 6V freeze"), true);
+  const extras = [
+    "field", "foldId", "tradingDate", "reason", "index", "cause", "candidateId",
+    "tradeId", "recordIndex", "symbol", "tradeIndex", "stage", "market",
+    "datasetId", "datasetVersion", "contentChecksum", "metadataHash",
+    "calendarId", "calendarVersion", "dayStatus", "sessionStatus",
+    "policyId", "policyVersion", "brokerChannel", "currency", "taxType",
+    "modelVersion", "orderType",
+  ];
+  let pos = 0;
+  for (const key of extras) {
+    const next = src.indexOf('"' + key + '"', pos);
+    assert.equal(next > -1, true, key);
+    pos = next + 1;
+  }
+});
+
+test("GATE6V-A01 freeze adapters still delete err.code; calendar null has no code", () => {
+  const { makeSafeCalendarError } = require("../lib/backtest/calendar-validation");
+  const raw = makeSafeCalendarError(null);
+  assert.deepEqual(raw, { severity: "ERROR" });
+  assert.equal(Object.prototype.hasOwnProperty.call(raw, "code"), false);
+  const backtestRoot = path.join(__dirname, "..", "lib", "backtest");
+  for (const name of [
+    "calendar-validation.js",
+    "cost-policy.js",
+    "execution-model.js",
+    "synthetic-pipeline.js",
+  ]) {
+    const src = fs.readFileSync(path.join(backtestRoot, name), "utf8");
+    assert.equal(src.includes("delete err.code"), true, name);
+  }
+});

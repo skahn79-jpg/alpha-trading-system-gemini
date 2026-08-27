@@ -2727,3 +2727,34 @@ test("GATE6U-R3-W01 walk-forward 6U-R1/R2 pins still hold", () => {
     pipelineMod.runSyntheticBenchmarkPipeline = original;
   }
 });
+
+
+test("GATE6V-W01 freeze nested DATA fail stays root-first with failedStage DATA", () => {
+  const original = pipelineMod.runSyntheticBenchmarkPipeline;
+  try {
+    pipelineMod.runSyntheticBenchmarkPipeline = function patched() {
+      return {
+        pipelineStatus: "BLOCKED_DATA_STAGE",
+        failedStage: "DATA",
+        totalReturn: null,
+        benchmarkReturn: null,
+        alpha: null,
+        errors: [
+          { code: "CALENDAR_MARKET_MISMATCH", severity: "ERROR" },
+          { code: "DATA_STAGE_FAILED", severity: "ERROR" },
+        ],
+        errorCodes: ["CALENDAR_MARKET_MISMATCH", "DATA_STAGE_FAILED"],
+      };
+    };
+    const result = runWalkForwardValidation(buildWalkForwardInput());
+    assert.equal(result.errorCodes[0], "CALENDAR_MARKET_MISMATCH");
+    const rootIdx = result.errorCodes.indexOf("CALENDAR_MARKET_MISMATCH");
+    const oosIdx = result.errorCodes.indexOf(ERROR.OOS_FOLD_FAILED);
+    const wfIdx = result.errorCodes.indexOf(ERROR.WALK_FORWARD_STAGE_FAILED);
+    assert.equal(rootIdx < oosIdx && oosIdx < wfIdx, true);
+    assert.equal(result.failedStage, "DATA");
+    assertOfficialLeakageFreeze(result);
+  } finally {
+    pipelineMod.runSyntheticBenchmarkPipeline = original;
+  }
+});
