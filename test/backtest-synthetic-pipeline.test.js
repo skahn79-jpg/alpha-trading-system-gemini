@@ -1769,6 +1769,8 @@ test("GATE5H-P50 허용 파일 외 변경 없음", () => {
     "test/backtest-make-error.test.js",
     "lib/backtest/leakage-guard.js",
     "test/backtest-leakage.test.js",
+    "lib/backtest/schemas.js",
+    "test/backtest-schemas.test.js",
   ]);
   for (const name of names) {
     assert.equal(allowed.has(name), true, name);

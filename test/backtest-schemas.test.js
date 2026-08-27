@@ -28,6 +28,7 @@ const {
   validateSimulatedFill,
   assertSimulatedFill,
   createNotExecutedPerformanceResult,
+  resultFail,
 } = require("../lib/backtest/schemas");
 
 function validIntent(overrides) {
@@ -354,6 +355,40 @@ test("parseYmd·parseKstDateTime·isValidUtcCivilDate", () => {
   assert.equal(parseKstDateTime("2100-01-04T15:40:00Z").ok, false);
   assert.equal(isValidUtcCivilDate(2100, 1, 5), true);
   assert.equal(isValidUtcCivilDate(2100, 2, 29), false);
+});
+
+
+test("GATE7S-C01 resultFail copies errors array", () => {
+  const errors = [{ code: SCHEMA_ERROR.INVALID_STRING, field: "symbol" }];
+  const result = resultFail(errors);
+  assert.equal(result.ok, false);
+  assert.notEqual(result.errors, errors);
+  assert.equal(result.status, SCHEMA_ERROR.INVALID_STRING);
+  assert.equal(result.errors.length, 1);
+  errors.push({ code: SCHEMA_ERROR.NOT_PLAIN_OBJECT, field: null });
+  assert.equal(result.errors.length, 1);
+  assert.equal(result.status, SCHEMA_ERROR.INVALID_STRING);
+  assert.equal(Object.hasOwn(result, "liveEligible"), false);
+});
+
+test("GATE7S-C02 resultFail empty or non-array becomes INVALID_INPUT", () => {
+  const empty = [];
+  const fromEmpty = resultFail(empty);
+  assert.equal(fromEmpty.ok, false);
+  assert.notEqual(fromEmpty.errors, empty);
+  assert.equal(fromEmpty.status, PERFORMANCE_STATUS.INVALID_INPUT);
+  assert.deepEqual(fromEmpty.errors, [{ code: PERFORMANCE_STATUS.INVALID_INPUT, field: null }]);
+  empty.push({ code: SCHEMA_ERROR.INVALID_STRING, field: "x" });
+  assert.equal(fromEmpty.errors.length, 1);
+  assert.equal(fromEmpty.errors[0].code, PERFORMANCE_STATUS.INVALID_INPUT);
+
+  const fromNull = resultFail(null);
+  assert.equal(fromNull.status, PERFORMANCE_STATUS.INVALID_INPUT);
+  assert.deepEqual(fromNull.errors, [{ code: PERFORMANCE_STATUS.INVALID_INPUT, field: null }]);
+
+  const fromObj = resultFail({ length: 1 });
+  assert.equal(fromObj.status, PERFORMANCE_STATUS.INVALID_INPUT);
+  assert.deepEqual(fromObj.errors, [{ code: PERFORMANCE_STATUS.INVALID_INPUT, field: null }]);
 });
 
 test("lib/backtest 소스에 주문·네트워크 경로가 없다", () => {
