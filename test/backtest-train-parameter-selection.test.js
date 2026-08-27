@@ -4031,3 +4031,13 @@ test("GATE7J-I01 walk-forward completed still slices folds", () => {
   assert.equal(src.includes("// 7I: copy folds/officialFolds so callers cannot mutate the result arrays."), true);
   assert.equal(src.includes("src.folds.slice()"), true);
 });
+
+test("GATE7K-H01 train still slices blocked and completed folds", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/train-parameter-selection.js"),
+    "utf8"
+  );
+  assert.equal(src.includes("7K freeze"), true);
+  assert.equal(src.includes("src.folds.slice()"), true);
+  assert.equal(src.includes("src.partialFoldResults.slice()"), true);
+});

@@ -2817,3 +2817,24 @@ test("GATE7I-H01 train blockedSelectionResult still slices folds", () => {
   );
   assert.equal(src.includes("src.folds.slice()"), true);
 });
+
+test("GATE7K-G01 walk-forward still slices blocked and completed folds", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/walk-forward-validation.js"),
+    "utf8"
+  );
+  assert.equal(src.includes("7K freeze"), true);
+  assert.equal(src.includes("src.folds.slice()"), true);
+  assert.equal(src.includes("src.partialFoldResults.slice()"), true);
+});
+
+test("GATE7K-C01 blocked and completed copies are not caller arrays", () => {
+  const folds = [{ foldId: "F1" }];
+  const blocked = blockedWalkForwardResult({ folds });
+  assert.notEqual(blocked.folds, folds);
+  assert.deepEqual(blocked.officialFolds, []);
+  const completed = completedWalkForwardResult({ folds });
+  assert.notEqual(completed.folds, folds);
+  assert.equal(completed.officialFolds, completed.folds);
+  assert.equal(completed.liveEligible, false);
+});
