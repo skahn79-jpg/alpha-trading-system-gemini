@@ -2887,3 +2887,15 @@ test("GATE7N-C01 fold embargoDates still match window contents", () => {
   assert.deepEqual(result.folds[0].embargoDates, windows.windows[0].embargoDates);
   assert.equal(result.liveEligible, false);
 });
+
+test("GATE7W-F01 freeze pins generateWalkForwardWindows fail unsliced", () => {
+  const src = fs.readFileSync(WF_PATH, "utf8");
+  assert.equal(src.includes("7W freeze"), true);
+  const start = src.indexOf("const fail =");
+  const end = src.indexOf("if (!isPlainObject(input))", start);
+  assert.equal(start >= 0, true);
+  assert.equal(end > start, true);
+  const failBlock = src.slice(start, end);
+  assert.equal(failBlock.includes("errors,"), true);
+  assert.equal(failBlock.includes("errors.slice()"), false);
+});
