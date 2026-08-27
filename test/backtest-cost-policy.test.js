@@ -1418,3 +1418,16 @@ test("GATE8M-C02 validateCostPolicy copies recordIndex and keeps canonical field
     assert.notEqual(err.field, "HACK");
   }
 });
+
+test("GATE8N-M01 freeze pins cost extra spread-first", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../lib/backtest/cost-policy.js"), "utf8");
+  const costTest = fs.readFileSync(__filename, "utf8");
+  assert.equal(src.includes("makeSafeCostError({ ...extra, code: ERROR.INVALID_RATE_PPM, field })"), true);
+  assert.equal(src.includes("makeSafeCostError({ ...taxExtra, code: ERROR.INVALID_INPUT, field: `sellTaxes[${i}]` })"), true);
+  assert.equal(src.includes(", ...extra"), false);
+  assert.equal(src.includes(", ...taxExtra"), false);
+  assert.equal(src.includes("const extra = recordIndex != null ? { recordIndex } : {};"), true);
+  assert.equal(src.includes("8N freeze"), true);
+  assert.equal(costTest.includes("GATE8M-C01"), true);
+  assert.equal(costTest.includes("GATE8M-C02"), true);
+});
