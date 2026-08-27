@@ -3563,3 +3563,28 @@ test("GATE6Y-P02 data-schema fail still has nested root then DATA_STAGE_FAILED",
   assert.equal(result.calendarVerified, false);
   assert.equal(result.liveEligible, false);
 });
+
+test("GATE7E-P01 createSyntheticPipelineResult copies closedTrades array", () => {
+  const closedTrades = [{ tradeId: "T1" }];
+  const result = createSyntheticPipelineResult({ closedTrades });
+  assert.notEqual(result.closedTrades, closedTrades);
+  assert.equal(result.closedTrades.length, 1);
+  assert.equal(result.closedTrades[0], closedTrades[0]);
+  closedTrades.push({ tradeId: "T2" });
+  assert.equal(result.closedTrades.length, 1);
+  assert.equal(result.liveEligible, false);
+  assert.equal(result.backtestExecutionEligible, false);
+});
+
+test("GATE7E-P02 non-array closedTrades become empty array", () => {
+  const result = createSyntheticPipelineResult({ closedTrades: { tradeId: "T1" } });
+  assert.deepEqual(result.closedTrades, []);
+});
+
+test("GATE7E-D01 data-validation still slices warnings", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/data-validation.js"),
+    "utf8"
+  );
+  assert.equal(src.includes("src.warnings.slice()"), true);
+});
