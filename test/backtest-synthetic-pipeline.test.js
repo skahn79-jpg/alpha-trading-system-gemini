@@ -3516,3 +3516,50 @@ test("GATE6U-R2-P04 completed pipeline failedStage is null", () => {
   assert.equal(result.calendarVerified, false);
   assert.equal(result.liveEligible, false);
 });
+
+test("GATE6Y-P01 DATA invariant wrap keeps nested root then DATA_STAGE_FAILED", () => {
+  const src = fs.readFileSync(PIPELINE_PATH, "utf8");
+  const start = src.indexOf("const dataInvariantErrors = collectDataMarketInvariantErrors(input);");
+  assert.equal(start >= 0, true);
+  const window = src.slice(start, start + 900);
+  assert.equal(window.includes("dataInvariantErrors.slice()"), true);
+  assert.equal(window.includes("ERROR.DATA_STAGE_FAILED"), true);
+  assert.equal(window.includes("failedStage: STAGE.DATA"), true);
+
+  const input = validPipelineInput();
+  input.calendar = buildCalendar({
+    market: SYNTHETIC_MARKETS.SYNTHETIC_KOSDAQ,
+    calendarId: "synthetic-calendar-kosdaq-v1",
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_DATA_STAGE);
+  assert.equal(result.failedStage, STAGE.DATA);
+  assert.equal(
+    result.errorCodes[0] === "CALENDAR_MARKET_MISMATCH"
+      || result.errorCodes[0] === ERROR.PIPELINE_MARKET_INVARIANT_VIOLATION,
+    true,
+    `root was ${result.errorCodes[0]}`,
+  );
+  assert.equal(result.errorCodes.includes(ERROR.DATA_STAGE_FAILED), true);
+  assert.equal(result.errorCodes.indexOf(ERROR.DATA_STAGE_FAILED) > 0, true);
+  assert.equal(result.errorCodes[0] === ERROR.DATA_STAGE_FAILED, false);
+  assert.equal(result.calendarVerified, false);
+  assert.equal(result.datasetVerified, false);
+  assert.equal(result.backtestExecutionEligible, false);
+  assert.equal(result.paperEligible, false);
+  assert.equal(result.liveEligible, false);
+});
+
+test("GATE6Y-P02 data-schema fail still has nested root then DATA_STAGE_FAILED", () => {
+  const input = validPipelineInput();
+  input.dataset.candles[0].volume = -1;
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_DATA_STAGE);
+  assert.equal(result.failedStage, STAGE.DATA);
+  assert.equal(Array.isArray(result.errorCodes) && result.errorCodes.length > 0, true);
+  assert.equal(result.errorCodes[0] === ERROR.DATA_STAGE_FAILED, false);
+  assert.equal(result.errorCodes.includes(ERROR.DATA_STAGE_FAILED), true);
+  assert.equal(result.errorCodes.indexOf(ERROR.DATA_STAGE_FAILED) > 0, true);
+  assert.equal(result.calendarVerified, false);
+  assert.equal(result.liveEligible, false);
+});

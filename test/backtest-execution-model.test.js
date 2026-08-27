@@ -1377,3 +1377,10 @@ test("GATE6X-E02 Date is non-plain; plain extra still copies; null has no code",
   assert.deepEqual(raw, { severity: "ERROR" });
   assert.equal(Object.prototype.hasOwnProperty.call(raw, "code"), false);
 });
+
+test("GATE6Y-X01 execution isPlainObject still uses proto check", () => {
+  const backtestRoot = path.join(__dirname, "..", "lib", "backtest");
+  const execSrc = fs.readFileSync(path.join(backtestRoot, "execution-model.js"), "utf8");
+  assert.equal(execSrc.includes("Object.getPrototypeOf(value)"), true);
+  assert.equal(execSrc.includes("proto === Object.prototype || proto === null"), true);
+});
