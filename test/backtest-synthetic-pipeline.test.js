@@ -3708,3 +3708,13 @@ test("GATE8C-B01 freeze pins blocked cost return verbatim", () => {
   }
 });
 
+test("GATE8D-F01 freeze pins extra-overwrite leftover chapter closed", () => {
+  const costSrc = fs.readFileSync(COST_PATH, "utf8");
+  const pipeSrc = fs.readFileSync(PIPELINE_PATH, "utf8");
+  assert.equal(costSrc.includes("7Y freeze"), true);
+  assert.equal(costSrc.includes("8D freeze"), true);
+  assert.equal(pipeSrc.includes("8A freeze"), true);
+  assert.equal(pipeSrc.includes("8C freeze"), true);
+  assert.equal(pipeSrc.includes("8D freeze"), true);
+});
+
