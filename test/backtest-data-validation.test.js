@@ -1681,3 +1681,22 @@ test("GATE8S-C02 unknown field copies datasetId and keeps canonical field", () =
   assert.equal(err.datasetId, "synthetic-daily-v1");
   assert.equal(src.includes("{ ...meta, field: key }"), true);
 });
+
+test("GATE8T-S01 freeze pins data extra spread-first", () => {
+  const src = fs.readFileSync(DATA_VALIDATION_PATH, "utf8");
+  const dataTest = fs.readFileSync(__filename, "utf8");
+  assert.equal(src.includes("{ ...meta, field: \"marketContract\" }"), true);
+  assert.equal(src.includes("{ ...meta, field }"), true);
+  assert.equal(src.includes("{ ...meta, field: \"markets\", market }"), true);
+  assert.equal(src.includes("      ...meta,\n      field: \"markets\","), true);
+  assert.equal(src.includes("          ...meta,\n          field: \"contentChecksum\","), true);
+  assert.equal(src.includes("{ ...loc, field: \"symbol\" }"), true);
+  assert.equal(src.includes("{ field: \"marketContract\", ...meta }"), false);
+  assert.equal(src.includes("{ field, ...meta }"), false);
+  assert.equal(src.includes("{ field: \"markets\", market, ...meta }"), false);
+  assert.equal(src.includes("      ...meta,\n    }));"), false);
+  assert.equal(src.includes("          field: \"contentChecksum\",\n          ...meta,"), false);
+  assert.equal(src.includes("8T freeze"), true);
+  assert.equal(dataTest.includes("GATE8S-C01"), true);
+  assert.equal(dataTest.includes("GATE8S-C02"), true);
+});
