@@ -8,6 +8,7 @@ const path = require("node:path");
 const {
   LEAKAGE_ERROR,
   PURGE_UNIT,
+  createLeakageResult,
   assertFeatureWindowNoLookAhead,
   validateSignalTiming,
   validatePointInTimeInputs,
@@ -310,4 +311,45 @@ test("GATE6L-G02 lookahead keeps recordIndex symbol and severity ERROR", () => {
   assert.equal(err.symbol, "SYNTH001");
   assert.equal(err.tradingDate, "2100-01-05");
   assert.equal(err.severity, "ERROR");
+});
+
+test("GATE7Q-C01 createLeakageResult copies errors array", () => {
+  const errors = [{ code: LEAKAGE_ERROR.INVALID_INPUT }];
+  const result = createLeakageResult(false, errors, [], []);
+  assert.notEqual(result.errors, errors);
+  assert.equal(result.errors.length, 1);
+  errors.push({ code: LEAKAGE_ERROR.MISSING_FIELD });
+  assert.equal(result.errors.length, 1);
+  assert.equal(result.backtestExecutionEligible, false);
+  assert.equal(result.promotionEligible, false);
+});
+
+test("GATE7Q-C02 createLeakageResult copies missingData array", () => {
+  const missingData = ["featureDataAsOf"];
+  const result = createLeakageResult(false, [], missingData, []);
+  assert.notEqual(result.missingData, missingData);
+  assert.deepEqual(result.missingData, ["featureDataAsOf"]);
+  missingData.push("signalCreatedAt");
+  assert.deepEqual(result.missingData, ["featureDataAsOf"]);
+});
+
+test("GATE7Q-C03 createLeakageResult copies warnings; non-arrays become []", () => {
+  const warnings = [{ code: "W1" }];
+  const result = createLeakageResult(true, [], [], warnings);
+  assert.notEqual(result.warnings, warnings);
+  warnings.push({ code: "W2" });
+  assert.equal(result.warnings.length, 1);
+  const empty = createLeakageResult(false, null, { x: 1 }, "nope");
+  assert.deepEqual(empty.errors, []);
+  assert.deepEqual(empty.missingData, []);
+  assert.deepEqual(empty.warnings, []);
+});
+
+test("GATE7P-O01 pin lifecycle still slices processSingleTrade errors", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/multi-trade-lifecycle.js"),
+    "utf8"
+  );
+  assert.equal(src.includes("7P freeze"), true);
+  assert.equal(src.includes("result.errors.slice()"), true);
 });
