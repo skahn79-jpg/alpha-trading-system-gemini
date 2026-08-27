@@ -1720,3 +1720,31 @@ test("GATE7C-B01 lifecycle still has 7B nullPerformanceFields", () => {
   assert.equal(src.includes("...nullPerformanceFields()"), true);
   assert.equal(src.includes("// 7B: BLOCKED keeps the same null performance keys as COMPLETED."), true);
 });
+
+test("GATE7O-S01 processSingleTrade fail copies errors", () => {
+  const src = fs.readFileSync(LIFECYCLE_SRC_PATH, "utf8");
+  assert.equal(src.includes("result.errors.slice()"), true);
+});
+
+test("GATE7O-W01 SHORT fail keeps errors array contents", () => {
+  const fx = build2TradeKospiFixture();
+  const intent = { ...fx.tradeIntents[0], direction: "SHORT" };
+  const result = runSyntheticMultiTradeLifecycle({
+    dataset: fx.dataset, calendar: fx.calendar,
+    calendarValidation: fx.calendarValidation, cost: fx.cost,
+    tradeIntents: [intent], calculationMode: fx.calculationMode,
+  });
+  assert.equal(result.lifecycleStatus, LIFECYCLE_STATUS.BLOCKED);
+  assert.equal(Array.isArray(result.errors), true);
+  assert.equal(result.errors.length > 0, true);
+  assert.equal(hasCode(result, ERROR_CODE.SHORT_POSITION_NOT_SUPPORTED), true);
+});
+
+test("GATE7N-L01 pin walk-forward still freezes embargo date slices", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/walk-forward-validation.js"),
+    "utf8"
+  );
+  assert.equal(src.includes("7N freeze"), true);
+  assert.equal(src.includes("window.embargoDates.slice()"), true);
+});
