@@ -25,6 +25,7 @@ const {
   validateHistoricalDataset,
   computeDatasetContentChecksum,
   computeDatasetMetadataHash,
+  createValidationResult,
 } = require("../lib/backtest/data-validation");
 
 const DATA_VALIDATION_PATH = path.join(__dirname, "..", "lib", "backtest", "data-validation.js");
@@ -1627,4 +1628,31 @@ test("GATE6N-G03 unknown field keeps datasetId field and severity ERROR", () => 
   assert.equal(err.field, "extraField");
   assert.equal(err.datasetId, "synthetic-daily-v1");
   assert.equal(err.severity, "ERROR");
+});
+
+test("GATE7D-W01 createValidationResult copies warnings array", () => {
+  const warnings = [{ code: "W1" }];
+  const result = createValidationResult({ warnings, schemaValid: false });
+  assert.notEqual(result.warnings, warnings);
+  assert.equal(result.warnings.length, 1);
+  assert.equal(result.warnings[0], warnings[0]);
+  warnings.push({ code: "W2" });
+  assert.equal(result.warnings.length, 1);
+  assert.equal(result.datasetVerified, false);
+  assert.equal(result.backtestExecutionEligible, false);
+  assert.equal(result.liveEligible, false);
+});
+
+test("GATE7D-W02 non-array warnings become empty array", () => {
+  const result = createValidationResult({ warnings: { code: "W1" } });
+  assert.deepEqual(result.warnings, []);
+});
+
+test("GATE7D-C01 cost-policy still omits leftover amounts on late BLOCKED", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/cost-policy.js"),
+    "utf8"
+  );
+  assert.equal(src.includes("// 7C: late BLOCKED omits leftover amounts so they stay null like early BLOCKED."), true);
+  assert.equal(src.includes("{ entryAmount, exitAmount }"), false);
 });
