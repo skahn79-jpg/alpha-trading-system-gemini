@@ -3718,3 +3718,37 @@ test("GATE8D-F01 freeze pins extra-overwrite leftover chapter closed", () => {
   assert.equal(pipeSrc.includes("8D freeze"), true);
 });
 
+
+test("GATE8V-C01 pipeline createSyntheticPipelineResult calls spread base first", () => {
+  const src = fs.readFileSync(PIPELINE_PATH, "utf8");
+  assert.equal(src.includes("      ...base,\n      pipelineStatus: PIPELINE_STATUS.COMPLETED_SYNTHETIC_MULTI_TRADE"), true);
+  assert.equal(src.includes("    ...base,\n    pipelineStatus,"), true);
+  assert.equal(src.includes("      ...base,\n      pipelineStatus,"), true);
+  assert.equal(src.includes("        ...base,\n        pipelineStatus: PIPELINE_STATUS.BLOCKED_PORTFOLIO_LEDGER"), true);
+  assert.equal(src.includes("      ...base,\n      pipelineStatus: PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER"), true);
+  assert.equal(src.includes("      ...base,\n    });"), false);
+  assert.equal(src.includes("    ...base,\n  });"), false);
+  assert.equal(src.includes("        ...base,\n      }),"), false);
+  assert.equal(src.includes("      ...base,\n    }),"), false);
+});
+
+test("GATE8V-C02 local base stays seven meta keys without pipelineStatus", () => {
+  const src = fs.readFileSync(PIPELINE_PATH, "utf8");
+  const baseBlock = `const base = {
+    datasetId: dataset.datasetId || null,
+    datasetVersion: dataset.datasetVersion || null,
+    calendarId: calendar.calendarId || null,
+    calendarVersion: calendar.calendarVersion || null,
+    symbol: Array.isArray(dataset.symbols) ? dataset.symbols[0] : null,
+    market: Array.isArray(dataset.markets) ? dataset.markets[0] : null,
+    marketContractStatus: Array.isArray(dataset.markets)
+      ? pipelineMarketContractStatus(dataset.markets[0])
+      : null,
+  };`;
+  assert.equal(src.split(baseBlock).length - 1, 2);
+  assert.equal(baseBlock.includes("pipelineStatus"), false);
+  assert.equal(src.includes("      ...base,\n    });"), false);
+  assert.equal(src.includes("    ...base,\n  });"), false);
+  assert.equal(src.includes("        ...base,\n      }),"), false);
+  assert.equal(src.includes("      ...base,\n    }),"), false);
+});
