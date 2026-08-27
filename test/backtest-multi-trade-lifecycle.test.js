@@ -1679,3 +1679,34 @@ test("GATE6M-G05 production market extra stays present with severity ERROR", () 
   assert.equal(err.field, "dataset.markets");
   assert.equal(err.severity, "ERROR");
 });
+
+const PERF_KEYS = [
+  "totalReturn", "cagr", "mdd", "winRate",
+  "profitFactor", "sharpeRatio", "benchmarkReturn", "alpha",
+];
+
+function assertNullPerformanceKeys(result) {
+  for (const key of PERF_KEYS) {
+    assert.equal(Object.prototype.hasOwnProperty.call(result, key), true, key);
+    assert.equal(result[key], null, key);
+  }
+  assert.notEqual(result.liveEligible, true);
+}
+
+test("GATE7B-L01 non-object BLOCKED has null performance keys", () => {
+  const result = runSyntheticMultiTradeLifecycle(null);
+  assert.equal(result.lifecycleStatus, LIFECYCLE_STATUS.BLOCKED);
+  assertNullPerformanceKeys(result);
+});
+
+test("GATE7B-L02 empty tradeIntents BLOCKED has null performance keys", () => {
+  const fx = build2TradeKospiFixture();
+  const result = runSyntheticMultiTradeLifecycle({
+    dataset: fx.dataset, calendar: fx.calendar,
+    calendarValidation: fx.calendarValidation, cost: fx.cost,
+    tradeIntents: [], calculationMode: fx.calculationMode,
+  });
+  assert.equal(result.lifecycleStatus, LIFECYCLE_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR_CODE.EMPTY_TRADE_INTENTS), true);
+  assertNullPerformanceKeys(result);
+});

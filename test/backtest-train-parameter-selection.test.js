@@ -3962,3 +3962,12 @@ test("GATE7A-Z01 late INVALID_BENCHMARK_INPUT still first-failure-wins field", (
   const src = fs.readFileSync(benchPath, "utf8");
   assert.equal(src.includes('const field = !isFiniteNumber(benchmarkReturn) ? "benchmarkReturn" : "alpha";'), true);
 });
+
+test("GATE7B-A01 nonfinite tile path still uses blockedEval", () => {
+  const src = fs.readFileSync(SEL_PATH, "utf8");
+  const start = src.indexOf("if (!isFiniteNumber(pipelineResult.totalReturn))");
+  assert.equal(start >= 0, true);
+  const window = src.slice(start, start + 500);
+  assert.equal(window.includes("evaluation: blockedEval"), true);
+  assert.equal(window.includes("trainTotalReturn: pipelineResult.totalReturn"), false);
+});
