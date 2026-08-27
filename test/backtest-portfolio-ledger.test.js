@@ -1002,3 +1002,12 @@ test("GATE7U-C02 blockedResult non-array becomes []", () => {
   assert.deepEqual(fromObj.errors, []);
   assert.deepEqual(fromObj.errorCodes, []);
 });
+
+test("GATE7V-U01 freeze pins blockedResult errors slice", () => {
+  const src = require("node:fs").readFileSync(
+    require("node:path").join(__dirname, "..", "lib", "backtest", "portfolio-ledger.js"),
+    "utf8",
+  );
+  assert.equal(src.includes("7V freeze"), true);
+  assert.equal(src.includes("errors.slice()"), true);
+});
