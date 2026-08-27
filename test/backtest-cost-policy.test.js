@@ -1431,3 +1431,231 @@ test("GATE8N-M01 freeze pins cost extra spread-first", () => {
   assert.equal(costTest.includes("GATE8M-C01"), true);
   assert.equal(costTest.includes("GATE8M-C02"), true);
 });
+
+
+test("GATE9E-I01 createCostResult copies valid finite leftover amounts", () => {
+  const result = createCostResult({
+    ok: true,
+    costCalculationEligible: true,
+    entryAmount: 10,
+    exitAmount: 20,
+    entryCommission: 1,
+    exitCommission: 2,
+    sellTaxTotal: 3,
+    totalCost: 6,
+    grossProfit: -4,
+    netProfit: -10,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.entryAmount, 10);
+  assert.equal(result.exitAmount, 20);
+  assert.equal(result.entryCommission, 1);
+  assert.equal(result.exitCommission, 2);
+  assert.equal(result.sellTaxTotal, 3);
+  assert.equal(result.totalCost, 6);
+  assert.equal(result.grossProfit, -4);
+  assert.equal(result.netProfit, -10);
+  assert.equal(result.liveEligible, false);
+});
+
+test("GATE9E-I02 leftover amount 0 is preserved", () => {
+  const helper = applyRatePpm(999999, 1, ROUNDING_MODE.FLOOR);
+  assert.equal(helper.ok, true);
+  assert.equal(helper.amount, 0);
+  const result = createCostResult({
+    ok: true,
+    costCalculationEligible: true,
+    entryAmount: 0,
+    exitAmount: 0,
+    entryCommission: 0,
+    exitCommission: 0,
+    sellTaxTotal: 0,
+    totalCost: 0,
+    grossProfit: 0,
+    netProfit: 0,
+  });
+  assert.equal(result.entryAmount, 0);
+  assert.equal(result.exitAmount, 0);
+  assert.equal(result.entryCommission, 0);
+  assert.equal(result.exitCommission, 0);
+  assert.equal(result.sellTaxTotal, 0);
+  assert.equal(result.totalCost, 0);
+  assert.equal(result.grossProfit, 0);
+  assert.equal(result.netProfit, 0);
+});
+
+test("GATE9E-I03 NaN leftover amount stays null", () => {
+  const result = createCostResult({
+    ok: true,
+    costCalculationEligible: true,
+    entryAmount: Number.NaN,
+    exitAmount: Number.NaN,
+    totalCost: Number.NaN,
+    grossProfit: Number.NaN,
+    netProfit: Number.NaN,
+  });
+  assert.equal(result.entryAmount, null);
+  assert.equal(result.exitAmount, null);
+  assert.equal(result.totalCost, null);
+  assert.equal(result.grossProfit, null);
+  assert.equal(result.netProfit, null);
+  assert.equal(result.liveEligible, false);
+});
+
+test("GATE9E-I04 Infinity leftover amount stays null", () => {
+  const result = createCostResult({
+    ok: true,
+    costCalculationEligible: true,
+    entryAmount: Number.POSITIVE_INFINITY,
+    totalCost: Number.POSITIVE_INFINITY,
+  });
+  assert.equal(result.entryAmount, null);
+  assert.equal(result.totalCost, null);
+});
+
+test("GATE9E-I05 -Infinity leftover amount stays null", () => {
+  const result = createCostResult({
+    ok: true,
+    costCalculationEligible: true,
+    entryAmount: Number.NEGATIVE_INFINITY,
+    netProfit: Number.NEGATIVE_INFINITY,
+  });
+  assert.equal(result.entryAmount, null);
+  assert.equal(result.netProfit, null);
+});
+
+test("GATE9E-I06 string leftover amount 10 is rejected", () => {
+  const result = createCostResult({
+    ok: true,
+    costCalculationEligible: true,
+    entryAmount: "10",
+  });
+  assert.equal(result.entryAmount, null);
+});
+
+test("GATE9E-I07 string leftover amount 0 is rejected", () => {
+  const result = createCostResult({
+    ok: true,
+    costCalculationEligible: true,
+    entryAmount: "0",
+  });
+  assert.equal(result.entryAmount, null);
+});
+
+test("GATE9E-I08 boolean leftover amount is rejected", () => {
+  const result = createCostResult({
+    ok: true,
+    costCalculationEligible: true,
+    entryAmount: true,
+    exitAmount: false,
+  });
+  assert.equal(result.entryAmount, null);
+  assert.equal(result.exitAmount, null);
+});
+
+test("GATE9E-I09 boxed Number leftover amount is rejected", () => {
+  const result = createCostResult({
+    ok: true,
+    costCalculationEligible: true,
+    entryAmount: new Number(10),
+  });
+  assert.equal(result.entryAmount, null);
+});
+
+test("GATE9E-I10 null leftover amount stays null", () => {
+  const result = createCostResult({
+    ok: true,
+    costCalculationEligible: true,
+    entryAmount: null,
+    exitAmount: null,
+  });
+  assert.equal(result.entryAmount, null);
+  assert.equal(result.exitAmount, null);
+});
+
+test("GATE9E-I11 undefined leftover amount stays null", () => {
+  const result = createCostResult({
+    ok: true,
+    costCalculationEligible: true,
+    entryAmount: undefined,
+    exitAmount: undefined,
+  });
+  assert.equal(result.entryAmount, null);
+  assert.equal(result.exitAmount, null);
+});
+
+test("GATE9E-I12 missing leftover amount stays null", () => {
+  const result = createCostResult({
+    ok: true,
+    costCalculationEligible: true,
+  });
+  assert.equal(result.entryAmount, null);
+  assert.equal(result.exitAmount, null);
+  assert.equal(result.entryCommission, null);
+  assert.equal(result.exitCommission, null);
+  assert.equal(result.sellTaxTotal, null);
+  assert.equal(result.totalCost, null);
+  assert.equal(result.grossProfit, null);
+  assert.equal(result.netProfit, null);
+});
+
+test("GATE9E-I13 JSON SUCCESS leftover amounts stay finite or null", () => {
+  const injected = createCostResult({
+    ok: true,
+    costCalculationEligible: true,
+    entryAmount: Number.POSITIVE_INFINITY,
+    exitAmount: Number.NaN,
+    grossProfit: Number.NEGATIVE_INFINITY,
+  });
+  const injectedJson = JSON.parse(JSON.stringify(injected));
+  assert.equal(injected.entryAmount, null);
+  assert.equal(injected.exitAmount, null);
+  assert.equal(injected.grossProfit, null);
+  assert.equal(injectedJson.entryAmount, null);
+  assert.equal(injectedJson.exitAmount, null);
+  assert.equal(injectedJson.grossProfit, null);
+  const producer = calculateSyntheticTradeCost(makeTrade());
+  const producerJson = JSON.parse(JSON.stringify(producer));
+  assert.equal(producer.ok, true);
+  assert.equal(producerJson.entryAmount, 100000);
+  assert.equal(Number.isFinite(producerJson.entryAmount), true);
+  assert.equal(Number.isFinite(producerJson.exitAmount), true);
+  assert.equal(Number.isFinite(producerJson.totalCost), true);
+  assert.equal(Number.isFinite(producerJson.grossProfit), true);
+  assert.equal(Number.isFinite(producerJson.netProfit), true);
+});
+
+test("GATE9E-I14 calculateSyntheticTradeCost known-answer unchanged", () => {
+  const result = calculateSyntheticTradeCost(makeTrade());
+  assert.equal(result.ok, true);
+  assert.equal(result.entryAmount, 100000);
+  assert.equal(result.exitAmount, 110000);
+  assert.equal(result.entryCommission, 10);
+  assert.equal(result.exitCommission, 11);
+  assert.equal(result.sellTaxTotal, 110);
+  assert.equal(result.totalCost, 131);
+  assert.equal(result.grossProfit, 10000);
+  assert.equal(result.netProfit, 9869);
+  assert.equal(result.costCalculationStatus, COST_CALCULATION_STATUS.CALCULATED_SYNTHETIC_ONLY);
+  assertNeverEligible(result);
+});
+
+test("GATE9E-I15 blocked result has no stale leftover amounts", () => {
+  const result = blockedCostResult(
+    [{ code: ERROR.INVALID_INPUT, field: "quantity" }],
+    {
+      entryAmount: 100000,
+      exitAmount: 110000,
+      totalCost: 131,
+      grossProfit: 10000,
+      netProfit: 9869,
+    }
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.entryAmount, null);
+  assert.equal(result.exitAmount, null);
+  assert.equal(result.totalCost, null);
+  assert.equal(result.grossProfit, null);
+  assert.equal(result.netProfit, null);
+  assertNeverEligible(result);
+});
