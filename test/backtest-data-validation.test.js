@@ -1700,3 +1700,26 @@ test("GATE8T-S01 freeze pins data extra spread-first", () => {
   assert.equal(dataTest.includes("GATE8S-C01"), true);
   assert.equal(dataTest.includes("GATE8S-C02"), true);
 });
+
+test("GATE8U-T01 freeze pins allowlist extra leftover chapter closed", () => {
+  const dataSrc = fs.readFileSync(DATA_VALIDATION_PATH, "utf8");
+  const costSrc = fs.readFileSync(path.join(__dirname, "..", "lib", "backtest", "cost-policy.js"), "utf8");
+  const calSrc = fs.readFileSync(CALENDAR_VALIDATION_PATH, "utf8");
+  const execSrc = fs.readFileSync(path.join(__dirname, "..", "lib", "backtest", "execution-model.js"), "utf8");
+  const costTest = fs.readFileSync(path.join(__dirname, "backtest-cost-policy.test.js"), "utf8");
+  const calTest = fs.readFileSync(path.join(__dirname, "backtest-calendar-validation.test.js"), "utf8");
+  const execTest = fs.readFileSync(path.join(__dirname, "backtest-execution-model.test.js"), "utf8");
+  const dataTest = fs.readFileSync(__filename, "utf8");
+  assert.equal(costSrc.includes("8N freeze"), true);
+  assert.equal(costSrc.includes("8U freeze"), true);
+  assert.equal(calSrc.includes("8P freeze"), true);
+  assert.equal(calSrc.includes("8U freeze"), true);
+  assert.equal(execSrc.includes("8R freeze"), true);
+  assert.equal(execSrc.includes("8U freeze"), true);
+  assert.equal(dataSrc.includes("8T freeze"), true);
+  assert.equal(dataSrc.includes("8U freeze"), true);
+  assert.equal(costTest.includes("GATE8N-M01"), true);
+  assert.equal(calTest.includes("GATE8P-O01"), true);
+  assert.equal(execTest.includes("GATE8R-Q01"), true);
+  assert.equal(dataTest.includes("GATE8T-S01"), true);
+});
