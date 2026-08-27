@@ -1316,3 +1316,36 @@ test("GATE7Y-X01 freeze pins blockedCostResult extra allowlist", () => {
   assert.equal(lit.includes("errors,"), true);
 });
 
+
+test("GATE8G-C01 createCostResult sellTaxes copy does not spread t", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../lib/backtest/cost-policy.js"), "utf8");
+  const start = src.indexOf("function createCostResult");
+  const end = src.indexOf("function collectUnknownKeys");
+  assert.equal(start >= 0, true);
+  assert.equal(end > start, true);
+  const block = src.slice(start, end);
+  assert.equal(block.includes("{ ...t"), false);
+  assert.equal(block.includes("taxType: t && t.taxType"), true);
+  assert.equal(block.includes("amount: t && t.amount"), true);
+});
+
+test("GATE8G-C02 copied sellTaxes keep taxType and amount, drop extras", () => {
+  const result = createCostResult({
+    ok: true,
+    costCalculationEligible: true,
+    sellTaxes: [{ taxType: "TAX_A", amount: 1, junkKey: true, liveEligible: true, ratePpm: 9 }],
+  });
+  assert.equal(Array.isArray(result.sellTaxes), true);
+  assert.equal(result.sellTaxes.length, 1);
+  assert.equal(result.sellTaxes[0].taxType, "TAX_A");
+  assert.equal(result.sellTaxes[0].amount, 1);
+  assert.equal(Object.prototype.hasOwnProperty.call(result.sellTaxes[0], "junkKey"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(result.sellTaxes[0], "liveEligible"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(result.sellTaxes[0], "ratePpm"), false);
+  assert.equal(result.liveEligible, false);
+});
+
+test("GATE8G-F01 lifecycle still freezes 8F", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../lib/backtest/multi-trade-lifecycle.js"), "utf8");
+  assert.equal(src.includes("8F freeze"), true);
+});
