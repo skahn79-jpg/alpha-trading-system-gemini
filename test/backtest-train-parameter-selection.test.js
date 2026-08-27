@@ -4041,3 +4041,40 @@ test("GATE7K-H01 train still slices blocked and completed folds", () => {
   assert.equal(src.includes("src.folds.slice()"), true);
   assert.equal(src.includes("src.partialFoldResults.slice()"), true);
 });
+
+test("GATE7M-S01 foldBase slices embargo date arrays", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/train-parameter-selection.js"),
+    "utf8"
+  );
+  assert.equal(src.includes("window.embargoDates.slice()"), true);
+  assert.equal(src.includes("window.postOosEmbargoDates.slice()"), true);
+});
+
+test("GATE7M-W01 fold embargoDates match window contents", () => {
+  const input = buildSelectionInput();
+  const windows = walkForward.generateWalkForwardWindows({
+    horizonType: input.horizonType,
+    tradingDates: input.tradingDates,
+    trainWindowSize: input.trainWindowSize,
+    oosWindowSize: input.oosWindowSize,
+    stepSize: input.stepSize,
+    embargoTradingDayCount: input.embargoTradingDayCount,
+  });
+  assert.equal(windows.ok, true);
+  const result = runWalkForwardTrainParameterSelection(input);
+  assert.equal(result.folds.length > 0, true);
+  assert.deepEqual(result.folds[0].embargoDates, windows.windows[0].embargoDates);
+  assert.deepEqual(result.folds[0].postOosEmbargoDates, windows.windows[0].postOosEmbargoDates);
+  assert.equal(result.liveEligible, false);
+  assert.equal(result.backtestExecutionEligible, false);
+});
+
+test("GATE7L-S01 pin walk-forward still slices embargo date arrays", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/walk-forward-validation.js"),
+    "utf8"
+  );
+  assert.equal(src.includes("window.embargoDates.slice()"), true);
+  assert.equal(src.includes("window.postOosEmbargoDates.slice()"), true);
+});
