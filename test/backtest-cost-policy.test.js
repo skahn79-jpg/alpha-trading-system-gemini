@@ -16,6 +16,7 @@ const {
   calculateSellTaxes,
   calculateSyntheticTradeCost,
   createCostResult,
+  blockedCostResult,
   makeSafeCostError,
   SAFE_ERROR_KEYS,
   ERROR,
@@ -1246,3 +1247,33 @@ test("GATE7F-A01 makeSafeCostError still drops null extras", () => {
   assert.equal(err.code, ERROR.INVALID_INPUT);
   assert.equal(Object.prototype.hasOwnProperty.call(err, "field"), false);
 });
+
+test("GATE7X-C01 blockedCostResult extra cannot overwrite ok/errors/flags/amounts", () => {
+  const first = [{ code: ERROR.INVALID_INPUT, field: "quantity" }];
+  const other = [{ code: ERROR.ARITHMETIC_OVERFLOW, field: "totalCost" }];
+  const extra = {
+    ok: true,
+    liveEligible: true,
+    costCalculationEligible: true,
+    entryAmount: 1,
+    exitAmount: 2,
+    totalCost: 3,
+    errors: other,
+  };
+  const result = blockedCostResult(first, extra);
+  assert.equal(result.ok, false);
+  assert.equal(result.costCalculationEligible, false);
+  assert.equal(result.liveEligible, false);
+  assert.equal(result.entryAmount, null);
+  assert.equal(result.exitAmount, null);
+  assert.equal(result.totalCost, null);
+  assert.equal(hasCode(result, ERROR.INVALID_INPUT), true);
+  assert.equal(hasCode(result, ERROR.ARITHMETIC_OVERFLOW), false);
+  assert.equal(result.errors === other, false);
+  first.push({ code: ERROR.COST_POLICY_NOT_VERIFIED });
+  other.push({ code: ERROR.COST_POLICY_GAP });
+  assert.equal(hasCode(result, ERROR.COST_POLICY_NOT_VERIFIED), false);
+  assert.equal(hasCode(result, ERROR.COST_POLICY_GAP), false);
+  assertNeverEligible(result);
+});
+
