@@ -1746,3 +1746,14 @@ test("GATE8X-C02 calendarIdentity stays calendarId and calendarVersion only", ()
   assert.equal(src.includes("    calendarValidationStatus: STATUS.BLOCKED_SYNTHETIC_CALENDAR_VALIDATION,\n    ...identity,"), false);
   assert.equal(src.includes("    ...identity,\n  };"), false);
 });
+
+test("GATE8Y-X01 freeze pins calendar identity spread-first", () => {
+  const src = fs.readFileSync(DATA_VALIDATION_PATH, "utf8");
+  const dataTest = fs.readFileSync(__filename, "utf8");
+  assert.equal(src.includes("    ...identity,\n    errors: [],"), true);
+  assert.equal(src.includes("    calendarValidationStatus: STATUS.BLOCKED_SYNTHETIC_CALENDAR_VALIDATION,\n    ...identity,"), false);
+  assert.equal(src.includes("    ...identity,\n  };"), false);
+  assert.equal(src.includes("8Y freeze"), true);
+  assert.equal(dataTest.includes("GATE8X-C01"), true);
+  assert.equal(dataTest.includes("GATE8X-C02"), true);
+});
