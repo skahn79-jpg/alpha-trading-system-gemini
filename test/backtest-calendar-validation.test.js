@@ -959,3 +959,26 @@ test("GATE6P-G06 non-null non-string severity is preserved", () => {
   const numeric = makeSafeCalendarError({ code: ERROR.UNKNOWN_FIELD, severity: 0 });
   assert.equal(numeric.severity, 0);
 });
+
+test("GATE8O-C01 calendar makeSafeCalendarError calls spread extra/meta/base first", () => {
+  const src = fs.readFileSync(MODULE_PATH, "utf8");
+  assert.equal(src.includes(", ...extra"), false);
+  assert.equal(src.includes(", ...meta"), false);
+  assert.equal(src.includes(", ...base"), false);
+  assert.equal(src.includes("...extra,"), true);
+  assert.equal(src.includes("...meta,"), true);
+  assert.equal(src.includes("...loc,"), true);
+});
+
+test("GATE8O-C02 validateCalendarDay copies recordIndex and keeps canonical field", () => {
+  const result = validateCalendarDay(null, { recordIndex: 3 });
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.length > 0, true);
+  const err = result.errors[0];
+  assert.equal(err.recordIndex, 3);
+  assert.equal(err.field, "days");
+  assert.equal(err.code, ERROR.MISSING_REQUIRED_FIELD);
+  for (const e of result.errors) {
+    assert.notEqual(e.field, "HACK");
+  }
+});
