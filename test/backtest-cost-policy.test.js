@@ -1349,3 +1349,21 @@ test("GATE8G-F01 lifecycle still freezes 8F", () => {
   const src = fs.readFileSync(path.join(__dirname, "../lib/backtest/multi-trade-lifecycle.js"), "utf8");
   assert.equal(src.includes("8F freeze"), true);
 });
+
+test("GATE8H-G01 freeze pins sellTaxes taxType/amount copy verbatim", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../lib/backtest/cost-policy.js"), "utf8");
+  const start = src.indexOf("// GATE 8G: copy sellTaxes");
+  const end = src.indexOf("sellTaxTotal:", start);
+  assert.equal(start >= 0, true);
+  assert.equal(end > start, true);
+  const block = src.slice(start, end);
+  const expected = `    sellTaxes: Array.isArray(src.sellTaxes) ? src.sellTaxes.map((t) => ({
+      taxType: t && t.taxType,
+      amount: t && t.amount,
+    })) : null,`;
+  assert.equal(block.includes(expected), true);
+  assert.equal(block.includes("{ ...t"), false);
+  assert.equal(block.includes("ratePpm"), false);
+  assert.equal(block.includes("roundingMode"), false);
+  assert.equal(src.includes("8H freeze"), true);
+});
