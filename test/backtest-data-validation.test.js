@@ -1656,3 +1656,28 @@ test("GATE7D-C01 cost-policy still omits leftover amounts on late BLOCKED", () =
   assert.equal(src.includes("// 7C: late BLOCKED omits leftover amounts so they stay null like early BLOCKED."), true);
   assert.equal(src.includes("{ entryAmount, exitAmount }"), false);
 });
+
+test("GATE8S-C01 data makeError extras spread meta first", () => {
+  const src = fs.readFileSync(DATA_VALIDATION_PATH, "utf8");
+  assert.equal(src.includes("{ field: \"marketContract\", ...meta }"), false);
+  assert.equal(src.includes("{ field, ...meta }"), false);
+  assert.equal(src.includes("{ field: \"markets\", market, ...meta }"), false);
+  assert.equal(src.includes("      ...meta,\n    }));"), false);
+  assert.equal(src.includes("          field: \"contentChecksum\",\n          ...meta,"), false);
+  assert.equal(src.includes("{ ...meta, field: \"marketContract\" }"), true);
+  assert.equal(src.includes("{ ...meta, field }"), true);
+  assert.equal(src.includes("{ ...meta, field: \"markets\", market }"), true);
+  assert.equal(src.includes("      ...meta,\n      field: \"markets\","), true);
+  assert.equal(src.includes("          ...meta,\n          field: \"contentChecksum\","), true);
+  assert.equal(src.includes("{ ...loc, field: \"symbol\" }"), true);
+});
+
+test("GATE8S-C02 unknown field copies datasetId and keeps canonical field", () => {
+  const src = fs.readFileSync(DATA_VALIDATION_PATH, "utf8");
+  const result = validateTest(validEnvelope({ extraField: 1 }));
+  assert.equal(hasCode(result, ERROR.UNKNOWN_FIELD), true);
+  const err = result.errors.find((e) => e.code === ERROR.UNKNOWN_FIELD);
+  assert.equal(err.field, "extraField");
+  assert.equal(err.datasetId, "synthetic-daily-v1");
+  assert.equal(src.includes("{ ...meta, field: key }"), true);
+});
