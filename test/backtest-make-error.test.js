@@ -421,3 +421,59 @@ test("GATE6T-U04 finite-tile-mean still has no reason or stage", () => {
   assert.equal(Object.prototype.hasOwnProperty.call(bad, "reason"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(bad, "stage"), false);
 });
+
+
+test("GATE6U-R4-H01 object extra.cause is not copied and does not alias", () => {
+  const nested = { nested: 1 };
+  const err = makeBacktestError("ANY_CODE", { cause: nested });
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "cause"), false);
+  nested.nested = 99;
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "cause"), false);
+  assert.equal(err.code, "ANY_CODE");
+});
+
+test("GATE6U-R4-H02 scalar extras still copy", () => {
+  const err = makeBacktestError("ANY_CODE", {
+    field: "trainTotalReturn",
+    foldId: "WF-0001",
+    cause: "R2A_TRAIN_ROOT",
+  });
+  assert.equal(err.field, "trainTotalReturn");
+  assert.equal(err.foldId, "WF-0001");
+  assert.equal(err.cause, "R2A_TRAIN_ROOT");
+});
+
+test("GATE6U-R4-H03 null field copies; undefined field is omitted", () => {
+  const withNull = makeBacktestError("ANY_CODE", { field: null });
+  assert.equal(Object.prototype.hasOwnProperty.call(withNull, "field"), true);
+  assert.equal(withNull.field, null);
+  const withUndef = makeBacktestError("ANY_CODE", { field: undefined });
+  assert.equal(Object.prototype.hasOwnProperty.call(withUndef, "field"), false);
+});
+
+test("GATE6U-R4-H04 helper return is not frozen so adapters can mutate", () => {
+  const err = makeBacktestError("ANY_CODE", { field: "meanOosTotalReturn" });
+  assert.equal(Object.isFrozen(err), false);
+  err.severity = "ERROR";
+  delete err.code;
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "code"), false);
+  assert.equal(err.severity, "ERROR");
+  assert.equal(err.field, "meanOosTotalReturn");
+});
+
+test("GATE6U-R4-A01 makeSafe adapters still drop code on non-object and keep delete err.code", () => {
+  const { makeSafeCalendarError } = require("../lib/backtest/calendar-validation");
+  const raw = makeSafeCalendarError(null);
+  assert.deepEqual(raw, { severity: "ERROR" });
+  assert.equal(Object.prototype.hasOwnProperty.call(raw, "code"), false);
+  const root = path.join(__dirname, "..", "lib", "backtest");
+  for (const name of [
+    "calendar-validation.js",
+    "cost-policy.js",
+    "execution-model.js",
+    "synthetic-pipeline.js",
+  ]) {
+    const src = fs.readFileSync(path.join(root, name), "utf8");
+    assert.equal(src.includes("delete err.code"), true, name);
+  }
+});
