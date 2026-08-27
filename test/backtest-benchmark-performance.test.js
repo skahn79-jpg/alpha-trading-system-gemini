@@ -684,3 +684,21 @@ test("GATE6Z-Y01 DATA invariant wrap still appends DATA_STAGE_FAILED", () => {
   assert.equal(window.includes("dataInvariantErrors.slice()"), true);
   assert.equal(window.includes("ERROR.DATA_STAGE_FAILED"), true);
 });
+
+
+test("GATE9J-J13 benchmark SUCCESS keeps return/alpha and FAILURE nulls them", () => {
+  const success = calculateBenchmarkPerformance(buildValidInput());
+  const failure = calculateBenchmarkPerformance(null);
+  assert.equal(success.ok, true);
+  assert.equal(success.benchmarkStatus, BENCHMARK_STATUS.COMPLETED);
+  assert.equal(typeof success.benchmarkReturn === "number" && Number.isFinite(success.benchmarkReturn), true);
+  assert.equal(typeof success.alpha === "number" && Number.isFinite(success.alpha), true);
+  assert.equal(Object.hasOwn(success, "failedStage"), false);
+  assert.equal(Object.hasOwn(success, "pipelineStatus"), false);
+  assert.equal(failure.ok, false);
+  assert.equal(failure.benchmarkStatus, BENCHMARK_STATUS.BLOCKED);
+  assert.equal(failure.benchmarkReturn, null);
+  assert.equal(failure.alpha, null);
+  assert.equal(failure.errors.length > 0, true);
+  assert.equal(Object.hasOwn(failure, "failedStage"), false);
+});

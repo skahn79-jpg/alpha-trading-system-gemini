@@ -1819,3 +1819,28 @@ test("GATE9I-C05 freeze pins data-validation family comment", () => {
   assert.equal(src.includes("GATE 9I freeze"), true);
   assert.equal(src.includes("calendarId is optional-missing"), true);
 });
+
+
+test("GATE9J-J09 data-validation SUCCESS and FAILURE keep module-specific shapes", () => {
+  const success = validateTest(validEnvelope());
+  const failure = validateTest({});
+  assert.equal(success.ok, false);
+  assert.equal(success.schemaValid, true);
+  assert.deepEqual(success.errors, []);
+  assert.equal("errorCodes" in success, true);
+  assert.equal(Array.isArray(success.errorCodes), true);
+  assert.equal("calendarId" in success, false);
+  assert.equal(Object.hasOwn(success, "pipelineStatus"), false);
+  assert.equal(Object.hasOwn(success, "failedStage"), false);
+  assert.equal(failure.ok, false);
+  assert.equal(failure.schemaValid, false);
+  assert.equal(failure.errors.length > 0, true);
+  assert.equal("errorCodes" in failure, true);
+  assert.equal(Array.isArray(failure.errorCodes), true);
+  assert.equal(failure.errorCodes.length > 0, true);
+  assert.equal("calendarId" in failure, false);
+  assert.equal(Object.hasOwn(failure, "pipelineStatus"), false);
+  assert.equal(Object.hasOwn(failure, "failedStage"), false);
+  assert.equal("status" in success, true);
+  assert.equal("status" in failure, true);
+});

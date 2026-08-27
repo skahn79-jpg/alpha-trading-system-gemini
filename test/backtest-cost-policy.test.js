@@ -1679,3 +1679,31 @@ test("GATE9I-C03 cost success nullable amount shape", () => {
   const src = fs.readFileSync(path.join(__dirname, "../lib/backtest/cost-policy.js"), "utf8");
   assert.equal(src.includes("GATE 9I freeze"), true);
 });
+
+
+test("GATE9J-J11 cost SUCCESS amounts stay finite-or-null and BLOCKED drops leftover amounts", () => {
+  const success = calculateSyntheticTradeCost(makeTrade());
+  assert.equal(success.ok, true);
+  assert.equal(Object.hasOwn(success, "failedStage"), false);
+  assert.equal(Object.hasOwn(success, "pipelineStatus"), false);
+  assert.equal("entryAmount" in success, true);
+  assert.equal(typeof success.entryAmount === "number" && Number.isFinite(success.entryAmount), true);
+  assert.equal(typeof success.netProfit === "number" && Number.isFinite(success.netProfit), true);
+  const blocked = blockedCostResult(
+    [{ code: ERROR.INVALID_INPUT, field: "quantity" }],
+    {
+      entryAmount: 100000,
+      exitAmount: 110000,
+      totalCost: 131,
+      grossProfit: 10000,
+      netProfit: 9869,
+    }
+  );
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.entryAmount, null);
+  assert.equal(blocked.exitAmount, null);
+  assert.equal(blocked.totalCost, null);
+  assert.equal(blocked.grossProfit, null);
+  assert.equal(blocked.netProfit, null);
+  assert.equal(Object.hasOwn(blocked, "failedStage"), false);
+});

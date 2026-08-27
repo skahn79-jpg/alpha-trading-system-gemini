@@ -2941,3 +2941,35 @@ test("GATE9I-B03 officialFolds/folds existing freeze unchanged", () => {
   assert.deepEqual(blocked.officialFolds, []);
   assert.notEqual(blocked.officialFolds, blocked.folds);
 });
+
+
+test("GATE9J-J05 walk-forward COMPLETED keeps officialFolds identity", () => {
+  const result = runWalkForwardValidation(buildWalkForwardInput());
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(Object.hasOwn(result, "ok"), false);
+  assert.equal(Object.hasOwn(result, "pipelineStatus"), false);
+  assert.equal(result.failedStage, null);
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.errorCodes, []);
+  assert.equal(result.officialFolds, result.folds);
+  assert.equal(Array.isArray(result.folds), true);
+  assert.equal(result.folds.length > 0, true);
+  assert.equal(Number.isFinite(result.meanOosTotalReturn), true);
+  assertOfficialLeakageFreeze(result);
+});
+
+test("GATE9J-J06 walk-forward BLOCKED keeps failure identity and empty officialFolds", () => {
+  const result = runWalkForwardValidation(null);
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(Object.hasOwn(result, "ok"), false);
+  assert.equal(Object.hasOwn(result, "pipelineStatus"), false);
+  assert.equal(result.failedStage, "WALK_FORWARD");
+  assert.equal(result.errors.length > 0, true);
+  assert.equal(Array.isArray(result.errorCodes), true);
+  assert.equal(result.errorCodes.length > 0, true);
+  assert.deepEqual(result.officialFolds, []);
+  assert.equal(result.meanOosTotalReturn, null);
+  assert.equal(result.meanOosBenchmarkReturn, null);
+  assert.equal(result.meanOosAlpha, null);
+  assertOfficialLeakageFreeze(result);
+});

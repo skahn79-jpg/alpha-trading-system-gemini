@@ -1451,3 +1451,23 @@ test("GATE9I-C04 execution/stage representative shape", () => {
   const src = fs.readFileSync(path.join(__dirname, "..", "lib", "backtest", "execution-model.js"), "utf8");
   assert.equal(src.includes("GATE 9I freeze"), true);
 });
+
+
+test("GATE9J-J10 execution SUCCESS and FAILURE keep ok/status separation", () => {
+  const success = evaluateDailyBarExecution(validInput());
+  const failure = evaluateDailyBarExecution(null);
+  assert.equal(success.ok, true);
+  assert.equal(Object.hasOwn(success, "status"), true);
+  assert.equal(Object.hasOwn(success, "failedStage"), false);
+  assert.equal(Object.hasOwn(success, "pipelineStatus"), false);
+  assert.equal(success.executionStatus, STATUS.NOT_EXECUTED);
+  assert.equal(failure.ok, false);
+  assert.equal(Object.hasOwn(failure, "status"), true);
+  assert.equal(failure.status != null, true);
+  assert.equal(failure.errors.length > 0, true);
+  assert.equal(failure.totalReturn, null);
+  assert.equal(failure.cagr, null);
+  assert.equal(failure.executionStatus, STATUS.NOT_EXECUTED);
+  assert.equal(Object.hasOwn(failure, "failedStage"), false);
+  assert.equal(Object.hasOwn(failure, "pipelineStatus"), false);
+});

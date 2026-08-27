@@ -4088,3 +4088,39 @@ test("GATE7N-M01 train freeze pins embargo date slices", () => {
   assert.equal(src.includes("window.embargoDates.slice()"), true);
   assert.equal(src.includes("window.postOosEmbargoDates.slice()"), true);
 });
+
+
+test("GATE9J-J07 selection COMPLETED keeps family B plus selection extensions", () => {
+  const result = runWalkForwardTrainParameterSelection(buildSelectionInput());
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(result.selectionStatus, SELECTION_STATUS.COMPLETED);
+  assert.equal(Object.hasOwn(result, "ok"), false);
+  assert.equal(Object.hasOwn(result, "pipelineStatus"), false);
+  assert.equal(result.failedStage, null);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.officialFolds, result.folds);
+  assert.equal(Array.isArray(result.folds), true);
+  assert.equal(result.folds.length > 0, true);
+  const fold = result.folds[0];
+  assert.equal(Array.isArray(fold.candidateEvaluations), true);
+  assert.equal(fold.candidateEvaluations.length > 0, true);
+  assert.equal(fold.selectedParameters != null, true);
+  assert.equal(typeof fold.selectedCandidateId, "string");
+  assert.equal(Number.isFinite(result.meanOosTotalReturn), true);
+});
+
+test("GATE9J-J08 selection FAILURE has no stale root winner payload", () => {
+  const result = runWalkForwardTrainParameterSelection(null);
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(result.selectionStatus, SELECTION_STATUS.BLOCKED);
+  assert.equal(Object.hasOwn(result, "ok"), false);
+  assert.equal(Object.hasOwn(result, "pipelineStatus"), false);
+  assert.equal(result.failedStage != null && result.failedStage.length > 0, true);
+  assert.deepEqual(result.officialFolds, []);
+  assert.equal(result.meanOosTotalReturn, null);
+  assert.equal(result.meanOosBenchmarkReturn, null);
+  assert.equal(result.meanOosAlpha, null);
+  assert.equal(Object.hasOwn(result, "selectedCandidateId"), false);
+  assert.equal(Object.hasOwn(result, "selectedParameters"), false);
+  assert.equal(result.errors.length > 0, true);
+});

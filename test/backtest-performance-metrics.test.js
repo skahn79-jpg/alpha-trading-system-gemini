@@ -955,3 +955,24 @@ test("GATE6J-P02 blocked portfolioStatus keeps field and severity ERROR", () => 
   assert.equal(result.errors[0].field, "portfolioStatus");
   assert.equal(result.errors[0].severity, "ERROR");
 });
+
+
+test("GATE9J-J12 performance SUCCESS keeps metrics and FAILURE nulls the bundle", () => {
+  const success = calculatePerformanceMetrics(buildCompletedInput());
+  const failure = calculatePerformanceMetrics(null);
+  assert.equal(success.ok, true);
+  assert.equal(success.performanceStatus, PERFORMANCE_STATUS.COMPLETED);
+  assert.equal(Number.isFinite(success.totalReturn), true);
+  assert.equal(Object.hasOwn(success, "failedStage"), false);
+  assert.equal(Object.hasOwn(success, "pipelineStatus"), false);
+  assert.equal(failure.ok, false);
+  assert.equal(failure.performanceStatus, PERFORMANCE_STATUS.BLOCKED);
+  assert.equal(failure.totalReturn, null);
+  assert.equal(failure.cagr, null);
+  assert.equal(failure.mdd, null);
+  assert.equal(failure.winRate, null);
+  assert.equal(failure.profitFactor, null);
+  assert.equal(failure.sharpeRatio, null);
+  assert.equal(failure.errors.length > 0, true);
+  assert.equal(Object.hasOwn(failure, "failedStage"), false);
+});

@@ -462,3 +462,21 @@ test("GATE9I-D02 resultFail has no errorCodes", () => {
   assert.equal(Object.hasOwn(result, "errorCodes"), false);
   assert.equal("errorCodes" in result, false);
 });
+
+
+test("GATE9J-J15 resultFail has no errorCodes and walk-forward guards optional codes", () => {
+  const result = resultFail([{ code: SCHEMA_ERROR.INVALID_STRING, field: "intentId" }]);
+  assert.deepEqual(Object.keys(result).sort(), ["errors", "ok", "status"]);
+  assert.equal(result.ok, false);
+  assert.equal(Object.hasOwn(result, "errorCodes"), false);
+  assert.equal("errorCodes" in result, false);
+  const wfSrc = fs.readFileSync(
+    path.join(__dirname, "..", "lib", "backtest", "walk-forward-validation.js"),
+    "utf8"
+  );
+  assert.equal(wfSrc.includes("Array.isArray(pipelineResult.errorCodes)"), true);
+  assert.equal(
+    wfSrc.includes("pipelineResult.pipelineStatus !== PIPELINE_STATUS.COMPLETED_BENCHMARK_ALPHA"),
+    true
+  );
+});

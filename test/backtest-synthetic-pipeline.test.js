@@ -3846,3 +3846,201 @@ test("GATE9I-A04 freeze pins pipeline family comment", () => {
   assert.equal(src.includes("pipelineStatus"), true);
   assert.equal(src.includes("Do not normalize this family to a generic ok or status."), true);
 });
+
+
+test("GATE9J-J01 pipeline COMPLETED has no stale blocking identity", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+  assert.equal(result.pipelineStatus.startsWith("BLOCKED"), false);
+  assert.equal(Object.hasOwn(result, "ok"), false);
+  assert.equal("failedStage" in result, true);
+  assert.equal(result.failedStage, null);
+  assert.equal(result.dataStageStatus, STAGE_STATUS.PASSED_SYNTHETIC_ONLY);
+  assert.equal(result.executionStageStatus, STAGE_STATUS.PASSED_SYNTHETIC_ONLY);
+  assert.equal(result.costStageStatus, STAGE_STATUS.PASSED_SYNTHETIC_ONLY);
+  assert.equal(typeof result.entryAmount === "number" && Number.isFinite(result.entryAmount), true);
+  assert.equal(typeof result.netProfit === "number" && Number.isFinite(result.netProfit), true);
+  assert.equal(result.totalReturn, null);
+  assert.equal(result.benchmarkReturn, null);
+  assert.equal(result.alpha, null);
+  assert.equal(Object.hasOwn(result, "performanceStatus"), false);
+  assert.equal(Object.hasOwn(result, "benchmarkStatus"), false);
+  assert.equal(Object.hasOwn(result, "portfolioStatus"), false);
+  assertOperationalBlocked(result);
+});
+
+test("GATE9J-J02 pipeline BLOCKED at DATA has no downstream completed payload", () => {
+  const input = validPipelineInput();
+  input.dataset.candles[0].volume = -1;
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_DATA_STAGE);
+  assert.equal(result.failedStage, STAGE.DATA);
+  assert.equal(result.dataStageStatus, STAGE_STATUS.FAILED);
+  assert.equal(result.executionStageStatus, STAGE_STATUS.NOT_STARTED);
+  assert.equal(result.costStageStatus, STAGE_STATUS.NOT_STARTED);
+  assert.equal(result.syntheticExecutionCalculated, false);
+  assert.equal(result.syntheticCostCalculated, false);
+  assert.equal(result.entryStatus, null);
+  assert.equal(result.entryPrice, null);
+  assert.equal(result.exitStatus, null);
+  assert.equal(result.entryAmount, null);
+  assert.equal(result.exitAmount, null);
+  assert.equal(result.netProfit, null);
+  assert.equal(result.totalReturn, null);
+  assert.equal(result.cagr, null);
+  assert.equal(result.benchmarkReturn, null);
+  assert.equal(result.alpha, null);
+  assert.equal(Object.hasOwn(result, "performanceStatus"), false);
+  assert.equal(Object.hasOwn(result, "benchmarkStatus"), false);
+  assert.equal(Object.hasOwn(result, "portfolioStatus"), false);
+  assert.equal(result.errors.length > 0, true);
+  assert.equal(Object.hasOwn(result, "ok"), false);
+});
+
+test("GATE9J-J03 pipeline BLOCKED at COST keeps upstream execution and drops downstream success", () => {
+  const input = validPipelineInput();
+  input.cost.policies = [];
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_COST_STAGE);
+  assert.equal(result.failedStage, STAGE.COST);
+  assert.equal(result.dataStageStatus, STAGE_STATUS.PASSED_SYNTHETIC_ONLY);
+  assert.equal(result.executionStageStatus, STAGE_STATUS.PASSED_SYNTHETIC_ONLY);
+  assert.equal(result.costStageStatus, STAGE_STATUS.FAILED);
+  assert.equal(result.syntheticExecutionCalculated, true);
+  assert.equal(result.entryStatus, ENTRY_STATUS.FILLED);
+  assert.equal(typeof result.entryPrice === "number" && Number.isFinite(result.entryPrice), true);
+  assert.equal(result.exitStatus != null, true);
+  assert.equal(result.entryAmount, null);
+  assert.equal(result.exitAmount, null);
+  assert.equal(result.totalCost, null);
+  assert.equal(result.grossProfit, null);
+  assert.equal(result.netProfit, null);
+  assert.equal(result.syntheticCostCalculated, false);
+  assert.equal(result.totalReturn, null);
+  assert.equal(result.cagr, null);
+  assert.equal(result.mdd, null);
+  assert.equal(result.benchmarkReturn, null);
+  assert.equal(result.alpha, null);
+  assert.equal(Object.hasOwn(result, "performanceStatus"), false);
+  assert.equal(Object.hasOwn(result, "benchmarkStatus"), false);
+  assert.equal(Object.hasOwn(result, "portfolioStatus"), false);
+});
+
+test("GATE9J-J04 pipeline COMPLETED_NO_ENTRY is diagnostic not BLOCKED", () => {
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const input = validPipelineInput({
+    dataset: buildDataset(calendar, fullTradeCandles(calendar)),
+    calendar,
+    execution: {
+      modelVersion: MODEL_VERSION,
+      side: SIDE.LONG,
+      entryIntent: {
+        orderType: ORDER_TYPE.MARKET_OPEN,
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: "2101-12-31",
+        limitPrice: null,
+      },
+      exitPolicy: {
+        stopLossPrice: 9500,
+        takeProfitPrice: 11000,
+        intrabarConflictPolicy: INTRABAR_CONFLICT_POLICY.STOP_FIRST,
+      },
+      quantity: 10,
+    },
+  });
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_NO_ENTRY);
+  assert.equal(result.pipelineStatus.startsWith("BLOCKED"), false);
+  assert.equal(result.failedStage, null);
+  assert.equal(result.costStageStatus, STAGE_STATUS.NOT_STARTED);
+  assert.equal(result.entryAmount, null);
+  assert.equal(result.netProfit, null);
+  assert.equal(hasCode(result, EXEC_ERROR.NO_ELIGIBLE_ENTRY_CANDLE), true);
+  assert.equal(Array.isArray(result.errors), true);
+  assert.equal(result.errors.length > 0, true);
+  assert.equal(Object.hasOwn(result, "ok"), false);
+});
+
+test("GATE9J-J14 optional calendarId uses producer/calendar/null fallback", () => {
+  const dataValidation = require("../lib/backtest/data-validation");
+  const omitted = dataValidation.createValidationResult({ ok: false, schemaValid: true });
+  assert.equal("calendarId" in omitted, false);
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(typeof result.calendarId, "string");
+  assert.equal(result.calendarId.length > 0, true);
+  const src = fs.readFileSync(PIPELINE_PATH, "utf8");
+  assert.equal(src.includes("(dataResult && dataResult.calendarId) || calendar.calendarId || null"), true);
+});
+
+test("GATE9J-J16 SUCCESS cannot keep stale blocking failedStage", () => {
+  const completed = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(completed.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+  assert.equal(completed.failedStage, null);
+  assert.equal(completed.errors.length, 0);
+  assert.deepEqual(completed.errorCodes, []);
+  const calendar = buildCalendar({ start: "2101-03-01", dayCount: 14 });
+  const t = tradingDatesOf(calendar);
+  const noEntry = runSyntheticSingleTradePipeline(validPipelineInput({
+    dataset: buildDataset(calendar, fullTradeCandles(calendar)),
+    calendar,
+    execution: {
+      modelVersion: MODEL_VERSION,
+      side: SIDE.LONG,
+      entryIntent: {
+        orderType: ORDER_TYPE.MARKET_OPEN,
+        signalTradingDate: t[0],
+        earliestExecutionTradingDate: "2101-12-31",
+        limitPrice: null,
+      },
+      exitPolicy: {
+        stopLossPrice: 9500,
+        takeProfitPrice: 11000,
+        intrabarConflictPolicy: INTRABAR_CONFLICT_POLICY.STOP_FIRST,
+      },
+      quantity: 10,
+    },
+  }));
+  assert.equal(noEntry.pipelineStatus, PIPELINE_STATUS.COMPLETED_NO_ENTRY);
+  assert.equal(noEntry.failedStage, null);
+  assert.equal(noEntry.pipelineStatus.startsWith("BLOCKED"), false);
+});
+
+test("GATE9J-J17 FAILURE cannot keep stale downstream success payload", () => {
+  const dataInput = validPipelineInput();
+  dataInput.dataset.candles[0].volume = -1;
+  const dataBlocked = runSyntheticSingleTradePipeline(dataInput);
+  assert.equal(dataBlocked.failedStage, STAGE.DATA);
+  assert.equal(dataBlocked.executionStageStatus, STAGE_STATUS.NOT_STARTED);
+  assert.equal(dataBlocked.entryStatus, null);
+  assert.equal(dataBlocked.entryAmount, null);
+  assert.equal(dataBlocked.totalReturn, null);
+  assert.equal(dataBlocked.alpha, null);
+  const costInput = validPipelineInput();
+  costInput.cost.policies = [];
+  const costBlocked = runSyntheticSingleTradePipeline(costInput);
+  assert.equal(costBlocked.failedStage, STAGE.COST);
+  assert.equal(costBlocked.entryStatus, ENTRY_STATUS.FILLED);
+  assert.equal(costBlocked.entryAmount, null);
+  assert.equal(costBlocked.totalReturn, null);
+  assert.equal(costBlocked.benchmarkReturn, null);
+  assert.equal(costBlocked.alpha, null);
+});
+
+test("GATE9J-J18 same-state pipeline shape is deterministic", () => {
+  const first = runSyntheticSingleTradePipeline(validPipelineInput());
+  const second = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(first.pipelineStatus, second.pipelineStatus);
+  assert.equal(first.failedStage, second.failedStage);
+  assert.deepEqual(Object.keys(first).sort(), Object.keys(second).sort());
+  assert.deepEqual(first.errorCodes, second.errorCodes);
+  assert.equal(first.errors.length, second.errors.length);
+  for (let i = 0; i < first.errors.length; i += 1) {
+    assert.equal(first.errors[i].code, second.errors[i].code);
+  }
+  assert.equal(first.entryAmount, second.entryAmount);
+  assert.equal(first.netProfit, second.netProfit);
+  assert.equal(first.calendarId, second.calendarId);
+  assert.equal("failedStage" in first, true);
+  assert.equal("failedStage" in second, true);
+});
