@@ -3659,3 +3659,52 @@ test("GATE8B-C02 blocked cost stage leftover amounts stay null", () => {
   assert.equal(result.liveEligible, false);
 });
 
+test("GATE8C-B01 freeze pins blocked cost return verbatim", () => {
+  const src = fs.readFileSync(PIPELINE_PATH, "utf8");
+  const start = src.indexOf("if (costResult.ok !== true)");
+  const end = src.indexOf("pipelineStatus: PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE", start);
+  assert.equal(start >= 0, true);
+  assert.equal(end > start, true);
+  const block = src.slice(start, end);
+  const expected = `    return createSyntheticPipelineResult({
+      pipelineStatus: PIPELINE_STATUS.BLOCKED_COST_STAGE,
+      failedStage: STAGE.COST,
+      dataStageStatus: STAGE_STATUS.PASSED_SYNTHETIC_ONLY,
+      executionStageStatus: STAGE_STATUS.PASSED_SYNTHETIC_ONLY,
+      costStageStatus: STAGE_STATUS.FAILED,
+      entryStatus: execResult.entryStatus,
+      entryTradingDate: execResult.entryTradingDate,
+      entryPrice: execResult.entryPrice,
+      entryReason: execResult.entryReason,
+      exitStatus: execResult.exitStatus,
+      exitTradingDate: execResult.exitTradingDate,
+      exitPrice: execResult.exitPrice,
+      exitReason: execResult.exitReason,
+      syntheticExecutionCalculated: true,
+      errors,
+      missingData: mergeMissingData([synthDataFlags.missingData, costResult.missingData]),
+      warnings: [
+        ...synthDataFlags.warnings,
+        ...(Array.isArray(costResult.warnings) ? costResult.warnings : []),
+      ],
+      ...meta,
+      syntheticDataValidated: true,
+      syntheticCalendarVerified: true,
+      syntheticCandleDatesVerified: true,
+    });`;
+  assert.equal(block.includes(expected), true);
+  const forbidden = [
+    "entryAmount",
+    "exitAmount",
+    "totalCost",
+    "grossProfit",
+    "netProfit",
+    "entryCommission",
+    "exitCommission",
+    "sellTaxTotal",
+  ];
+  for (const key of forbidden) {
+    assert.equal(block.includes(key), false);
+  }
+});
+
