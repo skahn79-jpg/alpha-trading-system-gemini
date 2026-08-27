@@ -26,6 +26,7 @@ const {
   sliceFeatureWindow,
   assertCausalTradeTiming,
   blockedSelectionResult,
+  completedSelectionResult,
 } = sel;
 
 const walkForward = require("../lib/backtest/walk-forward-validation");
@@ -3998,5 +3999,35 @@ test("GATE7H-G01 walk-forward still slices blocked folds", () => {
     path.join(__dirname, "../lib/backtest/walk-forward-validation.js"),
     "utf8"
   );
+  assert.equal(src.includes("src.folds.slice()"), true);
+});
+
+test("GATE7J-C01 completedSelectionResult copies folds array", () => {
+  const folds = [{ foldId: "F1" }];
+  const result = completedSelectionResult({ folds });
+  assert.equal(result.selectionStatus, SELECTION_STATUS.COMPLETED);
+  assert.notEqual(result.folds, folds);
+  assert.equal(result.officialFolds, result.folds);
+  assert.equal(result.folds.length, 1);
+  assert.equal(result.folds[0], folds[0]);
+  folds.push({ foldId: "F2" });
+  assert.equal(result.folds.length, 1);
+  assert.notEqual(result.officialFolds, folds);
+  assert.equal(result.liveEligible, false);
+  assert.equal(result.backtestExecutionEligible, false);
+});
+
+test("GATE7J-C02 non-array folds become empty arrays", () => {
+  const result = completedSelectionResult({ folds: { foldId: "F1" } });
+  assert.deepEqual(result.folds, []);
+  assert.deepEqual(result.officialFolds, []);
+});
+
+test("GATE7J-I01 walk-forward completed still slices folds", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/walk-forward-validation.js"),
+    "utf8"
+  );
+  assert.equal(src.includes("// 7I: copy folds/officialFolds so callers cannot mutate the result arrays."), true);
   assert.equal(src.includes("src.folds.slice()"), true);
 });
