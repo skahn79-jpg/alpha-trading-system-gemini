@@ -3752,3 +3752,20 @@ test("GATE8V-C02 local base stays seven meta keys without pipelineStatus", () =>
   assert.equal(src.includes("        ...base,\n      }),"), false);
   assert.equal(src.includes("      ...base,\n    }),"), false);
 });
+
+test("GATE8W-V01 freeze pins pipeline base spread-first", () => {
+  const src = fs.readFileSync(PIPELINE_PATH, "utf8");
+  const pipeTest = fs.readFileSync(__filename, "utf8");
+  assert.equal(src.includes("      ...base,\n      pipelineStatus: PIPELINE_STATUS.COMPLETED_SYNTHETIC_MULTI_TRADE"), true);
+  assert.equal(src.includes("    ...base,\n    pipelineStatus,"), true);
+  assert.equal(src.includes("      ...base,\n      pipelineStatus,"), true);
+  assert.equal(src.includes("        ...base,\n        pipelineStatus: PIPELINE_STATUS.BLOCKED_PORTFOLIO_LEDGER"), true);
+  assert.equal(src.includes("      ...base,\n      pipelineStatus: PIPELINE_STATUS.COMPLETED_PORTFOLIO_LEDGER"), true);
+  assert.equal(src.includes("      ...base,\n    });"), false);
+  assert.equal(src.includes("    ...base,\n  });"), false);
+  assert.equal(src.includes("        ...base,\n      }),"), false);
+  assert.equal(src.includes("      ...base,\n    }),"), false);
+  assert.equal(src.includes("8W freeze"), true);
+  assert.equal(pipeTest.includes("GATE8V-C01"), true);
+  assert.equal(pipeTest.includes("GATE8V-C02"), true);
+});
