@@ -2534,3 +2534,109 @@ test("GATE6I-W04 freeze 22-date embargo=1 success still pins official flags fals
   assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
   assertOfficialLeakageFreeze(result);
 });
+
+test("GATE6U-R1-W01 nested pipeline fail fold.errorCodes[0] equals fold.error.code", () => {
+  const original = pipelineMod.runSyntheticBenchmarkPipeline;
+  try {
+    pipelineMod.runSyntheticBenchmarkPipeline = function patched() {
+      return {
+        pipelineStatus: "BLOCKED_DATA_STAGE",
+        totalReturn: null,
+        benchmarkReturn: null,
+        alpha: null,
+        errors: [
+          { code: "CALENDAR_MARKET_MISMATCH", severity: "ERROR" },
+          { code: "DATA_STAGE_FAILED", severity: "ERROR" },
+        ],
+        errorCodes: ["CALENDAR_MARKET_MISMATCH", "DATA_STAGE_FAILED"],
+      };
+    };
+    const result = runWalkForwardValidation(buildWalkForwardInput());
+    const fold = result.folds[0];
+    assert.equal(fold.status, FOLD_STATUS.BLOCKED);
+    assert.equal(fold.errorCodes[0], "CALENDAR_MARKET_MISMATCH");
+    assert.equal(result.errors[0].code, "CALENDAR_MARKET_MISMATCH");
+    assert.equal(fold.errorCodes[0], result.errors[0].code);
+    assert.equal(fold.errorCodes.includes(ERROR.OOS_FOLD_FAILED), true);
+    assert.equal(fold.errorCodes[0] === ERROR.OOS_FOLD_FAILED, false);
+  } finally {
+    pipelineMod.runSyntheticBenchmarkPipeline = original;
+  }
+});
+
+test("GATE6U-R1-W02 nested pipeline fail keeps OOS_FOLD_FAILED after root", () => {
+  const original = pipelineMod.runSyntheticBenchmarkPipeline;
+  try {
+    pipelineMod.runSyntheticBenchmarkPipeline = function patched() {
+      return {
+        pipelineStatus: "BLOCKED_DATA_STAGE",
+        totalReturn: null,
+        benchmarkReturn: null,
+        alpha: null,
+        errors: [
+          { code: "CALENDAR_MARKET_MISMATCH", severity: "ERROR" },
+          { code: "DATA_STAGE_FAILED", severity: "ERROR" },
+        ],
+        errorCodes: ["CALENDAR_MARKET_MISMATCH", "DATA_STAGE_FAILED"],
+      };
+    };
+    const result = runWalkForwardValidation(buildWalkForwardInput());
+    const fold = result.folds[0];
+    const rootIdx = fold.errorCodes.indexOf("CALENDAR_MARKET_MISMATCH");
+    const wrapIdx = fold.errorCodes.indexOf(ERROR.OOS_FOLD_FAILED);
+    const dataIdx = fold.errorCodes.indexOf("DATA_STAGE_FAILED");
+    assert.equal(rootIdx < wrapIdx, true);
+    assert.equal(wrapIdx > -1, true);
+    assert.equal(dataIdx > wrapIdx, true);
+  } finally {
+    pipelineMod.runSyntheticBenchmarkPipeline = original;
+  }
+});
+
+test("GATE6U-R1-W03 local OOS_FOLD_FAILED errorCodes[0] matches error.code", () => {
+  const result = withTileMetrics(
+    () => ({ totalReturn: Number.MAX_VALUE, benchmarkReturn: 0.01, alpha: 0.01 }),
+    () => runWalkForwardValidation(sixBarWalkForwardInput()),
+  );
+  assert.equal(result.errors[0].code, ERROR.OOS_FOLD_FAILED);
+  assert.equal(result.errorCodes[0], ERROR.OOS_FOLD_FAILED);
+  assert.equal(result.folds[0].errorCodes[0], ERROR.OOS_FOLD_FAILED);
+  assert.equal(result.errors[0].field, "oosMetrics");
+});
+
+test("GATE6U-R1-W04 top-level nested fail stays root-first then summaries", () => {
+  const original = pipelineMod.runSyntheticBenchmarkPipeline;
+  try {
+    pipelineMod.runSyntheticBenchmarkPipeline = function patched() {
+      return {
+        pipelineStatus: "BLOCKED_DATA_STAGE",
+        totalReturn: null,
+        benchmarkReturn: null,
+        alpha: null,
+        errors: [
+          { code: "CALENDAR_MARKET_MISMATCH", severity: "ERROR" },
+          { code: "DATA_STAGE_FAILED", severity: "ERROR" },
+        ],
+        errorCodes: ["CALENDAR_MARKET_MISMATCH", "DATA_STAGE_FAILED"],
+      };
+    };
+    const result = runWalkForwardValidation(buildWalkForwardInput());
+    assert.equal(result.errors[0].code, result.errorCodes[0]);
+    assert.equal(result.errorCodes[0], "CALENDAR_MARKET_MISMATCH");
+    const rootIdx = result.errorCodes.indexOf("CALENDAR_MARKET_MISMATCH");
+    const oosIdx = result.errorCodes.indexOf(ERROR.OOS_FOLD_FAILED);
+    const wfIdx = result.errorCodes.indexOf(ERROR.WALK_FORWARD_STAGE_FAILED);
+    assert.equal(rootIdx < oosIdx && oosIdx < wfIdx, true);
+    assertOfficialLeakageFreeze(result);
+  } finally {
+    pipelineMod.runSyntheticBenchmarkPipeline = original;
+  }
+});
+
+test("GATE6U-R1-W05 train-parameter-selection 5O cause wrapper untouched", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "..", "lib", "backtest", "train-parameter-selection.js"),
+    "utf8",
+  );
+  assert.equal(src.includes("cause: rootErr.code"), true);
+});
