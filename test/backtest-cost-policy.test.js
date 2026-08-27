@@ -1277,3 +1277,42 @@ test("GATE7X-C01 blockedCostResult extra cannot overwrite ok/errors/flags/amount
   assertNeverEligible(result);
 });
 
+test("GATE7Y-X01 freeze pins blockedCostResult extra allowlist", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../lib/backtest/cost-policy.js"), "utf8");
+  const start = src.indexOf("function blockedCostResult");
+  const end = src.indexOf("function calculateSyntheticTradeCost");
+  assert.equal(start >= 0, true);
+  assert.equal(end > start, true);
+  const block = src.slice(start, end);
+  assert.equal(block.includes("warnings: src.warnings"), true);
+  assert.equal(block.includes("missingData: src.missingData"), true);
+  assert.equal(block.includes("...src"), false);
+  const forbidden = [
+    "entryAmount",
+    "exitAmount",
+    "totalCost",
+    "grossProfit",
+    "netProfit",
+    "entryCommission",
+    "exitCommission",
+    "sellTaxes",
+    "sellTaxTotal",
+    "liveEligible",
+    "paperEligible",
+    "promotionEligible",
+    "backtestExecutionEligible",
+    "costPolicyVerified",
+  ];
+  for (const key of forbidden) {
+    assert.equal(block.includes(key), false);
+  }
+  const litStart = block.indexOf("createCostResult({");
+  const litEnd = block.indexOf("});", litStart);
+  assert.equal(litStart >= 0, true);
+  assert.equal(litEnd > litStart, true);
+  const lit = block.slice(litStart, litEnd);
+  assert.equal(lit.includes("ok: false"), true);
+  assert.equal(lit.includes("costCalculationEligible: false"), true);
+  assert.equal(lit.includes("errors,"), true);
+});
+
