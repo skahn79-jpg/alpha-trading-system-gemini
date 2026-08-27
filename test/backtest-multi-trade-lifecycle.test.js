@@ -1748,3 +1748,19 @@ test("GATE7N-L01 pin walk-forward still freezes embargo date slices", () => {
   assert.equal(src.includes("7N freeze"), true);
   assert.equal(src.includes("window.embargoDates.slice()"), true);
 });
+
+test("GATE7P-O01 freeze pins result.errors slice", () => {
+  const src = fs.readFileSync(LIFECYCLE_SRC_PATH, "utf8");
+  assert.equal(src.includes("7P freeze"), true);
+  assert.equal(src.includes("result.errors.slice()"), true);
+});
+
+test("GATE7P-L01 local-owned error arrays stay unsliced", () => {
+  const src = fs.readFileSync(LIFECYCLE_SRC_PATH, "utf8");
+  assert.equal(src.includes("errors: preErrors"), true);
+  assert.equal(src.includes("errors: marketErrors"), true);
+  assert.equal(src.includes("errors: allErrors"), true);
+  assert.equal(src.includes("preErrors.slice()"), false);
+  assert.equal(src.includes("marketErrors.slice()"), false);
+  assert.equal(src.includes("allErrors.slice()"), false);
+});
