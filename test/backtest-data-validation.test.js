@@ -1770,3 +1770,20 @@ test("GATE8Z-Y01 freeze pins leftover result-overlay chapter closed", () => {
   assert.equal(pipeTest.includes("GATE8W-V01"), true);
   assert.equal(dataTest.includes("GATE8Y-X01"), true);
 });
+
+test("GATE9B-A01 freeze pins leftover-class audit after 8Z", () => {
+  const dataSrc = fs.readFileSync(DATA_VALIDATION_PATH, "utf8");
+  const pipeSrc = fs.readFileSync(path.join(__dirname, "..", "lib", "backtest", "synthetic-pipeline.js"), "utf8");
+  const walkSrc = fs.readFileSync(path.join(__dirname, "..", "lib", "backtest", "walk-forward-validation.js"), "utf8");
+  const costSrc = fs.readFileSync(path.join(__dirname, "..", "lib", "backtest", "cost-policy.js"), "utf8");
+  const dataTest = fs.readFileSync(__filename, "utf8");
+  assert.equal(pipeSrc.includes("8Z freeze"), true);
+  assert.equal(pipeSrc.includes("9B freeze"), true);
+  assert.equal(dataSrc.includes("8Z freeze"), true);
+  assert.equal(dataSrc.includes("9B freeze"), true);
+  assert.equal(walkSrc.includes("7W freeze"), true);
+  assert.equal(walkSrc.includes("9B freeze"), true);
+  assert.equal(costSrc.includes("8D freeze"), true);
+  assert.equal(costSrc.includes("9B freeze"), true);
+  assert.equal(dataTest.includes("GATE8Z-Y01"), true);
+});
