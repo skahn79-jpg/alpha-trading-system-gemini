@@ -1367,3 +1367,16 @@ test("GATE8H-G01 freeze pins sellTaxes taxType/amount copy verbatim", () => {
   assert.equal(block.includes("roundingMode"), false);
   assert.equal(src.includes("8H freeze"), true);
 });
+
+test("GATE8I-F01 freeze pins inbound object-spread leftover chapter", () => {
+  const costSrc = fs.readFileSync(path.join(__dirname, "../lib/backtest/cost-policy.js"), "utf8");
+  const lifeSrc = fs.readFileSync(path.join(__dirname, "../lib/backtest/multi-trade-lifecycle.js"), "utf8");
+  const lifeTest = fs.readFileSync(path.join(__dirname, "backtest-multi-trade-lifecycle.test.js"), "utf8");
+  const costTest = fs.readFileSync(__filename, "utf8");
+  assert.equal(lifeSrc.includes("8F freeze"), true);
+  assert.equal(lifeSrc.includes("8I freeze"), true);
+  assert.equal(costSrc.includes("8H freeze"), true);
+  assert.equal(costSrc.includes("8I freeze"), true);
+  assert.equal(lifeTest.includes("GATE8F-E01"), true);
+  assert.equal(costTest.includes("GATE8H-G01"), true);
+});
