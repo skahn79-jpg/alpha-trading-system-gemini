@@ -1384,3 +1384,37 @@ test("GATE6Y-X01 execution isPlainObject still uses proto check", () => {
   assert.equal(execSrc.includes("Object.getPrototypeOf(value)"), true);
   assert.equal(execSrc.includes("proto === Object.prototype || proto === null"), true);
 });
+
+test("GATE8Q-C01 execution makeSafeExecutionError calls spread extra first", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "lib", "backtest", "execution-model.js"), "utf8");
+  assert.equal(src.includes("field: \"symbol\", ...loc"), false);
+  assert.equal(src.includes("field, ...loc"), false);
+  assert.equal(src.includes("field: \"high\", ...loc"), false);
+  assert.equal(src.includes("field: \"volume\", ...loc"), false);
+  assert.equal(src.includes("field: \"candleFinality\", ...loc"), false);
+  assert.equal(src.includes("        ...extra,\n      }));"), false);
+  assert.equal(src.includes("        ...marketLoc,\n      }));"), false);
+  assert.equal(src.includes("    ...(loc || {}),\n  }));"), false);
+  assert.equal(src.includes("        ...(typeof input.market === \"string\" ? { market: input.market } : {}),\n      }));"), false);
+  assert.equal(src.includes("makeSafeExecutionError({ ...loc, code: ERROR.INVALID_SYMBOL, field: \"symbol\" })"), true);
+  assert.equal(src.includes("        ...extra,\n        code: ERROR.UNKNOWN_FIELD,"), true);
+  assert.equal(src.includes("        ...marketLoc,\n        code: ERROR.PRODUCTION_MARKET_NOT_ALLOWED,"), true);
+  assert.equal(src.includes("    ...(loc || {}),\n    code: ERROR.INVALID_TRADING_DATE,"), true);
+});
+
+test("GATE8Q-C02 validateExecutionCandle copies recordIndex and keeps canonical field", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "lib", "backtest", "execution-model.js"), "utf8");
+  const result = validateExecutionCandle({ symbol: "NOSYNTH" }, 3);
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.length > 0, true);
+  for (const err of result.errors) {
+    if (Object.prototype.hasOwnProperty.call(err, "recordIndex")) {
+      assert.equal(err.recordIndex, 3);
+    }
+  }
+  const symbolErr = result.errors.find((e) => e.code === ERROR.INVALID_SYMBOL);
+  assert.equal(Boolean(symbolErr), true);
+  assert.equal(symbolErr.field, "symbol");
+  assert.equal(symbolErr.recordIndex, 3);
+  assert.equal(src.includes("makeSafeExecutionError({ ...loc, code: ERROR.INVALID_SYMBOL, field: \"symbol\" })"), true);
+});
