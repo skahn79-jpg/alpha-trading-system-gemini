@@ -3610,3 +3610,28 @@ test("GATE7Z-C01 baseResultMeta does not carry array fields", () => {
   assert.equal(block.includes("warnings"), false);
 });
 
+test("GATE8A-Z01 freeze pins baseResultMeta return keys verbatim", () => {
+  const src = fs.readFileSync(PIPELINE_PATH, "utf8");
+  const start = src.indexOf("function baseResultMeta");
+  const end = src.indexOf("function runSyntheticSingleTradePipeline");
+  assert.equal(start >= 0, true);
+  assert.equal(end > start, true);
+  const block = src.slice(start, end);
+  const expected = `  return {
+    datasetId: dataset.datasetId,
+    datasetVersion: dataset.datasetVersion,
+    calendarId: (dataResult && dataResult.calendarId) || calendar.calendarId || null,
+    calendarVersion: (dataResult && dataResult.calendarVersion) || calendar.calendarVersion || null,
+    symbol: Array.isArray(dataset.symbols) ? dataset.symbols[0] : null,
+    market: Array.isArray(dataset.markets) ? dataset.markets[0] : null,
+    marketContractStatus: pipelineMarketContractStatus(
+      Array.isArray(dataset.markets) ? dataset.markets[0] : null,
+    ),
+    quantity: input.execution.quantity,
+  };`;
+  assert.equal(block.includes(expected), true);
+  assert.equal(block.includes("..."), false);
+  assert.equal(block.includes("missingData"), false);
+  assert.equal(block.includes("warnings"), false);
+});
+
