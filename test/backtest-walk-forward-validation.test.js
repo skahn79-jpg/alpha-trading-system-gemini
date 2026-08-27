@@ -14,6 +14,7 @@ const {
   generateWalkForwardWindows,
   runWalkForwardValidation,
   blockedWalkForwardResult,
+  completedWalkForwardResult,
 } = wf;
 
 const {
@@ -2786,4 +2787,33 @@ test("GATE7G-F01 make-error still has GATE 7F freeze", () => {
     "utf8"
   );
   assert.equal(src.includes("GATE 7F freeze"), true);
+});
+
+test("GATE7I-C01 completedWalkForwardResult copies folds array", () => {
+  const folds = [{ foldId: "F1" }];
+  const result = completedWalkForwardResult({ folds });
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.notEqual(result.folds, folds);
+  assert.equal(result.officialFolds, result.folds);
+  assert.equal(result.folds.length, 1);
+  assert.equal(result.folds[0], folds[0]);
+  folds.push({ foldId: "F2" });
+  assert.equal(result.folds.length, 1);
+  assert.notEqual(result.officialFolds, folds);
+  assert.equal(result.liveEligible, false);
+  assert.equal(result.backtestExecutionEligible, false);
+});
+
+test("GATE7I-C02 non-array folds become empty arrays", () => {
+  const result = completedWalkForwardResult({ folds: { foldId: "F1" } });
+  assert.deepEqual(result.folds, []);
+  assert.deepEqual(result.officialFolds, []);
+});
+
+test("GATE7I-H01 train blockedSelectionResult still slices folds", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/train-parameter-selection.js"),
+    "utf8"
+  );
+  assert.equal(src.includes("src.folds.slice()"), true);
 });
