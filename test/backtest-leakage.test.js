@@ -353,3 +353,32 @@ test("GATE7P-O01 pin lifecycle still slices processSingleTrade errors", () => {
   assert.equal(src.includes("7P freeze"), true);
   assert.equal(src.includes("result.errors.slice()"), true);
 });
+
+test("GATE7R-Q01 freeze pins leakage result array slices", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/leakage-guard.js"),
+    "utf8"
+  );
+  assert.equal(src.includes("7R freeze"), true);
+  assert.equal(src.includes("errors.slice()"), true);
+  assert.equal(src.includes("missingData.slice()"), true);
+  assert.equal(src.includes("warnings.slice()"), true);
+});
+
+test("GATE7R-C01 createLeakageResult still copies all three arrays", () => {
+  const errors = [{ code: LEAKAGE_ERROR.INVALID_INPUT }];
+  const missingData = ["featureDataAsOf"];
+  const warnings = [{ code: "W1" }];
+  const result = createLeakageResult(false, errors, missingData, warnings);
+  assert.notEqual(result.errors, errors);
+  assert.notEqual(result.missingData, missingData);
+  assert.notEqual(result.warnings, warnings);
+  errors.push({ code: LEAKAGE_ERROR.MISSING_FIELD });
+  missingData.push("signalCreatedAt");
+  warnings.push({ code: "W2" });
+  assert.equal(result.errors.length, 1);
+  assert.deepEqual(result.missingData, ["featureDataAsOf"]);
+  assert.equal(result.warnings.length, 1);
+  assert.equal(result.backtestExecutionEligible, false);
+  assert.equal(result.promotionEligible, false);
+});
