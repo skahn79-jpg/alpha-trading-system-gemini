@@ -1216,3 +1216,27 @@ test("GATE6Q-G06 non-null non-string severity is preserved", () => {
   const numeric = makeSafeCostError({ code: ERROR.INVALID_INPUT, severity: 0 });
   assert.equal(numeric.severity, 0);
 });
+
+test("GATE7C-C01 late policy-status fail after amounts keeps null leftover amounts", () => {
+  const result = calculateSyntheticTradeCost(makeTrade({
+    policies: [makePolicy({ policyStatus: POLICY_STATUS.VERIFIED })],
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.COST_POLICY_NOT_VERIFIED), true);
+  assert.equal(result.entryAmount, null);
+  assert.equal(result.exitAmount, null);
+  assertNeverEligible(result);
+});
+
+test("GATE7C-C02 early multiply overflow still null amounts", () => {
+  const result = calculateSyntheticTradeCost(makeTrade({
+    quantity: Number.MAX_SAFE_INTEGER,
+    entryPrice: 2,
+    exitPrice: 2,
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.ARITHMETIC_OVERFLOW), true);
+  assert.equal(result.entryAmount, null);
+  assert.equal(result.exitAmount, null);
+  assertNeverEligible(result);
+});

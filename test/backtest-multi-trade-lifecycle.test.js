@@ -1710,3 +1710,13 @@ test("GATE7B-L02 empty tradeIntents BLOCKED has null performance keys", () => {
   assert.equal(hasCode(result, ERROR_CODE.EMPTY_TRADE_INTENTS), true);
   assertNullPerformanceKeys(result);
 });
+
+test("GATE7C-B01 lifecycle still has 7B nullPerformanceFields", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/multi-trade-lifecycle.js"),
+    "utf8"
+  );
+  assert.equal(src.includes("function nullPerformanceFields()"), true);
+  assert.equal(src.includes("...nullPerformanceFields()"), true);
+  assert.equal(src.includes("// 7B: BLOCKED keeps the same null performance keys as COMPLETED."), true);
+});
