@@ -982,3 +982,18 @@ test("GATE8O-C02 validateCalendarDay copies recordIndex and keeps canonical fiel
     assert.notEqual(e.field, "HACK");
   }
 });
+
+test("GATE8P-O01 freeze pins calendar extra spread-first", () => {
+  const src = fs.readFileSync(MODULE_PATH, "utf8");
+  const calTest = fs.readFileSync(__filename, "utf8");
+  assert.equal(src.includes("...extra,\n      code: ERROR.UNKNOWN_FIELD,"), true);
+  assert.equal(src.includes("...base,\n      code: ERROR.MISSING_REQUIRED_FIELD,\n      field: \"days\","), true);
+  assert.equal(src.includes("...meta,\n        code: ERROR.INVALID_TRADING_DATE,\n        field: \"tradingDate\",\n        recordIndex: i,"), true);
+  assert.equal(src.includes("...loc,\n        code: ERROR.CALENDAR_MARKET_MISMATCH,"), true);
+  assert.equal(src.includes(", ...extra"), false);
+  assert.equal(src.includes(", ...meta"), false);
+  assert.equal(src.includes(", ...base"), false);
+  assert.equal(src.includes("8P freeze"), true);
+  assert.equal(calTest.includes("GATE8O-C01"), true);
+  assert.equal(calTest.includes("GATE8O-C02"), true);
+});
