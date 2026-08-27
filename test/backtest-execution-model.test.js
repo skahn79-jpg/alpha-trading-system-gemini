@@ -1418,3 +1418,20 @@ test("GATE8Q-C02 validateExecutionCandle copies recordIndex and keeps canonical 
   assert.equal(symbolErr.recordIndex, 3);
   assert.equal(src.includes("makeSafeExecutionError({ ...loc, code: ERROR.INVALID_SYMBOL, field: \"symbol\" })"), true);
 });
+
+test("GATE8R-Q01 freeze pins execution extra spread-first", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "lib", "backtest", "execution-model.js"), "utf8");
+  const execTest = fs.readFileSync(__filename, "utf8");
+  assert.equal(src.includes("makeSafeExecutionError({ ...loc, code: ERROR.INVALID_SYMBOL, field: \"symbol\" })"), true);
+  assert.equal(src.includes("        ...extra,\n        code: ERROR.UNKNOWN_FIELD,"), true);
+  assert.equal(src.includes("        ...marketLoc,\n        code: ERROR.PRODUCTION_MARKET_NOT_ALLOWED,"), true);
+  assert.equal(src.includes("    ...(loc || {}),\n    code: ERROR.INVALID_TRADING_DATE,"), true);
+  assert.equal(src.includes("field: \"symbol\", ...loc"), false);
+  assert.equal(src.includes("        ...extra,\n      }));"), false);
+  assert.equal(src.includes("        ...marketLoc,\n      }));"), false);
+  assert.equal(src.includes("    ...(loc || {}),\n  }));"), false);
+  assert.equal(src.includes("        ...(typeof input.market === \"string\" ? { market: input.market } : {}),\n      }));"), false);
+  assert.equal(src.includes("8R freeze"), true);
+  assert.equal(execTest.includes("GATE8Q-C01"), true);
+  assert.equal(execTest.includes("GATE8Q-C02"), true);
+});
