@@ -4078,3 +4078,13 @@ test("GATE7L-S01 pin walk-forward still slices embargo date arrays", () => {
   assert.equal(src.includes("window.embargoDates.slice()"), true);
   assert.equal(src.includes("window.postOosEmbargoDates.slice()"), true);
 });
+
+test("GATE7N-M01 train freeze pins embargo date slices", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/train-parameter-selection.js"),
+    "utf8"
+  );
+  assert.equal(src.includes("7N freeze"), true);
+  assert.equal(src.includes("window.embargoDates.slice()"), true);
+  assert.equal(src.includes("window.postOosEmbargoDates.slice()"), true);
+});

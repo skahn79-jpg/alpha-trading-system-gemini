@@ -2863,3 +2863,27 @@ test("GATE7L-W01 fold embargoDates match window contents", () => {
   assert.equal(result.liveEligible, false);
   assert.equal(result.backtestExecutionEligible, false);
 });
+
+test("GATE7N-L01 walk-forward freeze pins embargo date slices", () => {
+  const src = fs.readFileSync(WF_PATH, "utf8");
+  assert.equal(src.includes("7N freeze"), true);
+  assert.equal(src.includes("window.embargoDates.slice()"), true);
+  assert.equal(src.includes("window.postOosEmbargoDates.slice()"), true);
+});
+
+test("GATE7N-C01 fold embargoDates still match window contents", () => {
+  const input = buildWalkForwardInput();
+  const windows = generateWalkForwardWindows({
+    horizonType: input.horizonType,
+    tradingDates: input.tradingDates,
+    trainWindowSize: input.trainWindowSize,
+    oosWindowSize: input.oosWindowSize,
+    stepSize: input.stepSize,
+    embargoTradingDayCount: input.embargoTradingDayCount,
+  });
+  assert.equal(windows.ok, true);
+  const result = runWalkForwardValidation(input);
+  assert.equal(result.folds.length > 0, true);
+  assert.deepEqual(result.folds[0].embargoDates, windows.windows[0].embargoDates);
+  assert.equal(result.liveEligible, false);
+});
