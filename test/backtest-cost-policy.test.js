@@ -1380,3 +1380,17 @@ test("GATE8I-F01 freeze pins inbound object-spread leftover chapter", () => {
   assert.equal(lifeTest.includes("GATE8F-E01"), true);
   assert.equal(costTest.includes("GATE8H-G01"), true);
 });
+
+test("GATE8K-J01 freeze pins leftover-class audit conclusion", () => {
+  const pipeSrc = fs.readFileSync(path.join(__dirname, "../lib/backtest/synthetic-pipeline.js"), "utf8");
+  const lifeSrc = fs.readFileSync(path.join(__dirname, "../lib/backtest/multi-trade-lifecycle.js"), "utf8");
+  const costSrc = fs.readFileSync(path.join(__dirname, "../lib/backtest/cost-policy.js"), "utf8");
+  const costTest = fs.readFileSync(__filename, "utf8");
+  assert.equal(pipeSrc.includes("8K freeze"), true);
+  assert.equal(pipeSrc.includes("7F"), true);
+  assert.equal(lifeSrc.includes("8I freeze"), true);
+  assert.equal(lifeSrc.includes("8K freeze"), true);
+  assert.equal(costSrc.includes("8I freeze"), true);
+  assert.equal(costSrc.includes("8K freeze"), true);
+  assert.equal(costTest.includes("GATE8I-F01"), true);
+});
