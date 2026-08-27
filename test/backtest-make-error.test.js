@@ -528,3 +528,14 @@ test("GATE6V-A01 freeze adapters still delete err.code; calendar null has no cod
     assert.equal(src.includes("delete err.code"), true, name);
   }
 });
+
+
+test("GATE6W-V01 helper freeze still drops object cause and is not frozen", () => {
+  const nested = { nested: 1 };
+  const err = makeBacktestError("ANY_CODE", { cause: nested, field: "trainTotalReturn" });
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "cause"), false);
+  assert.equal(err.field, "trainTotalReturn");
+  assert.equal(Object.isFrozen(err), false);
+  const src = fs.readFileSync(SRC_PATH, "utf8");
+  assert.equal(src.includes("GATE 6V freeze"), true);
+});

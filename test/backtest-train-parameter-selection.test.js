@@ -3676,8 +3676,8 @@ test("GATE6H-S03 two-tile selection OOS overflow keeps severity ERROR and oosMet
 
 test("GATE6H-S04 selection extras cause/candidateId/tradeId still present", () => {
   const src = fs.readFileSync(SEL_PATH, "utf8");
-  assert.equal(src.includes("cause: tradeResult.error.code"), true);
-  assert.equal(src.includes("cause: rootErr.code") || src.includes("cause: build.error.code"), true);
+  assert.equal(src.includes("cause: tradeResult.error.code"), false);
+  assert.equal(src.includes("cause: build.error.code"), false);
   assert.equal(src.includes("{ field: \"periodDates\", tradeId }"), true);
   const r = selectWinnerFromTrainEvaluations([
     { candidateId: "P001", trainTotalReturn: 0.1, status: "BLOCKED" },
@@ -3724,7 +3724,7 @@ test("GATE6I-S03 freeze two-tile OOS MAX_VALUE still severity ERROR field oosMet
 
 test("GATE6I-S04 freeze selection extras cause/candidateId/tradeId still present", () => {
   const src = fs.readFileSync(SEL_PATH, "utf8");
-  assert.equal(src.includes("cause: tradeResult.error.code"), true);
+  assert.equal(src.includes("cause: tradeResult.error.code"), false);
   assert.equal(src.includes("{ field: \"periodDates\", tradeId }"), true);
   const r = selectWinnerFromTrainEvaluations([
     { candidateId: "P001", trainTotalReturn: 0.1, status: "BLOCKED" },
@@ -3809,12 +3809,79 @@ test("GATE6U-R3-S02 later-fold OOS stays off top-level errorCodes", () => {
 test("GATE6U-R3-S03 evaluateTrainCandidate no longer wraps with cause: rootErr.code", () => {
   const src = fs.readFileSync(SEL_PATH, "utf8");
   assert.equal(src.includes("cause: rootErr.code"), false);
-  assert.equal(src.includes("cause: build.error.code"), true);
-  assert.equal(src.includes("cause: tradeResult.error.code"), true);
+  assert.equal(src.includes("cause: build.error.code"), false);
+  assert.equal(src.includes("cause: tradeResult.error.code"), false);
 });
 
 
 test("GATE6V-S01 freeze train nested root stays errorCodes[0]", () => {
+  const pipelineMod = require("../lib/backtest/synthetic-pipeline");
+  const originalPerf = pipelineMod.runSyntheticPerformancePipeline;
+  try {
+    pipelineMod.runSyntheticPerformancePipeline = function patched(input) {
+      const tradeId = String(input.tradeIntents[0].tradeId);
+      if (tradeId.startsWith("WF-0001:") && tradeId.includes(":train:")) {
+        return {
+          pipelineStatus: "BLOCKED_PERFORMANCE_STAGE",
+          errors: [{ code: "R2A_TRAIN_ROOT" }],
+          errorCodes: ["R2A_TRAIN_ROOT"],
+          totalReturn: null,
+        };
+      }
+      return originalPerf(input);
+    };
+    const result = runWalkForwardTrainParameterSelection(buildSelectionInput());
+    assert.equal(result.errorCodes[0], "R2A_TRAIN_ROOT");
+    const evalIdx = result.errorCodes.indexOf(ERROR.TRAIN_CANDIDATE_EVALUATION_FAILED);
+    assert.equal(evalIdx > 0, true);
+    assert.equal(result.failedStage, "TRAIN_SELECTION");
+    assertOfficialLeakageFreeze(result);
+  } finally {
+    pipelineMod.runSyntheticPerformancePipeline = originalPerf;
+  }
+});
+
+
+test("GATE6W-S01 OOS cause wrappers are gone from source", () => {
+  const src = fs.readFileSync(SEL_PATH, "utf8");
+  assert.equal(src.includes("cause: tradeResult.error.code"), false);
+  assert.equal(src.includes("cause: build.error.code"), false);
+  assert.equal(src.includes("cloneNestedRootError"), true);
+});
+
+test("GATE6W-S02 nested OOS build root is errorCodes[0]", () => {
+  const leakageGuard = require("../lib/backtest/leakage-guard");
+  const originalGuard = leakageGuard.assertFeatureWindowNoLookAhead;
+  const input = buildSelectionInput();
+  const windows = walkForward.generateWalkForwardWindows({
+    tradingDates: input.tradingDates,
+    trainWindowSize: input.trainWindowSize,
+    oosWindowSize: input.oosWindowSize,
+    stepSize: input.stepSize,
+    embargoTradingDayCount: input.embargoTradingDayCount,
+    horizonType: input.horizonType,
+  });
+  const oosStarts = new Set(windows.windows.map((w) => w.oosStart));
+  try {
+    leakageGuard.assertFeatureWindowNoLookAhead = function patched(payload) {
+      const asOf = payload && payload.featureAsOfTradingDate;
+      if (oosStarts.has(asOf)) {
+        return { ok: false, errors: [{ code: "W_OOS_ROOT", severity: "ERROR" }] };
+      }
+      return originalGuard(payload);
+    };
+    const result = runWalkForwardTrainParameterSelection(input);
+    assert.equal(result.errorCodes[0], "W_OOS_ROOT");
+    const oosIdx = result.errorCodes.indexOf(ERROR.OOS_FOLD_FAILED);
+    assert.equal(oosIdx > 0, true);
+    assert.equal(result.failedStage, "WALK_FORWARD");
+    assertOfficialLeakageFreeze(result);
+  } finally {
+    leakageGuard.assertFeatureWindowNoLookAhead = originalGuard;
+  }
+});
+
+test("GATE6W-S03 train nested root pin still holds", () => {
   const pipelineMod = require("../lib/backtest/synthetic-pipeline");
   const originalPerf = pipelineMod.runSyntheticPerformancePipeline;
   try {
