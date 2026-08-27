@@ -3907,3 +3907,58 @@ test("GATE6W-S03 train nested root pin still holds", () => {
     pipelineMod.runSyntheticPerformancePipeline = originalPerf;
   }
 });
+
+test("GATE7A-S01 Infinity tile return stores trainTotalReturn null", () => {
+  const pipelineMod = require("../lib/backtest/synthetic-pipeline");
+  const originalPerf = pipelineMod.runSyntheticPerformancePipeline;
+  try {
+    pipelineMod.runSyntheticPerformancePipeline = function patched(input) {
+      const inner = originalPerf(input);
+      return {
+        ...inner,
+        pipelineStatus: PIPELINE_STATUS.COMPLETED_PERFORMANCE_METRICS,
+        totalReturn: Infinity,
+      };
+    };
+    const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
+      tradingDates: generateWeekdayDates("2101-03-01", 22),
+      trainWindowSize: 6,
+      oosWindowSize: 3,
+      stepSize: 11,
+    }));
+    assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+    assert.equal(hasCode(result, ERROR.TRAIN_SELECTION_NONFINITE), true);
+    assert.equal(result.errors[0].code, ERROR.TRAIN_SELECTION_NONFINITE);
+    assert.equal(result.errors[0].field, "trainTotalReturn");
+    assert.equal(Array.isArray(result.folds) && result.folds.length > 0, true);
+    const evidence = result.folds[0].candidateEvaluations;
+    assert.equal(Array.isArray(evidence) && evidence.length > 0, true);
+    for (const row of evidence) {
+      assert.equal(row.trainTotalReturn, null);
+      assert.equal(Number.isFinite(row.trainTotalReturn), false);
+    }
+    assert.equal(JSON.stringify(result).includes("Infinity"), false);
+    assertOfficialLeakageFreeze(result);
+  } finally {
+    pipelineMod.runSyntheticPerformancePipeline = originalPerf;
+  }
+});
+
+test("GATE7A-S02 nonfinite tile path no longer copies pipelineResult.totalReturn", () => {
+  const src = fs.readFileSync(SEL_PATH, "utf8");
+  const start = src.indexOf("if (!isFiniteNumber(pipelineResult.totalReturn))");
+  assert.equal(start >= 0, true);
+  const window = src.slice(start, start + 500);
+  assert.equal(window.includes("trainTotalReturn: pipelineResult.totalReturn"), false);
+  assert.equal(window.includes("evaluation: blockedEval"), true);
+  const meanStart = src.indexOf("const meanResult = assertFiniteEqualWeightedMean(tileReturns);");
+  assert.equal(meanStart >= 0, true);
+  const meanWindow = src.slice(meanStart, meanStart + 500);
+  assert.equal(meanWindow.includes("trainTotalReturn: null"), true);
+});
+
+test("GATE7A-Z01 late INVALID_BENCHMARK_INPUT still first-failure-wins field", () => {
+  const benchPath = path.join(__dirname, "..", "lib", "backtest", "benchmark-performance.js");
+  const src = fs.readFileSync(benchPath, "utf8");
+  assert.equal(src.includes('const field = !isFiniteNumber(benchmarkReturn) ? "benchmarkReturn" : "alpha";'), true);
+});
