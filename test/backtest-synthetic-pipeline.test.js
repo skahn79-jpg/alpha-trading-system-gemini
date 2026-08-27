@@ -3472,3 +3472,47 @@ test("GATE6S-G06 empty-string and WARNING severity are preserved", () => {
   const numeric = makeSafePipelineError({ code: ERROR.INVALID_INPUT, severity: 0 });
   assert.equal(numeric.severity, 0);
 });
+
+test("GATE6U-R2-P01 DATA block sets failedStage DATA", () => {
+  const input = validPipelineInput();
+  input.dataset.candles[0].volume = -1;
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_DATA_STAGE);
+  assert.equal(result.failedStage, STAGE.DATA);
+  assert.equal(result.dataStageStatus, STAGE_STATUS.FAILED);
+  assert.equal(result.calendarVerified, false);
+  assert.equal(result.datasetVerified, false);
+  assert.equal(result.backtestExecutionEligible, false);
+  assert.equal(result.paperEligible, false);
+  assert.equal(result.liveEligible, false);
+});
+
+test("GATE6U-R2-P02 EXECUTION block sets failedStage EXECUTION", () => {
+  const input = validPipelineInput();
+  input.execution.exitPolicy.stopLossPrice = "bad";
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_EXECUTION_STAGE);
+  assert.equal(result.failedStage, STAGE.EXECUTION);
+  assert.equal(result.executionStageStatus, STAGE_STATUS.FAILED);
+  assert.equal(result.calendarVerified, false);
+  assert.equal(result.liveEligible, false);
+});
+
+test("GATE6U-R2-P03 COST block sets failedStage COST", () => {
+  const input = validPipelineInput();
+  input.cost.policies = [];
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_COST_STAGE);
+  assert.equal(result.failedStage, STAGE.COST);
+  assert.equal(result.costStageStatus, STAGE_STATUS.FAILED);
+  assert.equal(result.calendarVerified, false);
+  assert.equal(result.liveEligible, false);
+});
+
+test("GATE6U-R2-P04 completed pipeline failedStage is null", () => {
+  const result = runSyntheticSingleTradePipeline(validPipelineInput());
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE);
+  assert.equal(result.failedStage, null);
+  assert.equal(result.calendarVerified, false);
+  assert.equal(result.liveEligible, false);
+});
