@@ -1764,3 +1764,35 @@ test("GATE7P-L01 local-owned error arrays stay unsliced", () => {
   assert.equal(src.includes("marketErrors.slice()"), false);
   assert.equal(src.includes("allErrors.slice()"), false);
 });
+
+test("GATE8E-C01 cost-fail errors fold through makeError not object spread", () => {
+  const src = fs.readFileSync(LIFECYCLE_SRC_PATH, "utf8");
+  const start = src.indexOf("if (costResult.ok !== true)");
+  const end = src.indexOf("ERROR_CODE.COST_STAGE_FAILED", start);
+  assert.equal(start >= 0, true);
+  assert.equal(end > start, true);
+  const block = src.slice(start, end);
+  assert.equal(block.includes("{ ...e"), false);
+  assert.equal(block.includes("makeError(e && e.code"), true);
+});
+
+test("GATE8E-C02 copied cost error keeps tradeId and tradeIndex", () => {
+  const fx = build2TradeKospiFixture();
+  const kosdaqCost = {
+    ...fx.cost,
+    policies: [makePolicy({ policyId: "synthetic-cost-kosdaq-v1", market: MARKET.SYNTHETIC_KOSDAQ })],
+  };
+  const result = runSyntheticMultiTradeLifecycle({
+    dataset: fx.dataset, calendar: fx.calendar,
+    calendarValidation: fx.calendarValidation, cost: kosdaqCost,
+    tradeIntents: fx.tradeIntents, calculationMode: fx.calculationMode,
+  });
+  assert.equal(result.lifecycleStatus, LIFECYCLE_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR_CODE.COST_STAGE_FAILED), true);
+  const tagged = result.errors.filter((e) => e && e.tradeId != null && e.code !== ERROR_CODE.COST_STAGE_FAILED);
+  assert.equal(tagged.length > 0, true);
+  assert.equal(typeof tagged[0].tradeId, "string");
+  assert.equal(Number.isInteger(tagged[0].tradeIndex), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(tagged[0], "junkKey"), false);
+});
+
