@@ -10,6 +10,7 @@ const {
   LEDGER_EVENT_TYPE,
   ERROR,
   runPortfolioLedger,
+  blockedResult,
 } = ledger;
 
 const {
@@ -976,4 +977,28 @@ test("GATE6K-L03 insufficient cash keeps tradeId/tradingDate and severity ERROR"
   assert.equal(result.errors[0].tradeId, "T1");
   assert.equal(typeof result.errors[0].tradingDate, "string");
   assert.equal(result.errors[0].severity, "ERROR");
+});
+
+test("GATE7U-C01 blockedResult copies errors array", () => {
+  const errors = [{ code: ERROR.INVALID_INPUT }];
+  const result = blockedResult(errors);
+  assert.equal(result.portfolioStatus, PORTFOLIO_STATUS.BLOCKED);
+  assert.notEqual(result.errors, errors);
+  assert.equal(result.errors.length, 1);
+  assert.deepEqual(result.errorCodes, [ERROR.INVALID_INPUT]);
+  errors.push({ code: ERROR.INVALID_QUANTITY });
+  assert.equal(result.errors.length, 1);
+  assert.deepEqual(result.errorCodes, [ERROR.INVALID_INPUT]);
+  assert.equal(result.liveEligible, false);
+  assert.equal(result.backtestExecutionEligible, false);
+  assert.equal(result.promotionEligible, false);
+});
+
+test("GATE7U-C02 blockedResult non-array becomes []", () => {
+  const fromNull = blockedResult(null);
+  assert.deepEqual(fromNull.errors, []);
+  assert.deepEqual(fromNull.errorCodes, []);
+  const fromObj = blockedResult({ length: 1 });
+  assert.deepEqual(fromObj.errors, []);
+  assert.deepEqual(fromObj.errorCodes, []);
 });
