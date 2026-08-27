@@ -1352,3 +1352,28 @@ test("GATE6R-G06 empty-string and WARNING severity are preserved", () => {
   const numeric = makeSafeExecutionError({ code: ERROR.INVALID_INPUT, severity: 0 });
   assert.equal(numeric.severity, 0);
 });
+
+
+test("GATE6X-E01 execution isPlainObject uses proto check like the other adapters", () => {
+  const backtestRoot = path.join(__dirname, "..", "lib", "backtest");
+  const execSrc = fs.readFileSync(path.join(backtestRoot, "execution-model.js"), "utf8");
+  assert.equal(execSrc.includes("Object.getPrototypeOf(value)"), true);
+  assert.equal(execSrc.includes("proto === Object.prototype || proto === null"), true);
+  for (const name of ["calendar-validation.js", "cost-policy.js", "synthetic-pipeline.js"]) {
+    const src = fs.readFileSync(path.join(backtestRoot, name), "utf8");
+    assert.equal(src.includes("Object.getPrototypeOf(value)"), true, name);
+    assert.equal(src.includes("proto === Object.prototype || proto === null"), true, name);
+  }
+});
+
+test("GATE6X-E02 Date is non-plain; plain extra still copies; null has no code", () => {
+  const dated = makeSafeExecutionError(new Date());
+  assert.deepEqual(dated, { severity: "ERROR" });
+  assert.equal(Object.prototype.hasOwnProperty.call(dated, "code"), false);
+  const copied = makeSafeExecutionError({ code: "X", field: "orderType" });
+  assert.equal(copied.code, "X");
+  assert.equal(copied.field, "orderType");
+  const raw = makeSafeExecutionError(null);
+  assert.deepEqual(raw, { severity: "ERROR" });
+  assert.equal(Object.prototype.hasOwnProperty.call(raw, "code"), false);
+});
