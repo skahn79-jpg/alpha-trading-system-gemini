@@ -1394,3 +1394,27 @@ test("GATE8K-J01 freeze pins leftover-class audit conclusion", () => {
   assert.equal(costSrc.includes("8K freeze"), true);
   assert.equal(costTest.includes("GATE8I-F01"), true);
 });
+
+test("GATE8M-C01 cost makeSafeCostError calls spread extra first", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../lib/backtest/cost-policy.js"), "utf8");
+  assert.equal(src.includes(", ...extra"), false);
+  assert.equal(src.includes(", ...taxExtra"), false);
+  assert.equal(src.includes("{ ...extra"), true);
+  assert.equal(src.includes("{ ...taxExtra"), true);
+});
+
+test("GATE8M-C02 validateCostPolicy copies recordIndex and keeps canonical field", () => {
+  const result = validateCostPolicy(
+    makePolicy({ commission: { buyRatePpm: -1 } }),
+    { recordIndex: 3 }
+  );
+  assert.equal(result.ok, false);
+  const rateErr = result.errors.find((e) => e.field === "commission.buyRatePpm");
+  assert.equal(Boolean(rateErr), true);
+  assert.equal(rateErr.recordIndex, 3);
+  assert.equal(rateErr.code, ERROR.INVALID_RATE_PPM);
+  for (const err of result.errors) {
+    assert.equal(err.recordIndex, 3);
+    assert.notEqual(err.field, "HACK");
+  }
+});
