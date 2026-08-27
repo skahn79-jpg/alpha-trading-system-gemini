@@ -13,6 +13,7 @@ const {
   AGGREGATE_DEFINITION,
   generateWalkForwardWindows,
   runWalkForwardValidation,
+  blockedWalkForwardResult,
 } = wf;
 
 const {
@@ -2757,4 +2758,32 @@ test("GATE6V-W01 freeze nested DATA fail stays root-first with failedStage DATA"
   } finally {
     pipelineMod.runSyntheticBenchmarkPipeline = original;
   }
+});
+
+test("GATE7G-W01 blockedWalkForwardResult copies folds array", () => {
+  const folds = [{ foldId: "F1" }];
+  const result = blockedWalkForwardResult({ folds });
+  assert.notEqual(result.folds, folds);
+  assert.equal(result.folds.length, 1);
+  assert.equal(result.folds[0], folds[0]);
+  assert.equal(result.partialFoldResults, result.folds);
+  folds.push({ foldId: "F2" });
+  assert.equal(result.folds.length, 1);
+  assert.notEqual(result.partialFoldResults, folds);
+  assert.equal(result.liveEligible, false);
+  assert.equal(result.backtestExecutionEligible, false);
+});
+
+test("GATE7G-W02 non-array folds become empty array", () => {
+  const result = blockedWalkForwardResult({ folds: { foldId: "F1" } });
+  assert.deepEqual(result.folds, []);
+  assert.deepEqual(result.partialFoldResults, []);
+});
+
+test("GATE7G-F01 make-error still has GATE 7F freeze", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/make-error.js"),
+    "utf8"
+  );
+  assert.equal(src.includes("GATE 7F freeze"), true);
 });
