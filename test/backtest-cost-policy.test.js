@@ -1240,3 +1240,9 @@ test("GATE7C-C02 early multiply overflow still null amounts", () => {
   assert.equal(result.exitAmount, null);
   assertNeverEligible(result);
 });
+
+test("GATE7F-A01 makeSafeCostError still drops null extras", () => {
+  const err = makeSafeCostError({ code: ERROR.INVALID_INPUT, field: null });
+  assert.equal(err.code, ERROR.INVALID_INPUT);
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "field"), false);
+});

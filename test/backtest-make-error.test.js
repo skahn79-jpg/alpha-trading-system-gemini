@@ -548,3 +548,11 @@ test("GATE6X-V01 helper freeze still drops object cause and is not frozen", () =
   assert.equal(err.field, "trainTotalReturn");
   assert.equal(Object.isFrozen(err), false);
 });
+
+test("GATE7F-H01 helper copies null extras", () => {
+  const err = makeBacktestError("ANY_CODE", { field: null });
+  assert.equal(Object.prototype.hasOwnProperty.call(err, "field"), true);
+  assert.equal(err.field, null);
+  const src = fs.readFileSync(SRC_PATH, "utf8");
+  assert.equal(src.includes("GATE 7F freeze"), true);
+});

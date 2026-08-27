@@ -3588,3 +3588,11 @@ test("GATE7E-D01 data-validation still slices warnings", () => {
   );
   assert.equal(src.includes("src.warnings.slice()"), true);
 });
+
+test("GATE7F-E01 pipeline still slices closedTrades", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/synthetic-pipeline.js"),
+    "utf8"
+  );
+  assert.equal(src.includes("src.closedTrades.slice()"), true);
+});
