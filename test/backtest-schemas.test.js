@@ -391,6 +391,16 @@ test("GATE7S-C02 resultFail empty or non-array becomes INVALID_INPUT", () => {
   assert.deepEqual(fromObj.errors, [{ code: PERFORMANCE_STATUS.INVALID_INPUT, field: null }]);
 });
 
+
+test("GATE7T-S01 freeze pins resultFail errors slice", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/schemas.js"),
+    "utf8"
+  );
+  assert.equal(src.includes("7T freeze"), true);
+  assert.equal(src.includes("errors.slice()"), true);
+});
+
 test("lib/backtest 소스에 주문·네트워크 경로가 없다", () => {
   const files = [
     path.join(__dirname, "../lib/backtest/schemas.js"),
