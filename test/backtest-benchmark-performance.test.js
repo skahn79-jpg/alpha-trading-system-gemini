@@ -639,3 +639,48 @@ test("GATE6J-B02 blocked performanceStatus keeps field and severity ERROR", () =
   assert.equal(result.errors[0].field, "performanceStatus");
   assert.equal(result.errors[0].severity, "ERROR");
 });
+
+test("GATE6Z-B01 overflow benchmarkReturn sets field benchmarkReturn", () => {
+  const result = calculateBenchmarkPerformance(buildValidInput({
+    benchmarkSeries: [
+      { tradingDate: "2101-03-01", close: Number.MIN_VALUE },
+      { tradingDate: "2101-03-02", close: 1 },
+      { tradingDate: "2101-03-03", close: 1 },
+      { tradingDate: "2101-03-04", close: Number.MAX_VALUE },
+    ],
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.benchmarkStatus, BENCHMARK_STATUS.BLOCKED);
+  assert.equal(result.errorCodes[0], ERROR.INVALID_BENCHMARK_INPUT);
+  assert.equal(result.errors[0].code, ERROR.INVALID_BENCHMARK_INPUT);
+  assert.equal(result.errors[0].field, "benchmarkReturn");
+  assert.equal(result.errors[0].severity, "ERROR");
+});
+
+test("GATE6Z-B02 finite return with overflow alpha sets field alpha", () => {
+  const result = calculateBenchmarkPerformance(buildValidInput({
+    strategyTotalReturn: -Number.MAX_VALUE,
+    benchmarkSeries: [
+      { tradingDate: "2101-03-01", close: 2 },
+      { tradingDate: "2101-03-02", close: 2 },
+      { tradingDate: "2101-03-03", close: 2 },
+      { tradingDate: "2101-03-04", close: Number.MAX_VALUE },
+    ],
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.benchmarkStatus, BENCHMARK_STATUS.BLOCKED);
+  assert.equal(result.errorCodes[0], ERROR.INVALID_BENCHMARK_INPUT);
+  assert.equal(result.errors[0].code, ERROR.INVALID_BENCHMARK_INPUT);
+  assert.equal(result.errors[0].field, "alpha");
+  assert.equal(result.errors[0].severity, "ERROR");
+});
+
+test("GATE6Z-Y01 DATA invariant wrap still appends DATA_STAGE_FAILED", () => {
+  const pipelinePath = path.join(__dirname, "..", "lib", "backtest", "synthetic-pipeline.js");
+  const src = fs.readFileSync(pipelinePath, "utf8");
+  const start = src.indexOf("const dataInvariantErrors = collectDataMarketInvariantErrors(input);");
+  assert.equal(start >= 0, true);
+  const window = src.slice(start, start + 900);
+  assert.equal(window.includes("dataInvariantErrors.slice()"), true);
+  assert.equal(window.includes("ERROR.DATA_STAGE_FAILED"), true);
+});
