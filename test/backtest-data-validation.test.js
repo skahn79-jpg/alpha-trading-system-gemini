@@ -1723,3 +1723,26 @@ test("GATE8U-T01 freeze pins allowlist extra leftover chapter closed", () => {
   assert.equal(execTest.includes("GATE8R-Q01"), true);
   assert.equal(dataTest.includes("GATE8T-S01"), true);
 });
+
+test("GATE8X-C01 calendar integration out spreads identity first", () => {
+  const src = fs.readFileSync(DATA_VALIDATION_PATH, "utf8");
+  assert.equal(src.includes("    ...identity,\n    errors: [],"), true);
+  assert.equal(src.includes("    calendarValidationStatus: STATUS.BLOCKED_SYNTHETIC_CALENDAR_VALIDATION,\n    ...identity,"), false);
+  assert.equal(src.includes("    ...identity,\n  };"), false);
+});
+
+test("GATE8X-C02 calendarIdentity stays calendarId and calendarVersion only", () => {
+  const src = fs.readFileSync(DATA_VALIDATION_PATH, "utf8");
+  const identity = `function calendarIdentity(calendar) {
+  const out = {};
+  if (isPlainObject(calendar)) {
+    if (typeof calendar.calendarId === "string") out.calendarId = calendar.calendarId;
+    if (typeof calendar.calendarVersion === "string") out.calendarVersion = calendar.calendarVersion;
+  }
+  return out;
+}`;
+  assert.equal(src.includes(identity), true);
+  assert.equal(identity.includes("errors"), false);
+  assert.equal(src.includes("    calendarValidationStatus: STATUS.BLOCKED_SYNTHETIC_CALENDAR_VALIDATION,\n    ...identity,"), false);
+  assert.equal(src.includes("    ...identity,\n  };"), false);
+});
