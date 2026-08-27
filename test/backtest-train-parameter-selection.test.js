@@ -25,6 +25,7 @@ const {
   runWalkForwardTrainParameterSelection,
   sliceFeatureWindow,
   assertCausalTradeTiming,
+  blockedSelectionResult,
 } = sel;
 
 const walkForward = require("../lib/backtest/walk-forward-validation");
@@ -3970,4 +3971,32 @@ test("GATE7B-A01 nonfinite tile path still uses blockedEval", () => {
   const window = src.slice(start, start + 500);
   assert.equal(window.includes("evaluation: blockedEval"), true);
   assert.equal(window.includes("trainTotalReturn: pipelineResult.totalReturn"), false);
+});
+
+test("GATE7H-S01 blockedSelectionResult copies folds array", () => {
+  const folds = [{ foldId: "F1" }];
+  const result = blockedSelectionResult({ folds });
+  assert.notEqual(result.folds, folds);
+  assert.equal(result.folds.length, 1);
+  assert.equal(result.folds[0], folds[0]);
+  assert.equal(result.partialFoldResults, result.folds);
+  folds.push({ foldId: "F2" });
+  assert.equal(result.folds.length, 1);
+  assert.notEqual(result.partialFoldResults, folds);
+  assert.equal(result.liveEligible, false);
+  assert.equal(result.backtestExecutionEligible, false);
+});
+
+test("GATE7H-S02 non-array folds become empty array", () => {
+  const result = blockedSelectionResult({ folds: { foldId: "F1" } });
+  assert.deepEqual(result.folds, []);
+  assert.deepEqual(result.partialFoldResults, []);
+});
+
+test("GATE7H-G01 walk-forward still slices blocked folds", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "../lib/backtest/walk-forward-validation.js"),
+    "utf8"
+  );
+  assert.equal(src.includes("src.folds.slice()"), true);
 });
