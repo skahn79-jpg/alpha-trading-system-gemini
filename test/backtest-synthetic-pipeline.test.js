@@ -3598,3 +3598,15 @@ test("GATE7F-E01 pipeline still slices closedTrades", () => {
   );
   assert.equal(src.includes("src.closedTrades.slice()"), true);
 });
+
+test("GATE7Z-C01 baseResultMeta does not carry array fields", () => {
+  const src = fs.readFileSync(PIPELINE_PATH, "utf8");
+  const start = src.indexOf("function baseResultMeta");
+  const end = src.indexOf("function runSyntheticSingleTradePipeline");
+  assert.equal(start >= 0, true);
+  assert.equal(end > start, true);
+  const block = src.slice(start, end);
+  assert.equal(block.includes("missingData"), false);
+  assert.equal(block.includes("warnings"), false);
+});
+
