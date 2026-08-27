@@ -1536,9 +1536,11 @@ test("GATE5O-R1-E01 Train→OOS mixed; firstFailure is Train", () => {
     };
     const result = runWalkForwardTrainParameterSelection(buildSelectionInput());
     assert.equal(result.failedStage, "TRAIN_SELECTION");
-    assert.equal(result.errors[0].code, ERROR.TRAIN_CANDIDATE_EVALUATION_FAILED);
-    assert.equal(result.errors[0].cause, "TRAIN_ROOT_WF1");
-    assert.equal(result.errors[1].code, ERROR.TRAIN_SELECTION_STAGE_FAILED);
+    assert.equal(result.errors[0].code, "TRAIN_ROOT_WF1");
+    assert.equal(result.errorCodes[0], "TRAIN_ROOT_WF1");
+    const evalIdx = result.errorCodes.indexOf(ERROR.TRAIN_CANDIDATE_EVALUATION_FAILED);
+    assert.equal(evalIdx > 0, true);
+    assert.equal(hasCode(result, ERROR.TRAIN_SELECTION_STAGE_FAILED), true);
     assert.equal(hasCode(result, ERROR.WALK_FORWARD_STAGE_FAILED), true);
     assert.equal(result.errorCodes.includes("OOS_ROOT_WF2"), false);
     const fold2 = result.folds.find((f) => f.foldId === "WF-0002");
@@ -1619,7 +1621,8 @@ test("GATE5O-R1-E03 multi Train; first Train root wins", () => {
     };
     const result = runWalkForwardTrainParameterSelection(buildSelectionInput());
     assert.equal(result.failedStage, "TRAIN_SELECTION");
-    assert.equal(result.errors[0].cause, "TRAIN_ROOT_A");
+    assert.equal(result.errors[0].code, "TRAIN_ROOT_A");
+    assert.equal(result.errorCodes[0], "TRAIN_ROOT_A");
     assert.equal(result.errorCodes.includes("TRAIN_ROOT_B"), false);
     const fold2 = result.folds.find((f) => f.foldId === "WF-0002");
     assert.equal(fold2.errorCodes.some((c) => c === ERROR.TRAIN_CANDIDATE_EVALUATION_FAILED), true);
@@ -2186,13 +2189,14 @@ test("GATE5O-R2A-A train-first then OOS-later keeps exact official errors", () =
     };
 
     const result = runWalkForwardTrainParameterSelection(buildSelectionInput());
-    assert.deepEqual(result.errorCodes, [
-      ERROR.TRAIN_CANDIDATE_EVALUATION_FAILED,
-      ERROR.TRAIN_SELECTION_STAGE_FAILED,
-      ERROR.WALK_FORWARD_STAGE_FAILED,
-    ]);
+    assert.equal(result.errorCodes[0], "R2A_TRAIN_ROOT");
+    const rootIdx = result.errorCodes.indexOf("R2A_TRAIN_ROOT");
+    const evalIdx = result.errorCodes.indexOf(ERROR.TRAIN_CANDIDATE_EVALUATION_FAILED);
+    const selIdx = result.errorCodes.indexOf(ERROR.TRAIN_SELECTION_STAGE_FAILED);
+    const wfIdx = result.errorCodes.indexOf(ERROR.WALK_FORWARD_STAGE_FAILED);
+    assert.equal(rootIdx > -1 && evalIdx > rootIdx && selIdx > evalIdx && wfIdx > selIdx, true);
     assert.equal(result.failedStage, "TRAIN_SELECTION");
-    assert.equal(result.errors[0].cause, "R2A_TRAIN_ROOT");
+    assert.equal(result.errors[0].code, "R2A_TRAIN_ROOT");
     assert.equal(result.errorCodes.includes("R2A_OOS_LATER"), false);
     assert.equal(
       result.folds.find((fold) => fold.foldId === "WF-0002").errorCodes.includes("R2A_OOS_LATER"),
@@ -2701,10 +2705,10 @@ test("GATE5P-P08 multi-fail permutation keeps first official root", () => {
       ...shared,
       parameterCandidates: shared.parameterCandidates.slice().reverse(),
     }));
-    assert.equal(r1.errors[0].cause, "ROOT_P001");
-    assert.equal(r2.errors[0].cause, "ROOT_P001");
+    assert.equal(r1.errors[0].code, "ROOT_P001");
+    assert.equal(r2.errors[0].code, "ROOT_P001");
     assert.equal(r1.failedStage, r2.failedStage);
-    assert.equal(r1.errors[0].code, ERROR.TRAIN_CANDIDATE_EVALUATION_FAILED);
+    assert.equal(hasCode(r1, ERROR.TRAIN_CANDIDATE_EVALUATION_FAILED), true);
   } finally {
     pipelineMod.runSyntheticPerformancePipeline = originalPerf;
   }
@@ -2731,7 +2735,7 @@ test("GATE5P-P09 multi-tile first-root is candidate pipeline failure", () => {
       tradingDates: generateWeekdayDates("2101-03-01", 22),
     }));
     assert.equal(result.failedStage, "TRAIN_SELECTION");
-    assert.equal(result.errors[0].cause, "MULTI_TILE_ROOT");
+    assert.equal(result.errors[0].code, "MULTI_TILE_ROOT");
     assert.equal(hasCode(result, ERROR.TRAIN_CANDIDATE_EVALUATION_FAILED), true);
   } finally {
     pipelineMod.runSyntheticPerformancePipeline = originalPerf;
@@ -3728,4 +3732,83 @@ test("GATE6I-S04 freeze selection extras cause/candidateId/tradeId still present
   assert.equal(r.ok, false);
   assert.equal(r.error.candidateId, "P001");
   assert.equal(r.error.severity, "ERROR");
+});
+
+
+test("GATE6U-R3-S01 nested train pipeline root is errorCodes[0]", () => {
+  const pipelineMod = require("../lib/backtest/synthetic-pipeline");
+  const originalPerf = pipelineMod.runSyntheticPerformancePipeline;
+  try {
+    pipelineMod.runSyntheticPerformancePipeline = function patched(input) {
+      const tradeId = String(input.tradeIntents[0].tradeId);
+      if (tradeId.startsWith("WF-0001:") && tradeId.includes(":train:")) {
+        return {
+          pipelineStatus: "BLOCKED_PERFORMANCE_STAGE",
+          errors: [{ code: "R2A_TRAIN_ROOT" }],
+          errorCodes: ["R2A_TRAIN_ROOT"],
+          totalReturn: null,
+        };
+      }
+      return originalPerf(input);
+    };
+    const result = runWalkForwardTrainParameterSelection(buildSelectionInput());
+    assert.equal(result.errorCodes[0], "R2A_TRAIN_ROOT");
+    assert.equal(result.errors[0].code, "R2A_TRAIN_ROOT");
+    const evalIdx = result.errorCodes.indexOf(ERROR.TRAIN_CANDIDATE_EVALUATION_FAILED);
+    assert.equal(evalIdx > 0, true);
+    assert.equal(result.failedStage, "TRAIN_SELECTION");
+    assertOfficialLeakageFreeze(result);
+  } finally {
+    pipelineMod.runSyntheticPerformancePipeline = originalPerf;
+  }
+});
+
+test("GATE6U-R3-S02 later-fold OOS stays off top-level errorCodes", () => {
+  const pipelineMod = require("../lib/backtest/synthetic-pipeline");
+  const originalPerf = pipelineMod.runSyntheticPerformancePipeline;
+  const originalBench = pipelineMod.runSyntheticBenchmarkPipeline;
+  try {
+    pipelineMod.runSyntheticPerformancePipeline = function patched(input) {
+      const tradeId = String(input.tradeIntents[0].tradeId);
+      if (tradeId.startsWith("WF-0001:") && tradeId.includes(":train:")) {
+        return {
+          pipelineStatus: "BLOCKED_PERFORMANCE_STAGE",
+          errors: [{ code: "R2A_TRAIN_ROOT" }],
+          errorCodes: ["R2A_TRAIN_ROOT"],
+          totalReturn: null,
+        };
+      }
+      return originalPerf(input);
+    };
+    pipelineMod.runSyntheticBenchmarkPipeline = function patched(input) {
+      if (String(input.tradeIntents[0].tradeId).startsWith("WF-0002:oos:")) {
+        return {
+          pipelineStatus: "BLOCKED_BENCHMARK_STAGE",
+          errors: [{ code: "R2A_OOS_LATER" }],
+          errorCodes: ["R2A_OOS_LATER"],
+          totalReturn: null,
+          benchmarkReturn: null,
+          alpha: null,
+        };
+      }
+      return originalBench(input);
+    };
+    const result = runWalkForwardTrainParameterSelection(buildSelectionInput());
+    assert.equal(result.errorCodes.includes("R2A_OOS_LATER"), false);
+    assert.equal(
+      result.folds.find((fold) => fold.foldId === "WF-0002").errorCodes.includes("R2A_OOS_LATER"),
+      true,
+    );
+    assert.equal(result.failedStage, "TRAIN_SELECTION");
+  } finally {
+    pipelineMod.runSyntheticPerformancePipeline = originalPerf;
+    pipelineMod.runSyntheticBenchmarkPipeline = originalBench;
+  }
+});
+
+test("GATE6U-R3-S03 evaluateTrainCandidate no longer wraps with cause: rootErr.code", () => {
+  const src = fs.readFileSync(SEL_PATH, "utf8");
+  assert.equal(src.includes("cause: rootErr.code"), false);
+  assert.equal(src.includes("cause: build.error.code"), true);
+  assert.equal(src.includes("cause: tradeResult.error.code"), true);
 });

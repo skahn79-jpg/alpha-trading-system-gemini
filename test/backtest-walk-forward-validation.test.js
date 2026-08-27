@@ -2633,12 +2633,12 @@ test("GATE6U-R1-W04 top-level nested fail stays root-first then summaries", () =
   }
 });
 
-test("GATE6U-R1-W05 train-parameter-selection 5O cause wrapper untouched", () => {
+test("GATE6U-R1-W05 train-parameter-selection 5O cause wrapper removed by 6U-R3", () => {
   const src = fs.readFileSync(
     path.join(__dirname, "..", "lib", "backtest", "train-parameter-selection.js"),
     "utf8",
   );
-  assert.equal(src.includes("cause: rootErr.code"), true);
+  assert.equal(src.includes("cause: rootErr.code"), false);
 });
 
 test("GATE6U-R2-W01 nested DATA pipeline fail copies failedStage DATA", () => {
@@ -2678,13 +2678,13 @@ test("GATE6U-R2-W02 invalid initialCapital stays failedStage WALK_FORWARD", () =
   assertOfficialLeakageFreeze(result);
 });
 
-test("GATE6U-R2-W03 train-parameter-selection 5O failedStage and cause untouched", () => {
+test("GATE6U-R2-W03 train-parameter-selection failedStage TRAIN_SELECTION stays", () => {
   const src = fs.readFileSync(
     path.join(__dirname, "..", "lib", "backtest", "train-parameter-selection.js"),
     "utf8",
   );
   assert.equal(src.includes('failedStage: "TRAIN_SELECTION"'), true);
-  assert.equal(src.includes("cause: rootErr.code"), true);
+  assert.equal(src.includes("cause: rootErr.code"), false);
 });
 
 test("GATE6U-R2-W04 local tile overflow stays failedStage WALK_FORWARD", () => {
@@ -2695,4 +2695,35 @@ test("GATE6U-R2-W04 local tile overflow stays failedStage WALK_FORWARD", () => {
   assert.equal(result.failedStage, "WALK_FORWARD");
   assert.equal(result.errors[0].code, ERROR.OOS_FOLD_FAILED);
   assertOfficialLeakageFreeze(result);
+});
+
+
+test("GATE6U-R3-W01 walk-forward 6U-R1/R2 pins still hold", () => {
+  const original = pipelineMod.runSyntheticBenchmarkPipeline;
+  try {
+    pipelineMod.runSyntheticBenchmarkPipeline = function patched() {
+      return {
+        pipelineStatus: "BLOCKED_DATA_STAGE",
+        failedStage: "DATA",
+        totalReturn: null,
+        benchmarkReturn: null,
+        alpha: null,
+        errors: [
+          { code: "CALENDAR_MARKET_MISMATCH", severity: "ERROR" },
+          { code: "DATA_STAGE_FAILED", severity: "ERROR" },
+        ],
+        errorCodes: ["CALENDAR_MARKET_MISMATCH", "DATA_STAGE_FAILED"],
+      };
+    };
+    const result = runWalkForwardValidation(buildWalkForwardInput());
+    assert.equal(result.errorCodes[0], "CALENDAR_MARKET_MISMATCH");
+    const rootIdx = result.errorCodes.indexOf("CALENDAR_MARKET_MISMATCH");
+    const oosIdx = result.errorCodes.indexOf(ERROR.OOS_FOLD_FAILED);
+    const wfIdx = result.errorCodes.indexOf(ERROR.WALK_FORWARD_STAGE_FAILED);
+    assert.equal(rootIdx < oosIdx && oosIdx < wfIdx, true);
+    assert.equal(result.failedStage, "DATA");
+    assertOfficialLeakageFreeze(result);
+  } finally {
+    pipelineMod.runSyntheticBenchmarkPipeline = original;
+  }
 });
