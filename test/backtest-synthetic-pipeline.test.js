@@ -3635,3 +3635,27 @@ test("GATE8A-Z01 freeze pins baseResultMeta return keys verbatim", () => {
   assert.equal(block.includes("warnings"), false);
 });
 
+test("GATE8B-C01 blocked costResult fail does not copy leftover amounts", () => {
+  const src = fs.readFileSync(PIPELINE_PATH, "utf8");
+  const start = src.indexOf("if (costResult.ok !== true)");
+  const end = src.indexOf("pipelineStatus: PIPELINE_STATUS.COMPLETED_SYNTHETIC_SINGLE_TRADE", start);
+  assert.equal(start >= 0, true);
+  assert.equal(end > start, true);
+  const block = src.slice(start, end);
+  assert.equal(block.includes("entryAmount"), false);
+  assert.equal(block.includes("exitAmount"), false);
+});
+
+test("GATE8B-C02 blocked cost stage leftover amounts stay null", () => {
+  const input = validPipelineInput();
+  input.cost.policies = [];
+  const result = runSyntheticSingleTradePipeline(input);
+  assert.equal(result.pipelineStatus, PIPELINE_STATUS.BLOCKED_COST_STAGE);
+  assert.equal(result.entryAmount, null);
+  assert.equal(result.exitAmount, null);
+  assert.equal(result.totalCost, null);
+  assert.equal(result.grossProfit, null);
+  assert.equal(result.netProfit, null);
+  assert.equal(result.liveEligible, false);
+});
+
