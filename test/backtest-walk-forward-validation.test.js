@@ -11,11 +11,14 @@ const {
   FOLD_STATUS,
   ERROR,
   AGGREGATE_DEFINITION,
+  MAX_WALK_FORWARD_TRADING_DATES,
   generateWalkForwardWindows,
   runWalkForwardValidation,
   blockedWalkForwardResult,
   completedWalkForwardResult,
 } = wf;
+
+const benchmarkDateIndex = require("../lib/backtest/benchmark-date-index");
 
 const {
   runSyntheticBenchmarkPipeline,
@@ -2972,4 +2975,206 @@ test("GATE9J-J06 walk-forward BLOCKED keeps failure identity and empty officialF
   assert.equal(result.meanOosBenchmarkReturn, null);
   assert.equal(result.meanOosAlpha, null);
   assertOfficialLeakageFreeze(result);
+});
+
+
+function withBenchmarkIndexSpy(run) {
+  const originalBuild = benchmarkDateIndex.buildBenchmarkDateIndex;
+  const originalSlice = benchmarkDateIndex.sliceBenchmarkFromIndex;
+  const builds = [];
+  const slices = [];
+  benchmarkDateIndex.buildBenchmarkDateIndex = function patchedBuild(series) {
+    builds.push(series);
+    return originalBuild(series);
+  };
+  benchmarkDateIndex.sliceBenchmarkFromIndex = function patchedSlice(index, dates) {
+    slices.push(Array.isArray(dates) ? dates.slice() : dates);
+    return originalSlice(index, dates);
+  };
+  try {
+    const result = run();
+    return { result, builds, slices };
+  } finally {
+    benchmarkDateIndex.buildBenchmarkDateIndex = originalBuild;
+    benchmarkDateIndex.sliceBenchmarkFromIndex = originalSlice;
+  }
+}
+
+test("GATE10M-M1-01 1260 exact-cover dates accepted", () => {
+  assert.equal(MAX_WALK_FORWARD_TRADING_DATES, 1260);
+  const dates = generateWeekdayDates("2101-03-01", MAX_WALK_FORWARD_TRADING_DATES);
+  const r = generateWalkForwardWindows({
+    horizonType: "ULTRA_SHORT",
+    tradingDates: dates,
+    trainWindowSize: 3,
+    oosWindowSize: 3,
+    embargoTradingDayCount: 3,
+    stepSize: 12,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.windows.length, 105);
+  assert.equal(r.droppedIncompleteTail, false);
+});
+
+test("GATE10M-M1-02 1261 dates fail field tradingDates windows empty", () => {
+  const dates = generateWeekdayDates("2101-03-01", MAX_WALK_FORWARD_TRADING_DATES + 1);
+  const r = generateWalkForwardWindows({
+    horizonType: "ULTRA_SHORT",
+    tradingDates: dates,
+    trainWindowSize: 3,
+    oosWindowSize: 3,
+    embargoTradingDayCount: 3,
+    stepSize: 12,
+  });
+  assert.equal(r.ok, false);
+  assert.equal(hasCode(r, ERROR.INVALID_WALK_FORWARD_CONFIG), true);
+  assert.equal(r.errors[0].field, "tradingDates");
+  assert.deepEqual(r.windows, []);
+});
+
+test("GATE10M-M1-03 size cap fails before pairwise windows empty", () => {
+  const dates = generateWeekdayDates("2101-03-01", MAX_WALK_FORWARD_TRADING_DATES + 1);
+  const r = generateWalkForwardWindows({
+    horizonType: "ULTRA_SHORT",
+    tradingDates: dates,
+    trainWindowSize: 3,
+    oosWindowSize: 3,
+    embargoTradingDayCount: 3,
+    stepSize: 12,
+  });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.windows, []);
+  assert.equal(hasCode(r, ERROR.WALK_FORWARD_OVERLAP_DETECTED), false);
+  assert.equal(r.errors[0].field, "tradingDates");
+});
+
+test("GATE10M-M1-04 1261 is not a truncated 1260 success", () => {
+  const dates = generateWeekdayDates("2101-03-01", MAX_WALK_FORWARD_TRADING_DATES + 1);
+  const r = generateWalkForwardWindows({
+    horizonType: "ULTRA_SHORT",
+    tradingDates: dates,
+    trainWindowSize: 3,
+    oosWindowSize: 3,
+    embargoTradingDayCount: 3,
+    stepSize: 12,
+  });
+  assert.equal(r.ok, false);
+  assert.notEqual(r.windows.length, 105);
+  assert.deepEqual(r.windows, []);
+});
+
+test("GATE10M-M3-01 planted extra on pipelineBase is not copied into standalone tile input", () => {
+  const pipelineMod = require("../lib/backtest/synthetic-pipeline");
+  const original = pipelineMod.runSyntheticBenchmarkPipeline;
+  const capturedKeys = [];
+  pipelineMod.runSyntheticBenchmarkPipeline = function patched(input) {
+    capturedKeys.push(Object.keys(input || {}));
+    return original(input);
+  };
+  try {
+    const input = buildWalkForwardInput();
+    input.pipelineBase.giantSources = { candles: [1, 2, 3] };
+    const result = runWalkForwardValidation(input);
+    assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+    assert.equal(capturedKeys.length > 0, true);
+    for (const keys of capturedKeys) {
+      assert.equal(keys.includes("giantSources"), false);
+      assert.equal(keys.includes("pipelineVersion"), true);
+      assert.equal(keys.includes("calculationMode"), true);
+      assert.equal(keys.includes("dataset"), true);
+      assert.equal(keys.includes("calendar"), true);
+      assert.equal(keys.includes("calendarValidation"), true);
+      assert.equal(keys.includes("cost"), true);
+      assert.equal(keys.includes("tradeIntents"), true);
+      assert.equal(keys.includes("initialCapital"), true);
+    }
+  } finally {
+    pipelineMod.runSyntheticBenchmarkPipeline = original;
+  }
+});
+
+test("GATE10M-M4-02 standalone WF builds benchmark index once", () => {
+  const { result, builds, slices } = withBenchmarkIndexSpy(() => runWalkForwardValidation(buildWalkForwardInput()));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(builds.length, 1);
+  assert.equal(slices.length > 0, true);
+  for (const dates of slices) {
+    assert.equal(dates.length <= 3, true);
+  }
+});
+
+test("GATE10M-M4-05 duplicate date first-row-wins helper and standalone OOS", () => {
+  const first = { tradingDate: "2101-03-01", close: 111 };
+  const second = { tradingDate: "2101-03-01", close: 999 };
+  const index = benchmarkDateIndex.buildBenchmarkDateIndex([first, second]);
+  assert.equal(index.get("2101-03-01"), first);
+  const sliced = benchmarkDateIndex.sliceBenchmarkFromIndex(index, ["2101-03-01"]);
+  assert.equal(sliced.ok, true);
+  assert.equal(sliced.series[0], first);
+
+  const input = buildWalkForwardInput();
+  const oos0 = input.tradingDates.slice(7, 10);
+  const orig = input.benchmarkSeries.find((row) => row.tradingDate === oos0[0]);
+  input.benchmarkSeries.push({ tradingDate: oos0[0], close: orig.close + 50000 });
+  const { result, captures } = captureWalkForwardBenchmarks(input);
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  const firstCap = captures[0];
+  assert.equal(firstCap.benchmarkDates[0], oos0[0]);
+});
+
+test("GATE10M-M4-06 output order follows tile dates not Map insertion", () => {
+  const series = [
+    { tradingDate: "2101-03-03", close: 3 },
+    { tradingDate: "2101-03-01", close: 1 },
+    { tradingDate: "2101-03-02", close: 2 },
+  ];
+  const index = benchmarkDateIndex.buildBenchmarkDateIndex(series);
+  const sliced = benchmarkDateIndex.sliceBenchmarkFromIndex(index, [
+    "2101-03-01",
+    "2101-03-02",
+    "2101-03-03",
+  ]);
+  assert.equal(sliced.ok, true);
+  assert.deepEqual(sliced.series.map((row) => row.tradingDate), [
+    "2101-03-01",
+    "2101-03-02",
+    "2101-03-03",
+  ]);
+  assert.deepEqual(sliced.series.map((row) => row.close), [1, 2, 3]);
+});
+
+test("GATE10M-M4-07 missing row fail-closed helper and standalone OOS", () => {
+  const index = benchmarkDateIndex.buildBenchmarkDateIndex([
+    { tradingDate: "2101-03-01", close: 1 },
+    { tradingDate: "2101-03-02", close: 2 },
+  ]);
+  const missing = benchmarkDateIndex.sliceBenchmarkFromIndex(index, [
+    "2101-03-01",
+    "2101-03-02",
+    "2101-03-03",
+  ]);
+  assert.equal(missing.ok, false);
+  assert.equal(missing.series, null);
+
+  const input = buildWalkForwardInput();
+  const oos0 = input.tradingDates.slice(7, 10);
+  input.benchmarkSeries = input.benchmarkSeries.filter((row) => row.tradingDate !== oos0[1]);
+  const result = runWalkForwardValidation(input);
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.OOS_FOLD_FAILED), true);
+  assert.equal(result.errors.some((err) => err && err.field === "benchmarkSeries"), true);
+});
+
+test("GATE10M-M4-08 standalone benchmarkReturn/alpha parity on second run", () => {
+  const input = buildWalkForwardInput();
+  const r1 = runWalkForwardValidation(deepClone(input));
+  const r2 = runWalkForwardValidation(deepClone(input));
+  assert.equal(r1.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(r2.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(r1.meanOosBenchmarkReturn, r2.meanOosBenchmarkReturn);
+  assert.equal(r1.meanOosAlpha, r2.meanOosAlpha);
+  assert.deepEqual(
+    r1.folds.map((f) => ({ br: f.benchmarkReturn, a: f.alpha })),
+    r2.folds.map((f) => ({ br: f.benchmarkReturn, a: f.alpha })),
+  );
 });

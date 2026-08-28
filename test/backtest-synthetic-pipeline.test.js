@@ -1753,6 +1753,7 @@ test("GATE5H-P50 허용 파일 외 변경 없음", () => {
     "test/backtest-walk-forward-validation.test.js",
     "lib/backtest/train-parameter-selection.js",
     "test/backtest-train-parameter-selection.test.js",
+    "lib/backtest/benchmark-date-index.js",
     "src/trading-platform.jsx",
     "src/pro-chart-canvas.jsx",
     "src/nchart.js",

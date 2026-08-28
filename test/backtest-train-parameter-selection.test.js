@@ -13,6 +13,7 @@ const {
   SELECTION_EVALUATION_POLICY,
   TILE_SIZE,
   MAX_COMPLETE_TILE_COUNT,
+  MAX_PARAMETER_CANDIDATE_COUNT,
   padTileIndex,
   buildTrainTiles,
   FOLD_STATUS,
@@ -30,6 +31,7 @@ const {
 } = sel;
 
 const walkForward = require("../lib/backtest/walk-forward-validation");
+const benchmarkDateIndex = require("../lib/backtest/benchmark-date-index");
 const { WALK_FORWARD_STATUS } = walkForward;
 
 const {
@@ -4123,4 +4125,180 @@ test("GATE9J-J08 selection FAILURE has no stale root winner payload", () => {
   assert.equal(Object.hasOwn(result, "selectedCandidateId"), false);
   assert.equal(Object.hasOwn(result, "selectedParameters"), false);
   assert.equal(result.errors.length > 0, true);
+});
+
+
+function makeCountedCandidates(n) {
+  const out = [];
+  for (let i = 1; i <= n; i += 1) {
+    out.push({
+      id: "P" + String(i).padStart(3, "0"),
+      stopLossPrice: 9500 + i,
+      takeProfitPrice: 11000 + i,
+    });
+  }
+  return out;
+}
+
+function withBenchmarkIndexSpy(run) {
+  const originalBuild = benchmarkDateIndex.buildBenchmarkDateIndex;
+  const originalSlice = benchmarkDateIndex.sliceBenchmarkFromIndex;
+  const builds = [];
+  const slices = [];
+  benchmarkDateIndex.buildBenchmarkDateIndex = function patchedBuild(series) {
+    builds.push(series);
+    return originalBuild(series);
+  };
+  benchmarkDateIndex.sliceBenchmarkFromIndex = function patchedSlice(index, dates) {
+    slices.push(Array.isArray(dates) ? dates.slice() : dates);
+    return originalSlice(index, dates);
+  };
+  try {
+    const result = run();
+    return { result, builds, slices };
+  } finally {
+    benchmarkDateIndex.buildBenchmarkDateIndex = originalBuild;
+    benchmarkDateIndex.sliceBenchmarkFromIndex = originalSlice;
+  }
+}
+
+test("GATE10M-M2-01 16 unique valid candidates ok", () => {
+  assert.equal(MAX_PARAMETER_CANDIDATE_COUNT, 16);
+  const r = validateParameterCandidates(makeCountedCandidates(16));
+  assert.equal(r.ok, true);
+  assert.equal(r.candidates.length, 16);
+});
+
+test("GATE10M-M2-02 17 candidates fail", () => {
+  const r = validateParameterCandidates(makeCountedCandidates(17));
+  assert.equal(r.ok, false);
+  assert.equal(r.error.code, ERROR.INVALID_PARAMETER_CANDIDATES);
+  assert.equal(r.error.field, "parameterCandidates");
+});
+
+test("GATE10M-M2-03 17 candidates BLOCKED with zero train pipeline calls", () => {
+  let trainCalls = 0;
+  const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
+    parameterCandidates: makeCountedCandidates(17),
+    hooks: {
+      onTrainPipelineCall: () => { trainCalls += 1; },
+    },
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(result.selectionStatus, SELECTION_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.INVALID_PARAMETER_CANDIDATES), true);
+  assert.equal(trainCalls, 0);
+});
+
+test("GATE10M-M2-04 17 is not a truncated 16 success", () => {
+  const candidates = makeCountedCandidates(17);
+  const unit = validateParameterCandidates(candidates);
+  assert.equal(unit.ok, false);
+  assert.equal(Array.isArray(unit.candidates) && unit.candidates.length === 16, false);
+  const result = runWalkForwardTrainParameterSelection(buildSelectionInput({
+    parameterCandidates: candidates,
+  }));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.BLOCKED);
+  assert.equal(result.selectionStatus, SELECTION_STATUS.BLOCKED);
+  assert.equal(result.folds.length, 0);
+  assert.equal(result.successfulFoldCount, 0);
+});
+
+test("GATE10M-M3-01 planted extra on pipelineBase is not copied into selection tile input", () => {
+  const input = buildSelectionInput();
+  input.pipelineBase.giantSources = { candles: [1, 2, 3] };
+  const pipelineMod = require("../lib/backtest/synthetic-pipeline");
+  const originalPerf = pipelineMod.runSyntheticPerformancePipeline;
+  const originalBench = pipelineMod.runSyntheticBenchmarkPipeline;
+  const capturedKeys = [];
+  function wrap(original) {
+    return function patched(payload) {
+      capturedKeys.push(Object.keys(payload || {}));
+      return original(payload);
+    };
+  }
+  pipelineMod.runSyntheticPerformancePipeline = wrap(originalPerf);
+  pipelineMod.runSyntheticBenchmarkPipeline = wrap(originalBench);
+  try {
+    const result = runWalkForwardTrainParameterSelection(input);
+    assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+    assert.equal(capturedKeys.length > 0, true);
+    for (const keys of capturedKeys) {
+      assert.equal(keys.includes("giantSources"), false);
+      assert.equal(keys.includes("pipelineVersion"), true);
+      assert.equal(keys.includes("dataset"), true);
+      assert.equal(keys.includes("calendar"), true);
+      assert.equal(keys.includes("cost"), true);
+      assert.equal(keys.includes("tradeIntents"), true);
+      assert.equal(keys.includes("initialCapital"), true);
+    }
+  } finally {
+    pipelineMod.runSyntheticPerformancePipeline = originalPerf;
+    pipelineMod.runSyntheticBenchmarkPipeline = originalBench;
+  }
+});
+
+test("GATE10M-M4-01 selection builds benchmark index once", () => {
+  const { result, builds, slices } = withBenchmarkIndexSpy(() => (
+    runWalkForwardTrainParameterSelection(buildSelectionInput())
+  ));
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(result.folds.length >= 2, true);
+  assert.equal(builds.length, 1);
+  assert.equal(slices.length > 0, true);
+  for (const dates of slices) {
+    assert.equal(dates.length <= 3, true);
+  }
+});
+
+test("GATE10M-M4-03 two selection invocations do not share a module-level index cache", () => {
+  const helper = benchmarkDateIndex;
+  const originalBuild = helper.buildBenchmarkDateIndex;
+  const counts = [];
+  let n = 0;
+  helper.buildBenchmarkDateIndex = function patchedBuild(series) {
+    n += 1;
+    return originalBuild(series);
+  };
+  try {
+    const r1 = runWalkForwardTrainParameterSelection(buildSelectionInput());
+    counts.push(n);
+    const r2 = runWalkForwardTrainParameterSelection(buildSelectionInput());
+    counts.push(n);
+    assert.equal(r1.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+    assert.equal(r2.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+    assert.equal(counts[0], 1);
+    assert.equal(counts[1], 2);
+  } finally {
+    helper.buildBenchmarkDateIndex = originalBuild;
+  }
+});
+
+test("GATE10M-M4-04 train path stays benchmark-free", () => {
+  const { result, captures } = capturePipelineCalendars(buildSelectionInput());
+  assert.equal(result.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  const trainCaps = captures.filter((c) => c.kind === "train");
+  const oosCaps = captures.filter((c) => c.kind === "oos");
+  assert.equal(trainCaps.length > 0, true);
+  assert.equal(oosCaps.length > 0, true);
+  for (const cap of trainCaps) {
+    assert.deepEqual(cap.benchmarkDates, []);
+  }
+  for (const cap of oosCaps) {
+    assert.equal(cap.benchmarkDates.length > 0, true);
+  }
+});
+
+test("GATE10M-M4-08 selection benchmarkReturn/alpha parity on second run", () => {
+  const input = buildSelectionInput();
+  const r1 = runWalkForwardTrainParameterSelection(deepClone(input));
+  const r2 = runWalkForwardTrainParameterSelection(deepClone(input));
+  assert.equal(r1.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(r2.walkForwardStatus, WALK_FORWARD_STATUS.COMPLETED);
+  assert.equal(r1.meanOosBenchmarkReturn, r2.meanOosBenchmarkReturn);
+  assert.equal(r1.meanOosAlpha, r2.meanOosAlpha);
+  assert.deepEqual(
+    r1.folds.map((f) => ({ br: f.oosBenchmarkReturn, a: f.oosAlpha })),
+    r2.folds.map((f) => ({ br: f.oosBenchmarkReturn, a: f.oosAlpha })),
+  );
 });
