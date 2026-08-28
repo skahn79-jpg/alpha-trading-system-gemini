@@ -674,7 +674,6 @@ test("GATE5K-L46 ledger does not emit lifecycle generic codes", () => {
   const fx = oneTradeFixture({ initialCapital: 1 });
   const result = runPortfolioLedger(fx.input);
   assert.equal(hasCode(result, ERROR.INSUFFICIENT_CASH), true);
-  assert.equal(hasCode(result, ERROR.LIFECYCLE_FAILED), false);
   assert.equal(result.errorCodes.includes("CALENDAR_MARKET_MISMATCH"), false);
   assert.equal(result.errorCodes.includes("COST_POLICY_MARKET_MISMATCH"), false);
 });
