@@ -16,6 +16,7 @@ const {
   createPaperAccountState,
 } = require("../lib/paper/paper-account-state");
 const { executePaper } = require("../lib/paper/paper-execution-adapter");
+const { evaluatePaperRisk } = require("../lib/paper/paper-risk-engine");
 const executionModel = require("../lib/backtest/execution-model");
 const {
   calculateCommission,
@@ -141,6 +142,16 @@ function makeApproval(intent, risk, overrides) {
   };
 }
 
+function makePermissiveRiskConfig(intent) {
+  const i = intent || makeIntent();
+  return {
+    maxOrderNotional: Number.MAX_SAFE_INTEGER,
+    maxPositionNotional: Number.MAX_SAFE_INTEGER,
+    allowedMarkets: [i.market],
+    allowedSymbols: [i.symbol],
+  };
+}
+
 function makeInput(overrides) {
   const extra = overrides || {};
   const intent = extra.orderIntent !== undefined ? extra.orderIntent : makeIntent();
@@ -160,6 +171,7 @@ function makeInput(overrides) {
       brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
       currency: CURRENCY.KRW,
     },
+    riskConfig: makePermissiveRiskConfig(intent),
   };
   return { ...base, ...extra, orderIntent: intent, marketEvent: event, riskDecision: risk, userApproval: approval };
 }
@@ -181,6 +193,7 @@ function paperSources() {
     "paper-account-state.js",
     "paper-ledger-stepper.js",
     "paper-execution-adapter.js",
+    "paper-risk-engine.js",
   ].map((name) => ({
     name,
     src: fs.readFileSync(path.join(root, name), "utf8"),
@@ -315,7 +328,7 @@ test("C11 insufficient cash consumes event, ledger unchanged except cursor", () 
   const result = executePaper(input);
   assert.equal(result.ok, false);
   assert.equal(result.executionRecord, null);
-  assert.equal(hasCode(result, ERROR.PAPER_INSUFFICIENT_CASH), true);
+  assert.equal(hasCode(result, ERROR.PAPER_RISK_INSUFFICIENT_CASH), true);
   const fields = ledgerFields(result.accountState);
   const orig = ledgerFields(before);
   assert.deepEqual(fields, orig);
@@ -334,7 +347,7 @@ test("C12 insufficient position consumes event, ledger unchanged except cursor",
   const before = jsonClone(input.accountState);
   const result = executePaper(input);
   assert.equal(result.ok, false);
-  assert.equal(hasCode(result, ERROR.PAPER_INSUFFICIENT_POSITION), true);
+  assert.equal(hasCode(result, ERROR.PAPER_RISK_INSUFFICIENT_POSITION), true);
   assert.deepEqual(ledgerFields(result.accountState), ledgerFields(before));
   assert.equal(result.accountState.lastProcessedSequence, 11);
   assert.equal(result.executionRecord, null);
@@ -626,7 +639,7 @@ test("C39 cost fail policies [] BLOCKED PAPER_COST_FAILED consume", () => {
   });
   const before = jsonClone(input.accountState);
   const result = executePaper(input);
-  assert.equal(hasCode(result, ERROR.PAPER_COST_FAILED), true);
+  assert.equal(hasCode(result, ERROR.PAPER_RISK_NONFINITE_CALCULATION), true);
   assert.deepEqual(ledgerFields(result.accountState), ledgerFields(before));
   assert.equal(result.accountState.lastProcessedSequence, 11);
 });
@@ -979,4 +992,253 @@ test("11D-R1 JSON round-trip unusual __proto__ keys remain own after later event
   }));
   assert.equal(hasCode(result, ERROR.PAPER_INTENT_ALREADY_EXECUTED), true);
   assert.equal(Object.getPrototypeOf(result.accountState.executedIntentIds), Object.prototype);
+});
+
+function tightOrderConfig(maxOrderNotional, maxPositionNotional) {
+  return {
+    maxOrderNotional,
+    maxPositionNotional,
+    allowedMarkets: [MARKET.SYNTHETIC_KOSPI],
+    allowedSymbols: ["AAA"],
+  };
+}
+
+function engineCostContext() {
+  return {
+    policies: [makePolicy()],
+    brokerChannel: BROKER_CHANNEL.SYNTHETIC_ONLINE,
+    currency: CURRENCY.KRW,
+    tradingDate: "2101-06-01",
+  };
+}
+
+test("I49 engine decision + approval + safe fill FILLED", () => {
+  const intent = makeIntent();
+  const riskConfig = makePermissiveRiskConfig(intent);
+  const decision = evaluatePaperRisk({
+    accountState: emptyState(),
+    intent,
+    riskReferencePrice: 50000,
+    riskConfig,
+    costContext: engineCostContext(),
+    riskDecisionId: "risk-1",
+    validAfterEventSequence: 10,
+  });
+  assert.equal(decision.approved, true);
+  assert.deepEqual(decision.reasonCodes, []);
+  const approval = makeApproval(intent, decision);
+  const result = executePaper(makeInput({
+    orderIntent: intent,
+    riskDecision: decision,
+    userApproval: approval,
+    riskConfig,
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.paperStatus, PAPER_STATUS.FILLED);
+  assert.equal(result.accountState.cash, 499950);
+  assert.equal(result.executionRecord.riskDecisionId, "risk-1");
+});
+
+test("I50 risk 50k approved, event.open 70k, maxOrder 500000 BLOCKED ORDER_NOTIONAL", () => {
+  const intent = makeIntent();
+  const riskConfig = tightOrderConfig(500000, Number.MAX_SAFE_INTEGER);
+  const atFifty = evaluatePaperRisk({
+    accountState: emptyState(),
+    intent,
+    riskReferencePrice: 50000,
+    riskConfig,
+    costContext: engineCostContext(),
+    riskDecisionId: "risk-1",
+    validAfterEventSequence: 10,
+  });
+  assert.equal(atFifty.approved, true);
+  const input = makeInput({
+    orderIntent: intent,
+    riskDecision: makeRisk(intent),
+    riskConfig,
+    marketEvent: makeEvent({ open: 70000 }),
+  });
+  const before = jsonClone(input.accountState);
+  const result = executePaper(input);
+  assert.equal(result.ok, false);
+  assert.equal(result.paperStatus, PAPER_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.PAPER_RISK_ORDER_NOTIONAL_EXCEEDED), true);
+  assert.equal(result.accountState.cash, before.cash);
+  assert.equal(result.accountState.lastProcessedSequence, 11);
+  assert.equal(Object.prototype.hasOwnProperty.call(result.accountState.executedIntentIds, intent.intentId), false);
+  assert.equal(result.executionRecord, null);
+});
+
+test("I51 price gap maxPosition breach BLOCKED", () => {
+  const intent = makeIntent();
+  const riskConfig = tightOrderConfig(Number.MAX_SAFE_INTEGER, 500000);
+  const atFifty = evaluatePaperRisk({
+    accountState: emptyState(),
+    intent,
+    riskReferencePrice: 50000,
+    riskConfig,
+    costContext: engineCostContext(),
+    riskDecisionId: "risk-1",
+    validAfterEventSequence: 10,
+  });
+  assert.equal(atFifty.approved, true);
+  const result = executePaper(makeInput({
+    orderIntent: intent,
+    riskConfig,
+    marketEvent: makeEvent({ open: 70000 }),
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.PAPER_RISK_POSITION_NOTIONAL_EXCEEDED), true);
+  assert.equal(result.accountState.cash, 1_000_000);
+  assert.equal(result.executionRecord, null);
+});
+
+test("I52 price gap + commission cash breach BLOCKED", () => {
+  const intent = makeIntent();
+  const state = emptyState();
+  state.cash = 700000;
+  const riskConfig = tightOrderConfig(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+  const result = executePaper(makeInput({
+    accountState: state,
+    orderIntent: intent,
+    riskConfig,
+    marketEvent: makeEvent({ open: 70000 }),
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.PAPER_RISK_INSUFFICIENT_CASH), true);
+  assert.equal(result.accountState.cash, 700000);
+  assert.equal(result.executionRecord, null);
+});
+
+test("I53 forged approved:true cannot fill past limits", () => {
+  const intent = makeIntent();
+  const forged = makeRisk(intent, { approved: true, requestedQuantity: 10, approvedQuantity: 10 });
+  const riskConfig = tightOrderConfig(500000, 500000);
+  const result = executePaper(makeInput({
+    orderIntent: intent,
+    riskDecision: forged,
+    userApproval: makeApproval(intent, forged),
+    riskConfig,
+    marketEvent: makeEvent({ open: 70000 }),
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.paperStatus, PAPER_STATUS.BLOCKED);
+  assert.equal(hasCode(result, ERROR.PAPER_RISK_ORDER_NOTIONAL_EXCEEDED), true);
+  assert.equal(result.executionRecord, null);
+  assert.equal(result.accountState.cash, 1_000_000);
+});
+
+test("I54 recheck fail cash unchanged", () => {
+  const intent = makeIntent();
+  const result = executePaper(makeInput({
+    orderIntent: intent,
+    riskConfig: tightOrderConfig(500000, Number.MAX_SAFE_INTEGER),
+    marketEvent: makeEvent({ open: 70000 }),
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.accountState.cash, 1_000_000);
+  assert.deepEqual(result.accountState.positions, {});
+});
+
+test("I55 recheck fail cursor advances to event.sequence", () => {
+  const event = makeEvent({ open: 70000, sequence: 11, eventId: "evt-11" });
+  const result = executePaper(makeInput({
+    riskConfig: tightOrderConfig(500000, Number.MAX_SAFE_INTEGER),
+    marketEvent: event,
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.accountState.lastProcessedSequence, event.sequence);
+  assert.equal(result.accountState.lastProcessedEventId, event.eventId);
+});
+
+test("I56 recheck fail intent not in executedIntentIds", () => {
+  const intent = makeIntent({ intentId: "intent-1" });
+  const result = executePaper(makeInput({
+    orderIntent: intent,
+    riskConfig: tightOrderConfig(500000, Number.MAX_SAFE_INTEGER),
+    marketEvent: makeEvent({ open: 70000 }),
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(result.accountState.executedIntentIds, "intent-1"), false);
+  assert.deepEqual(result.accountState.executedIntentIds, {});
+});
+
+test("I57 recheck fail no FILLED executionRecord null", () => {
+  const result = executePaper(makeInput({
+    riskConfig: tightOrderConfig(500000, Number.MAX_SAFE_INTEGER),
+    marketEvent: makeEvent({ open: 70000 }),
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.paperStatus, PAPER_STATUS.BLOCKED);
+  assert.equal(result.executionRecord, null);
+  assert.equal(result.paperStatus === PAPER_STATUS.FILLED, false);
+});
+
+test("I58 SELL full exit allowed despite caps at event.open", () => {
+  const state = emptyState();
+  state.cash = 499950;
+  state.positions = { AAA: { symbol: "AAA", quantity: 10, costBasis: 500050 } };
+  const intent = makeIntent({ side: SIDE.SELL, quantity: 10, intentId: "intent-sell-exit" });
+  const risk = makeRisk(intent);
+  const approval = makeApproval(intent, risk);
+  const result = executePaper(makeInput({
+    accountState: state,
+    orderIntent: intent,
+    riskDecision: risk,
+    userApproval: approval,
+    executionId: "PAPER-exec-sell",
+    riskConfig: tightOrderConfig(0, 0),
+    marketEvent: makeEvent({ open: 90000 }),
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.paperStatus, PAPER_STATUS.FILLED);
+  assert.equal(result.accountState.positions.AAA, undefined);
+  assert.deepEqual(result.accountState.positions, {});
+});
+
+test("I59 missing riskConfig BLOCKED", () => {
+  const input = makeInput({ riskConfig: undefined });
+  const before = jsonClone(input.accountState);
+  const result = executePaper(input);
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.PAPER_RISK_INVALID_CONFIG), true);
+  const fieldErr = result.errors.find((e) => e.field === "riskConfig");
+  assert.equal(fieldErr != null, true);
+  assert.deepEqual(ledgerFields(result.accountState), ledgerFields(before));
+  assert.equal(result.accountState.lastProcessedSequence, 11);
+  assert.equal(result.executionRecord, null);
+});
+
+test("I60 invalid riskConfig BLOCKED", () => {
+  const input = makeInput({
+    riskConfig: { allowEverything: true },
+  });
+  const before = jsonClone(input.accountState);
+  const result = executePaper(input);
+  assert.equal(result.ok, false);
+  assert.equal(hasCode(result, ERROR.PAPER_RISK_INVALID_CONFIG), true);
+  assert.deepEqual(ledgerFields(result.accountState), ledgerFields(before));
+  assert.equal(result.accountState.lastProcessedSequence, 11);
+  assert.equal(result.executionRecord, null);
+});
+
+test("I61 existing C03-style fill still works with explicit permissive config", () => {
+  const intent = makeIntent();
+  const result = executePaper(makeInput({
+    orderIntent: intent,
+    riskConfig: makePermissiveRiskConfig(intent),
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.paperStatus, PAPER_STATUS.FILLED);
+  assert.equal(result.accountState.cash, 499950);
+  assert.equal(result.accountState.positions.AAA.quantity, 10);
+  assert.equal(result.accountState.positions.AAA.costBasis, 500050);
+  const comm = calculateCommission({
+    amount: 500000,
+    ratePpm: 100,
+    minimumAmount: 0,
+    roundingMode: ROUNDING_MODE.FLOOR,
+  });
+  assert.equal(comm.amount, 50);
+  assert.equal(result.executionRecord.cost.commission, comm.amount);
 });
