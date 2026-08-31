@@ -1804,6 +1804,14 @@ test("GATE5H-P50 허용 파일 외 변경 없음", () => {
     "tools/gate-runner/safety-scanner.js",
     "tools/gate-runner/schema.js",
     "tools/gate-runner/test-runner.js",
+    "lib/paper/in-memory-paper-repository.js",
+    "lib/paper/paper-persistence-canonical.js",
+    "lib/paper/paper-persistence-service.js",
+    "lib/paper/paper-persistence-validator.js",
+    "test/in-memory-paper-repository.test.js",
+    "test/paper-persistence-canonical.test.js",
+    "test/paper-persistence-service.test.js",
+    "test/paper-persistence-validator.test.js",
   ]);
   for (const name of names) {
     assert.equal(allowed.has(name), true, name);
