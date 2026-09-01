@@ -1812,6 +1812,8 @@ test("GATE5H-P50 허용 파일 외 변경 없음", () => {
     "test/paper-persistence-canonical.test.js",
     "test/paper-persistence-service.test.js",
     "test/paper-persistence-validator.test.js",
+    "lib/paper/paper-runtime-loop.js",
+    "test/paper-runtime-loop.test.js",
   ]);
   for (const name of names) {
     assert.equal(allowed.has(name), true, name);
