@@ -61,12 +61,17 @@ struct ChartView: View {
         .background(AppTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .task(id: "\(code)-\(period)-\(kind.rawValue)") {
+            let prefs = ChartOverlayPrefs.load(code: code)
+            showGogoZones = prefs.showGogo
+            learnModes = Set(prefs.modes.compactMap(LearnMode.init(rawValue:)))
             resetWindow()
             await viewModel.load(code: code, period: period, kind: kind)
         }
         .onChange(of: viewModel.candles.count) { _ in
             chartWindow = chartWindow.clamped(total: viewModel.candles.count)
         }
+        .onChange(of: showGogoZones) { _ in persistOverlayPrefs() }
+        .onChange(of: learnModes) { _ in persistOverlayPrefs() }
     }
 
     private var interactiveCharts: some View {
@@ -143,7 +148,17 @@ struct ChartView: View {
                 .padding(.horizontal, 12)
                 .padding(.bottom, 4)
         }
-        if let tf = MarketSignalEngine.multiTimeframeSummary(candles: viewModel.candles) {
+        if let vp = volumeProfile {
+            Text(vp.comment)
+                .font(.paperlogy(10))
+                .foregroundStyle(AppTheme.textSecondary)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 2)
+        }
+        if let tf = MarketSignalEngine.multiTimeframeSummary(
+            candles: viewModel.candles,
+            weekly: viewModel.weeklyCandles
+        ) {
             Text(tf)
                 .font(.paperlogy(10))
                 .foregroundStyle(AppTheme.textSecondary)
@@ -156,7 +171,10 @@ struct ChartView: View {
                 .foregroundStyle(AppTheme.textSecondary)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
-        } else if MarketSignalEngine.multiTimeframeSummary(candles: viewModel.candles) == nil {
+        } else if MarketSignalEngine.multiTimeframeSummary(
+            candles: viewModel.candles,
+            weekly: viewModel.weeklyCandles
+        ) == nil && volumeProfile == nil {
             Spacer().frame(height: 4)
         }
     }
@@ -227,6 +245,16 @@ struct ChartView: View {
                             .font(.paperlogy(8))
                             .foregroundStyle(Color.orange)
                     }
+            }
+            ForEach(Array(hvnLevels.enumerated()), id: \.offset) { index, price in
+                RuleMark(y: .value("HVN\(index)", price))
+                    .foregroundStyle(Color.orange.opacity(0.35))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [1, 4]))
+            }
+            ForEach(savedDrawings.filter { $0.type == "hline" && $0.price != nil }) { drawing in
+                RuleMark(y: .value("그림-\(drawing.id)", drawing.price!))
+                    .foregroundStyle(Color.yellow.opacity(0.7))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
             }
             // 학습 오버레이 (켜진 모드만 그림)
             learnOverlays
@@ -311,8 +339,30 @@ struct ChartView: View {
         GogoZoneDetector.detect(candles: viewModel.candles)
     }
 
+    private var volumeProfile: MarketSignalEngine.VolumeProfileResult? {
+        MarketSignalEngine.volumeProfile(candles: displayCandles)
+    }
+
     private var volumePOC: Double? {
-        MarketSignalEngine.volumePOC(candles: displayCandles)
+        volumeProfile?.poc
+    }
+
+    private var hvnLevels: [Double] {
+        guard let profile = volumeProfile else { return [] }
+        let poc = profile.poc
+        return profile.hvnMids.filter { abs($0 - poc) / max(poc, 1) > 0.004 }.prefix(2).map { $0 }
+    }
+
+    private var savedDrawings: [ChartDrawing] {
+        ChartDrawingStore.load(code: code)
+    }
+
+    private func persistOverlayPrefs() {
+        ChartOverlayPrefs.save(
+            code: code,
+            showGogo: showGogoZones,
+            modes: learnModes.map(\.rawValue).sorted()
+        )
     }
 
     private var openingGap: (prevClose: Double, open: Double, pct: Double)? {
@@ -484,6 +534,16 @@ struct ChartView: View {
         if let poc = volumePOC {
             lows.append(poc)
             highs.append(poc)
+        }
+        for price in hvnLevels {
+            lows.append(price)
+            highs.append(price)
+        }
+        for drawing in savedDrawings {
+            if let price = drawing.price {
+                lows.append(price)
+                highs.append(price)
+            }
         }
         if learnModes.contains(.ichimoku) {
             let cloud = ichimokuSeries

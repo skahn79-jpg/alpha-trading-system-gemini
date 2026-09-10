@@ -30,3 +30,16 @@ struct WatchPersonalSignal: Identifiable, Codable, Equatable {
     var createdAt: TimeInterval
     var opportunity: Bool
 }
+
+/// WidgetKit Complication 훅 — 별도 위젯 타깃 없이 문구만 준비 (CI 부담 없이).
+enum WatchComplicationSnapshot {
+    static func headline(_ signals: [WatchPersonalSignal]) -> String {
+        guard let first = signals.first else { return "관심종목 대기" }
+        return "\(first.kind.label) \(first.name)"
+    }
+
+    static func detail(_ signals: [WatchPersonalSignal]) -> String {
+        guard let first = signals.first else { return "아이폰 관심종목 High 알림" }
+        return first.detail
+    }
+}

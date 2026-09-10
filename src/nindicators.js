@@ -667,6 +667,49 @@ function personalAlerts(input = {}) {
   return out;
 }
 
+/** chartlab-compatible volume profile. candles oldest→newest. */
+function volumeProfile(candles = [], bins = 24) {
+  const rows = Array.isArray(candles) ? candles : [];
+  if (rows.length < 8) return null;
+  const lo = Math.min(...rows.map((c) => num(c.low)));
+  const hi = Math.max(...rows.map((c) => num(c.high)));
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return null;
+  const step = (hi - lo) / bins;
+  const vols = Array.from({ length: bins }, () => 0);
+  for (const c of rows) {
+    const tp = (num(c.high) + num(c.low) + num(c.close)) / 3;
+    let idx = Math.floor((tp - lo) / step);
+    if (idx >= bins) idx = bins - 1;
+    if (idx < 0) idx = 0;
+    vols[idx] += num(c.volume, 0);
+  }
+  const total = vols.reduce((a, b) => a + b, 0);
+  if (total <= 0) return null;
+  let best = 0;
+  for (let i = 1; i < vols.length; i += 1) if (vols[i] > vols[best]) best = i;
+  const close = num(rows[rows.length - 1].close);
+  let above = 0;
+  let below = 0;
+  const mids = vols.map((vol, i) => {
+    const mid = lo + (i + 0.5) * step;
+    if (mid > close) above += vol;
+    else below += vol;
+    return { mid, vol };
+  });
+  const poc = lo + (best + 0.5) * step;
+  const hvn = [...mids].sort((a, b) => b.vol - a.vol).slice(0, 3).map((x) => x.mid);
+  const abovePct = Math.round((above / total) * 100);
+  const belowPct = Math.round((below / total) * 100);
+  const pos = close > poc ? "최대 매물대 위 (하방 지지)" : close < poc ? "최대 매물대 아래 (상방 부담)" : "최대 매물대 내부";
+  return {
+    poc,
+    hvn,
+    abovePct,
+    belowPct,
+    comment: `매물대 POC ${formatZonePrice(poc)} · ${pos} · 상방 ${abovePct}% / 하방 ${belowPct}%`,
+  };
+}
+
 const NIndicators = {
   smaSeries,
   emaSeries,
@@ -686,6 +729,7 @@ const NIndicators = {
   accuracy,
   personalAlerts,
   detectGogoZones,
+  volumeProfile,
 };
 
 export default NIndicators;
@@ -705,4 +749,5 @@ export {
   accuracy,
   personalAlerts,
   detectGogoZones,
+  volumeProfile,
 };

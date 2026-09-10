@@ -42,6 +42,8 @@ const COLORS = {
   zoneHighLine: "rgba(255,68,102,0.7)",
   zoneLow: "rgba(0,255,136,0.16)",
   zoneLowLine: "rgba(0,255,136,0.7)",
+  poc: "rgba(249,115,22,0.75)",
+  hvn: "rgba(249,115,22,0.35)",
 };
 
 function num(v, fallback = NaN) {
@@ -411,7 +413,9 @@ ChartEngine.prototype.draw = function draw() {
   }
   if (Array.isArray(this.options.overlayPrices)) extras.push(...this.options.overlayPrices);
   const gogoZones = this.options.showGogoZones === false ? null : NIndicators.detectGogoZones(this.full);
+  const volumeProfile = NIndicators.volumeProfile(visible);
   if (gogoZones) extras.push(gogoZones.highHigh, gogoZones.highLow, gogoZones.lowHigh, gogoZones.lowLow, gogoZones.trendLinePrice);
+  if (volumeProfile) extras.push(volumeProfile.poc, ...(volumeProfile.hvn || []));
   const range = priceRange(visible, extras);
   const xAtIndex = (i) => layout.main.x + i * layout.step + layout.step * 0.5;
   const yAtPrice = (p) => layout.main.y + ((range.max - num(p, range.min)) / Math.max(1e-9, range.max - range.min)) * layout.main.h;
@@ -423,6 +427,7 @@ ChartEngine.prototype.draw = function draw() {
 
   this._drawGrid(ctx, layout, range);
   if (gogoZones) this._drawGogoZones(ctx, layout, yAtPrice, gogoZones, sliced, xAtIndex);
+  if (volumeProfile) this._drawVolumeProfile(ctx, layout, yAtPrice, volumeProfile);
   if (this.options.showMaCloud) this._drawMaCloud(ctx, sliced, xAtIndex, yAtPrice);
   if (this.options.showRainbow) this._drawRainbow(ctx, sliced, xAtIndex, yAtPrice);
   if (this.options.showSma50) this._drawLine(ctx, sliced, this.computed?.ma50, xAtIndex, yAtPrice, COLORS.sma50, 1.6);
@@ -447,6 +452,7 @@ ChartEngine.prototype.draw = function draw() {
     visible: visible.length,
     last: visible[visible.length - 1] || null,
     gogoZones,
+    volumeProfile,
   };
 };
 
@@ -550,6 +556,38 @@ ChartEngine.prototype._drawGogoZones = function drawGogoZones(ctx, layout, yAtPr
       }
     }
   }
+  ctx.restore();
+};
+
+ChartEngine.prototype._drawVolumeProfile = function drawVolumeProfile(ctx, layout, yAtPrice, profile) {
+  if (!profile || !Number.isFinite(profile.poc)) return;
+  const left = layout.main.x;
+  const right = layout.main.x + layout.main.w;
+  const line = (price, color, dash, label) => {
+    const y = yAtPrice(price);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.setLineDash(dash);
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(right, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (label) {
+      ctx.fillStyle = color;
+      ctx.font = "10px sans-serif";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "bottom";
+      ctx.fillText(label, right - 4, y - 2);
+    }
+  };
+  ctx.save();
+  (profile.hvn || []).forEach((price) => {
+    if (Number.isFinite(price) && Math.abs(price - profile.poc) / Math.max(profile.poc, 1) > 0.004) {
+      line(price, COLORS.hvn, [1, 4]);
+    }
+  });
+  line(profile.poc, COLORS.poc, [2, 3], `POC ${formatPrice(profile.poc)}`);
   ctx.restore();
 };
 
@@ -802,6 +840,7 @@ const NChart = {
   formatDate,
   priceRange,
   detectGogoZones: NIndicators.detectGogoZones,
+  volumeProfile: NIndicators.volumeProfile,
 };
 
 export default NChart;

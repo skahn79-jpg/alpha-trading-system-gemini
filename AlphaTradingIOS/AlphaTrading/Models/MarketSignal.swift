@@ -114,6 +114,8 @@ enum MarketSignalEngine {
         }
         if let div = divergenceSignal(code: code, name: name, analysis: analysis) {
             out.append(div)
+        } else if let local = localDivergenceSignal(code: code, name: name, candles: candles) {
+            out.append(local)
         }
         return out
     }
@@ -262,23 +264,32 @@ enum MarketSignalEngine {
         return nil
     }
 
-    static func multiTimeframeSummary(candles: [ChartCandle]) -> String? {
+    static func multiTimeframeSummary(candles: [ChartCandle], weekly: [ChartCandle] = []) -> String? {
         guard candles.count >= 20, let last = candles.last else { return nil }
-        func sma(_ period: Int) -> Double? {
-            guard candles.count >= period else { return nil }
-            let window = candles.suffix(period)
+        func sma(_ rows: [ChartCandle], _ period: Int) -> Double? {
+            guard rows.count >= period else { return nil }
+            let window = rows.suffix(period)
             return window.map(\.close).reduce(0, +) / Double(period)
         }
         var parts: [String] = []
-        if let ma20 = sma(20) {
+        if let ma20 = sma(candles, 20) {
             parts.append(last.close >= ma20 ? "일봉 MA20 위" : "일봉 MA20 아래")
         }
-        if let ma60 = sma(60) {
+        if let ma60 = sma(candles, 60) {
             parts.append(last.close >= ma60 ? "중기 MA60 위" : "중기 MA60 아래")
-        } else if candles.count >= 40, let ma40 = sma(40) {
+        } else if candles.count >= 40, let ma40 = sma(candles, 40) {
             parts.append(last.close >= ma40 ? "중기선 위" : "중기선 아래")
         }
+        if let week = weeklyContext(candles: weekly) {
+            parts.append(week)
+        }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    static func weeklyContext(candles: [ChartCandle]) -> String? {
+        guard candles.count >= 20, let last = candles.last else { return nil }
+        let ma20 = candles.suffix(20).map(\.close).reduce(0, +) / 20
+        return last.close >= ma20 ? "주봉 MA20 위" : "주봉 MA20 아래"
     }
 
     static func atrPercent(_ candles: [ChartCandle]) -> Double {
@@ -299,7 +310,16 @@ enum MarketSignalEngine {
         return (close - lower) / (upper - lower)
     }
 
-    static func volumePOC(candles: [ChartCandle], bins: Int = 16) -> Double? {
+    struct VolumeProfileResult: Equatable {
+        var poc: Double
+        var hvnMids: [Double]
+        var abovePct: Int
+        var belowPct: Int
+        var comment: String
+    }
+
+    /// chartlab.js volumeProfile와 같은 구간 거래량 분포 (봉은 과거→현재)
+    static func volumeProfile(candles: [ChartCandle], bins: Int = 24) -> VolumeProfileResult? {
         guard candles.count >= 8 else { return nil }
         let lo = candles.map(\.low).min() ?? 0
         let hi = candles.map(\.high).max() ?? 0
@@ -313,8 +333,112 @@ enum MarketSignalEngine {
             if idx < 0 { idx = 0 }
             vols[idx] += c.volume
         }
-        guard let best = vols.enumerated().max(by: { $0.element < $1.element }) else { return nil }
-        return lo + (Double(best.offset) + 0.5) * step
+        let total = vols.reduce(0, +)
+        guard total > 0, let best = vols.enumerated().max(by: { $0.element < $1.element }) else { return nil }
+        let close = candles.last?.close ?? 0
+        var above = 0.0
+        var below = 0.0
+        var mids: [(Double, Double)] = []
+        for (i, vol) in vols.enumerated() {
+            let mid = lo + (Double(i) + 0.5) * step
+            mids.append((mid, vol))
+            if mid > close { above += vol } else { below += vol }
+        }
+        let poc = lo + (Double(best.offset) + 0.5) * step
+        let hvn = mids.sorted { $0.1 > $1.1 }.prefix(3).map(\.0)
+        let abovePct = Int((above / total * 100).rounded())
+        let belowPct = Int((below / total * 100).rounded())
+        let pos: String
+        if close > poc { pos = "최대 매물대 위 (하방 지지)" }
+        else if close < poc { pos = "최대 매물대 아래 (상방 부담)" }
+        else { pos = "최대 매물대 내부" }
+        return VolumeProfileResult(
+            poc: poc,
+            hvnMids: Array(hvn),
+            abovePct: abovePct,
+            belowPct: belowPct,
+            comment: "매물대 POC \(formatPrice(poc)) · \(pos) · 상방 \(abovePct)% / 하방 \(belowPct)%"
+        )
+    }
+
+    static func volumePOC(candles: [ChartCandle], bins: Int = 16) -> Double? {
+        volumeProfile(candles: candles, bins: bins)?.poc
+    }
+
+    /// 분석 API가 없을 때 캔들로 RSI↔가격 다이버전스 추정
+    static func localDivergenceSignal(code: String, name: String, candles: [ChartCandle]) -> PersonalSignal? {
+        guard candles.count >= 24 else { return nil }
+        let closes = candles.map(\.close)
+        let rsi = rsiWilder(closes, period: 14)
+        var lows: [(Int, Double, Double)] = []
+        var highs: [(Int, Double, Double)] = []
+        for i in 2..<(candles.count - 2) {
+            guard let r = rsi[i] else { continue }
+            let c = candles[i]
+            if c.low <= candles[i - 1].low && c.low <= candles[i - 2].low &&
+                c.low <= candles[i + 1].low && c.low <= candles[i + 2].low {
+                lows.append((i, c.low, r))
+            }
+            if c.high >= candles[i - 1].high && c.high >= candles[i - 2].high &&
+                c.high >= candles[i + 1].high && c.high >= candles[i + 2].high {
+                highs.append((i, c.high, r))
+            }
+        }
+        if lows.count >= 2 {
+            let a = lows[lows.count - 2]
+            let b = lows[lows.count - 1]
+            if b.1 < a.1 && b.2 > a.2 {
+                return PersonalSignal(
+                    code: code, name: name, kind: .fearGreed, severity: .high,
+                    title: "\(name) 강세 다이버전스",
+                    detail: "RSI 저점은 높아지는데 가격 저점은 낮아짐 — 기회 관찰",
+                    opportunity: true
+                )
+            }
+        }
+        if highs.count >= 2 {
+            let a = highs[highs.count - 2]
+            let b = highs[highs.count - 1]
+            if b.1 > a.1 && b.2 < a.2 {
+                return PersonalSignal(
+                    code: code, name: name, kind: .fearGreed, severity: .high,
+                    title: "\(name) 약세 다이버전스",
+                    detail: "가격 고점은 높아지는데 RSI 고점은 낮아짐 — 위험 관찰",
+                    opportunity: false
+                )
+            }
+        }
+        return nil
+    }
+
+    static func rsiWilder(_ closes: [Double], period: Int = 14) -> [Double?] {
+        var out = Array<Double?>(repeating: nil, count: closes.count)
+        guard closes.count > period else { return out }
+        var gain = 0.0
+        var loss = 0.0
+        for i in 1...period {
+            let delta = closes[i] - closes[i - 1]
+            if delta >= 0 { gain += delta } else { loss -= delta }
+        }
+        gain /= Double(period)
+        loss /= Double(period)
+        func value(_ g: Double, _ l: Double) -> Double {
+            if l == 0 { return 100 }
+            let rs = g / l
+            return 100 - (100 / (1 + rs))
+        }
+        out[period] = value(gain, loss)
+        if period + 1 < closes.count {
+            for i in (period + 1)..<closes.count {
+                let delta = closes[i] - closes[i - 1]
+                let g = max(delta, 0)
+                let l = max(-delta, 0)
+                gain = (gain * Double(period - 1) + g) / Double(period)
+                loss = (loss * Double(period - 1) + l) / Double(period)
+                out[i] = value(gain, loss)
+            }
+        }
+        return out
     }
 
     static func openingGap(candles: [ChartCandle]) -> (prevClose: Double, open: Double, pct: Double)? {

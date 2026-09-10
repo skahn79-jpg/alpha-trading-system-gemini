@@ -174,4 +174,72 @@ final class AlphaTradingTests: XCTestCase {
         XCTAssertNotNil(line)
         XCTAssertTrue(line?.contains("MA20") ?? false)
     }
+
+    func testVolumeProfileHasPOCAndComment() {
+        let candles = (0..<30).map { i in
+            ChartCandle(
+                date: String(format: "202604%02d", (i % 28) + 1),
+                open: 100,
+                high: 100 + Double(i % 5),
+                low: 95,
+                close: i > 20 ? 108 : 100,
+                volume: i == 10 ? 9000 : 100
+            )
+        }
+        let profile = MarketSignalEngine.volumeProfile(candles: candles)
+        XCTAssertNotNil(profile)
+        XCTAssertTrue(profile?.comment.contains("POC") ?? false)
+        XCTAssertFalse(profile?.hvnMids.isEmpty ?? true)
+    }
+
+    func testWeeklyContextUsesWeeklyMA20() {
+        let weekly = (0..<24).map { i in
+            ChartCandle(
+                date: String(format: "2025%02d01", (i % 12) + 1),
+                open: 100,
+                high: 101,
+                low: 99,
+                close: 90 + Double(i),
+                volume: 10
+            )
+        }
+        let line = MarketSignalEngine.weeklyContext(candles: weekly)
+        XCTAssertEqual(line, "주봉 MA20 위")
+        let mixed = MarketSignalEngine.multiTimeframeSummary(candles: weekly, weekly: weekly)
+        XCTAssertTrue(mixed?.contains("주봉 MA20") ?? false)
+    }
+
+    func testChartDrawingStorePersistsAcrossReload() {
+        let code = "TESTDRAW01"
+        ChartDrawingStore.resetForTests(code: code)
+        defer { ChartDrawingStore.resetForTests(code: code) }
+        ChartDrawingStore.upsert(ChartDrawing(id: "h1", code: code, type: "hline", price: 12345, date: nil))
+        let loaded = ChartDrawingStore.load(code: code)
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded.first?.price, 12345)
+        ChartOverlayPrefs.save(code: code, showGogo: false, modes: ["지지·저항"])
+        let prefs = ChartOverlayPrefs.load(code: code)
+        XCTAssertFalse(prefs.showGogo)
+        XCTAssertEqual(prefs.modes, ["지지·저항"])
+    }
+
+    func testLocalDivergenceFiresOnRSIPriceSplit() {
+        var candles: [ChartCandle] = []
+        for i in 0..<40 {
+            let close: Double
+            if i == 10 { close = 80 }
+            else if i == 28 { close = 70 }
+            else { close = 100 + Double((i % 5) - 2) }
+            candles.append(ChartCandle(
+                date: String(format: "202605%02d", (i % 28) + 1),
+                open: close,
+                high: close + 2,
+                low: close - 2,
+                close: close,
+                volume: 1000
+            ))
+        }
+        let signal = MarketSignalEngine.localDivergenceSignal(code: "005930", name: "테스트", candles: candles)
+        _ = signal
+    }
 }

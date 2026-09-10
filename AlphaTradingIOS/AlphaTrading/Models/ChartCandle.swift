@@ -64,3 +64,71 @@ struct ChartWindow: Equatable {
         abs(dx) > abs(dy)
     }
 }
+
+/// 차트 오버레이 칩 상태 — 종목별 기기 로컬 저장
+struct ChartOverlayPrefs: Equatable {
+    var showGogo: Bool
+    var modes: [String]
+
+    static func key(_ code: String) -> String { "alpha.chart.overlay.\(code)" }
+
+    static func load(code: String) -> ChartOverlayPrefs {
+        guard let data = UserDefaults.standard.data(forKey: key(code)),
+              let prefs = try? JSONDecoder().decode(ChartOverlayPrefs.self, from: data) else {
+            return ChartOverlayPrefs(showGogo: true, modes: [])
+        }
+        return prefs
+    }
+
+    static func save(code: String, showGogo: Bool, modes: [String]) {
+        let prefs = ChartOverlayPrefs(showGogo: showGogo, modes: modes)
+        if let data = try? JSONEncoder().encode(prefs) {
+            UserDefaults.standard.set(data, forKey: key(code))
+        }
+    }
+}
+
+extension ChartOverlayPrefs: Codable {}
+
+/// 수평선 등 그림 도구 — 기기 로컬. iOS에 그리기 UI가 생기면 이 저장소를 사용.
+struct ChartDrawing: Codable, Equatable, Identifiable {
+    var id: String
+    var code: String
+    var type: String
+    var price: Double?
+    var date: String?
+}
+
+enum ChartDrawingStore {
+    static func key(_ code: String) -> String { "alpha.chart.drawings.\(code)" }
+
+    static func load(code: String) -> [ChartDrawing] {
+        guard let data = UserDefaults.standard.data(forKey: key(code)),
+              let list = try? JSONDecoder().decode([ChartDrawing].self, from: data) else { return [] }
+        return list
+    }
+
+    static func save(code: String, drawings: [ChartDrawing]) {
+        guard let data = try? JSONEncoder().encode(drawings) else { return }
+        UserDefaults.standard.set(data, forKey: key(code))
+    }
+
+    static func upsert(_ drawing: ChartDrawing) {
+        var list = load(code: drawing.code)
+        if let idx = list.firstIndex(where: { $0.id == drawing.id }) {
+            list[idx] = drawing
+        } else {
+            list.append(drawing)
+        }
+        save(code: drawing.code, drawings: list)
+    }
+
+    static func remove(code: String, id: String) {
+        save(code: code, drawings: load(code: code).filter { $0.id != id })
+    }
+
+    static func resetForTests(code: String) {
+        UserDefaults.standard.removeObject(forKey: key(code))
+        UserDefaults.standard.removeObject(forKey: ChartOverlayPrefs.key(code))
+    }
+}

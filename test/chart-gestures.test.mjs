@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import ChartGestures from "../src/chart-gestures.js";
 import NChart from "../src/nchart.js";
 import NIndicators from "../src/nindicators.js";
+import NDraw from "../src/ndraw.js";
 
 test("pinch out (scale>1) reduces visible bar count", () => {
   assert.equal(ChartGestures.nextVisibleCount(80, 2, 400), 40);
@@ -113,4 +114,36 @@ test("personalAlerts covers 급락 돌파 공포탐욕 뉴스", () => {
   assert.equal(fg.some((s) => s.kind === "fearGreed" && s.opportunity), true);
   const news = NIndicators.personalAlerts({ name: "테스트전자", code: "005930", newsTitles: ["테스트전자 실적 상향"] });
   assert.equal(news.some((s) => s.kind === "news" && s.opportunity), true);
+});
+
+test("volumeProfile returns POC and HVN", () => {
+  const candles = Array.from({ length: 30 }, (_, i) => ({
+    date: `202604${String((i % 28) + 1).padStart(2, "0")}`,
+    open: 100,
+    high: 100 + (i % 5),
+    low: 95,
+    close: i > 20 ? 108 : 100,
+    volume: i === 10 ? 9000 : 100,
+  }));
+  const profile = NIndicators.volumeProfile(candles);
+  assert.ok(profile);
+  assert.ok(Number.isFinite(profile.poc));
+  assert.ok(Array.isArray(profile.hvn) && profile.hvn.length > 0);
+  assert.ok(String(profile.comment).includes("POC"));
+});
+
+test("NDraw persists drawings across create()", () => {
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, String(v)); },
+    removeItem: (k) => { store.delete(k); },
+  };
+  const first = NDraw.create({ symbol: "005930" });
+  const added = first.add({ type: "hline", points: [{ price: 71000, t: Date.parse("2026-03-01T00:00:00Z") }] });
+  assert.ok(added);
+  const second = NDraw.create({ symbol: "005930" });
+  assert.equal(second.list().length, 1);
+  assert.equal(second.list()[0].type, "hline");
+  assert.equal(second.list()[0].points[0].price, 71000);
 });

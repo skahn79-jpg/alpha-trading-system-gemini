@@ -13,7 +13,7 @@ struct ContentView: View {
                         Text("아이폰에서 관심종목 알림을 기다립니다")
                             .multilineTextAlignment(.center)
                             .font(.footnote)
-                        Text("급락 · 돌파 · 공포탐욕 · 뉴스 · 높음만")
+                        Text(WatchComplicationSnapshot.detail(inbox.signals))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }

@@ -7,11 +7,13 @@ final class ChartViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var outlookLine: String?
+    @Published var weeklyCandles: [ChartCandle] = []
 
     func load(code: String, period: String = "D", kind: AssetKind = .kr) async {
         isLoading = true
         errorMessage = nil
         outlookLine = nil
+        weeklyCandles = []
         defer { isLoading = false }
         do {
             if kind == .kr {
@@ -31,9 +33,9 @@ final class ChartViewModel: ObservableObject {
                 candles = chart.candles.reversed()
                 quote = q
                 if period == "D" {
-                    let outlookCode = code
-                    let outlookKind = kind
-                    Task { await self.loadOutlook(code: outlookCode, kind: outlookKind) }
+                    let extraCode = code
+                    let extraKind = kind
+                    Task { await self.loadDailyExtras(code: extraCode, kind: extraKind) }
                 }
             } else {
                 // 미국주식/코인 — Yahoo 캔들 (주봉/월봉은 period=W/M 그대로 지원)
@@ -52,9 +54,9 @@ final class ChartViewModel: ObservableObject {
                 let (chart, gq) = try await (chartTask, quoteTask)
                 candles = chart.candles // Yahoo는 과거→현재 순
                 if period == "D" {
-                    let outlookCode = code
-                    let outlookKind = kind
-                    Task { await self.loadOutlook(code: outlookCode, kind: outlookKind) }
+                    let extraCode = code
+                    let extraKind = kind
+                    Task { await self.loadDailyExtras(code: extraCode, kind: extraKind) }
                 }
                 quote = Quote(
                     code: code, name: nil,
@@ -65,6 +67,41 @@ final class ChartViewModel: ObservableObject {
             }
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func loadDailyExtras(code: String, kind: AssetKind) async {
+        async let outlook: Void = loadOutlook(code: code, kind: kind)
+        async let weekly: Void = loadWeekly(code: code, kind: kind)
+        _ = await (outlook, weekly)
+    }
+
+    private func loadWeekly(code: String, kind: AssetKind) async {
+        do {
+            if kind == .kr {
+                let chart: ChartResponse = try await APIClient.shared.get(
+                    "/api/chart/\(code)",
+                    query: [
+                        URLQueryItem(name: "period", value: "W"),
+                        URLQueryItem(name: "count", value: "80"),
+                        URLQueryItem(name: "analyze", value: "0"),
+                    ]
+                )
+                weeklyCandles = chart.candles.reversed()
+            } else {
+                let chart: ChartResponse = try await APIClient.shared.get(
+                    "/api/global/chart/\(code)",
+                    query: [
+                        URLQueryItem(name: "type", value: kind.rawValue),
+                        URLQueryItem(name: "period", value: "W"),
+                        URLQueryItem(name: "range", value: "10Y"),
+                        URLQueryItem(name: "count", value: "80"),
+                    ]
+                )
+                weeklyCandles = chart.candles
+            }
+        } catch {
+            weeklyCandles = []
         }
     }
 
