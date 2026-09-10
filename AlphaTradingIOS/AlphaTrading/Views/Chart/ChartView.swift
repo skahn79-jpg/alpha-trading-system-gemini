@@ -521,47 +521,10 @@ struct ChartView: View {
         return dates
     }
 
-    /// 캔들 저가~고가 + 볼린저밴드 + (켜진 경우) 일목구름·예측 콘 범위를 모두 포함하는 y축 스케일
+    /// 표시 중인 봉의 고가·저가만으로 Y축을 맞춘다 (줌/팬 시 실시간 재계산).
+    /// 고고저 밴드·볼린저·일목 등 전체 시계열 오버레이는 도메인에 넣지 않아 최근 진폭이 납작해지지 않는다.
     private var yDomain: ClosedRange<Double> {
-        var lows = displayCandles.map { Double($0.low) } + bollingerSeries.map(\.lower)
-        var highs = displayCandles.map { Double($0.high) } + bollingerSeries.map(\.upper)
-        if showGogoZones, let zones = gogoZones {
-            lows.append(zones.lowLow)
-            highs.append(zones.highHigh)
-            if let trend = zones.trendLinePrice {
-                lows.append(trend)
-                highs.append(trend)
-            }
-        }
-        if let poc = volumePOC {
-            lows.append(poc)
-            highs.append(poc)
-        }
-        for price in hvnLevels {
-            lows.append(price)
-            highs.append(price)
-        }
-        for drawing in savedDrawings {
-            if let price = drawing.price {
-                lows.append(price)
-                highs.append(price)
-            }
-        }
-        if learnModes.contains(.ichimoku) {
-            let cloud = ichimokuSeries
-            lows += cloud.map { min($0.spanA, $0.spanB) }
-            highs += cloud.map { max($0.spanA, $0.spanB) }
-        }
-        if learnModes.contains(.predict) {
-            let cone = forecastPoints
-            lows += cone.map(\.lower)
-            highs += cone.map(\.upper)
-        }
-        guard let minLow = lows.min(), let maxHigh = highs.max(), minLow < maxHigh else {
-            return 0...1
-        }
-        let padding = max(1, (maxHigh - minLow) / 50)
-        return (minLow - padding)...(maxHigh + padding)
+        ChartWindow.yDomain(candles: displayCandles)
     }
 
     /// 카테고리 X축에 전체 날짜 라벨이 겹쳐 그려지지 않도록 4개만 고르게 표시

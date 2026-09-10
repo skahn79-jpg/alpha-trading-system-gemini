@@ -4,11 +4,14 @@ struct SignalBannerView: View {
     let signals: [PersonalSignal]
     var onSelect: ((PersonalSignal) -> Void)?
 
+    private var riskSignals: [PersonalSignal] { signals.filter { !$0.opportunity } }
+    private var opportunitySignals: [PersonalSignal] { signals.filter { $0.opportunity } }
+
     var body: some View {
         if signals.isEmpty {
             EmptyView()
         } else {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Image(systemName: "bell.badge.fill")
                         .foregroundStyle(AppTheme.accent)
@@ -20,7 +23,33 @@ struct SignalBannerView: View {
                         .font(.paperlogy(10))
                         .foregroundStyle(AppTheme.textSecondary)
                 }
-                ForEach(signals.prefix(4)) { signal in
+                signalGroup(title: "위험", tint: AppTheme.down, rows: riskSignals)
+                signalGroup(title: "기회", tint: AppTheme.up, rows: opportunitySignals)
+            }
+            .padding(14)
+            .background(AppTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    @ViewBuilder
+    private func signalGroup(title: String, tint: Color, rows: [PersonalSignal]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                    .font(.paperlogy(12, weight: .semibold))
+                    .foregroundStyle(tint)
+                Text("\(rows.count)")
+                    .font(.paperlogy(11, weight: .bold))
+                    .foregroundStyle(AppTheme.textSecondary)
+                Spacer()
+            }
+            if rows.isEmpty {
+                Text("해당 없음")
+                    .font(.paperlogy(11))
+                    .foregroundStyle(AppTheme.textSecondary)
+            } else {
+                ForEach(rows.prefix(4)) { signal in
                     Button {
                         onSelect?(signal)
                     } label: {
@@ -51,9 +80,6 @@ struct SignalBannerView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(14)
-            .background(AppTheme.card)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
         }
     }
 }

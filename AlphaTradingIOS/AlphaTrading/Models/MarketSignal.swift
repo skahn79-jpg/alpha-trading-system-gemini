@@ -470,15 +470,16 @@ enum MarketSignalEngine {
         return String(format: "%.2f", value)
     }
 
-    /// Current 고고저 breakout: reference closeBreak without low-structure failure.
+    /// Dashboard 고고저 돌파: findGoGoJeoTrend + 급경사 제외 + 신규(fresh) + 거래량·양봉·0.3% 돌파.
     static func gogoBreakout(
         code: String,
         name: String,
         candles: [ChartCandle],
-        assetType: String? = nil
+        assetType: String? = nil,
+        marketGroup: GogoMarketGroup = .kospi
     ) -> GogoBreakoutItem? {
         guard let zones = GogoZoneDetector.detect(candles: candles),
-              zones.confirmedBreakout,
+              zones.isRealBreakout,
               let close = candles.last?.close, close > 0 else { return nil }
         var parts: [String] = []
         if !zones.phase.isEmpty { parts.append(zones.phase) }
@@ -486,15 +487,19 @@ enum MarketSignalEngine {
             parts.append("종가 \(formatPrice(close)) / 추세선 \(formatPrice(trend))")
         }
         if zones.freshBreak { parts.append("신규 돌파") }
-        if zones.lowHold { parts.append("저가 유지") }
-        if zones.volumeRatio >= 1.2 {
+        if zones.isVolumeConfirm {
             parts.append(String(format: "거래량 %.1f배", zones.volumeRatio))
+        }
+        if zones.isBullishCandle { parts.append("양봉") }
+        if zones.breakoutRate >= 0.3 {
+            parts.append(String(format: "돌파 +%.1f%%", zones.breakoutRate))
         }
         if parts.isEmpty { parts.append(zones.comment) }
         return GogoBreakoutItem(
             code: code,
             name: name,
             assetType: assetType,
+            marketGroup: marketGroup,
             close: close,
             highHigh: zones.highHigh,
             trendLinePrice: zones.trendLinePrice,
@@ -507,11 +512,28 @@ enum MarketSignalEngine {
     }
 }
 
+enum GogoMarketGroup: String, CaseIterable, Codable, Identifiable {
+    case kospi
+    case kosdaq
+    case overseas
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .kospi: return "코스피"
+        case .kosdaq: return "코스닥"
+        case .overseas: return "해외"
+        }
+    }
+}
+
 struct GogoBreakoutItem: Identifiable, Equatable, Hashable {
-    var id: String { code }
+    var id: String { "\(marketGroup.rawValue)-\(code)" }
     var code: String
     var name: String
     var assetType: String?
+    var marketGroup: GogoMarketGroup
     var close: Double
     var highHigh: Double
     var trendLinePrice: Double?
@@ -527,7 +549,15 @@ struct GogoBreakoutItem: Identifiable, Equatable, Hashable {
     }
 
     var asStock: Stock {
-        Stock(code: code, name: name, assetType: assetType)
+        let type: String?
+        if let assetType {
+            type = assetType
+        } else if marketGroup == .overseas {
+            type = "us"
+        } else {
+            type = nil
+        }
+        return Stock(code: code, name: name, assetType: type)
     }
 }
 
@@ -560,27 +590,64 @@ struct GogoZoneResult: Equatable {
     var confirmedBreakout: Bool
     var lowStructure: String
     var lowComment: String
+    var trendSlopePer20Bars: Double
+    var isTrendTooSteep: Bool
+    var breakoutRate: Double
+    var isVolumeConfirm: Bool
+    var isBullishCandle: Bool
+    var isLineSane: Bool
+    var isRealBreakout: Bool
 
     var highBand: ClosedRange<Double> { min(highLow, highHigh)...max(highLow, highHigh) }
     var lowBand: ClosedRange<Double> { min(lowLow, lowHigh)...max(lowLow, lowHigh) }
 }
 
 enum GogoZoneDetector {
+    /// trading-platform `isTrendTooSteep`: drop% per bar × 20 >= 18 → 급경사 추세선 제외
+    static let steepSlopeThreshold = 18.0
+    /// calculateGogojeoSignal lookback 120, dashboard prefers 120–180
+    static let lookbackBars = 160
+    static let volumeConfirmRatio = 1.25
+    static let minBreakoutRatePct = 0.3
+    static let minTrendBars = 5
+    static let lineVsRecentLowFloor = 0.5
+
+    static func trendSlopePer20Bars(p1: GogoPivot, p2: GogoPivot) -> Double {
+        guard p1.price > 0 else { return 0 }
+        let trendDropRate = ((p1.price - p2.price) / p1.price) * 100
+        let trendBars = Double(max(1, p2.index - p1.index))
+        return (trendDropRate / trendBars) * 20
+    }
+
+    static func isTrendTooSteep(p1: GogoPivot, p2: GogoPivot) -> Bool {
+        trendSlopePer20Bars(p1: p1, p2: p2) >= steepSlopeThreshold
+    }
+
+    /// Reject collapsed/negative projections (short p1→p2 span falling far below price).
+    static func isLineSane(trendNow: Double, candles: [ChartCandle], p1: GogoPivot, p2: GogoPivot) -> Bool {
+        guard trendNow > 0 else { return false }
+        guard p2.index - p1.index >= minTrendBars else { return false }
+        let minLow = candles.suffix(20).map(\.low).min() ?? 0
+        guard minLow > 0 else { return true }
+        return trendNow >= minLow * lineVsRecentLowFloor
+    }
+
     static func detect(candles: [ChartCandle]) -> GogoZoneResult? {
-        guard candles.count >= 10 else { return nil }
-        let highs = swingPivots(candles, kind: .high)
-        let lows = swingPivots(candles, kind: .low)
+        let rows = Array(candles.suffix(lookbackBars))
+        guard rows.count >= 10 else { return nil }
+        let highs = swingPivots(rows, kind: .high)
+        let lows = swingPivots(rows, kind: .low)
         let recentHighs = Array(highs.suffix(3))
         let recentLows = Array(lows.suffix(3))
-        let trend = findGoGoJeoTrend(candles)
+        let trend = findGoGoJeoTrend(rows)
         if recentHighs.isEmpty && trend == nil { return nil }
 
         let hiPrices = recentHighs.isEmpty ? highs.map(\.price) : recentHighs.map(\.price)
         let loSource: [GogoPivot]
         if recentLows.isEmpty {
-            let start = max(0, candles.count - 10)
-            loSource = (start..<candles.count).map {
-                GogoPivot(index: $0, price: candles[$0].low, date: candles[$0].date)
+            let start = max(0, rows.count - 10)
+            loSource = (start..<rows.count).map {
+                GogoPivot(index: $0, price: rows[$0].low, date: rows[$0].date)
             }
         } else {
             loSource = recentLows
@@ -595,7 +662,7 @@ enum GogoZoneDetector {
         let p2 = trend?.1
         let signals: GogoChartSignals? = {
             guard let p1, let p2 else { return nil }
-            return chartMethodSignals(candles: candles, p1: p1, p2: p2, swingLows: lows)
+            return chartMethodSignals(candles: rows, p1: p1, p2: p2, swingLows: lows)
         }()
         let trendPrice = signals?.trendLineNow
         let isBreakout = signals?.closeBreak ?? false
@@ -611,11 +678,12 @@ enum GogoZoneDetector {
             var extras: [String] = []
             if signals.freshBreak { extras.append("신규(전일 종가 아래→오늘 위)") }
             if signals.lowHold { extras.append("저가 추세선 위 유지") }
-            if signals.volumeRatio >= 1.2 { extras.append(String(format: "거래량 %.1f배", signals.volumeRatio)) }
-            let lastClose = candles.last?.close ?? 0
+            if signals.isVolumeConfirm { extras.append(String(format: "거래량 %.1f배", signals.volumeRatio)) }
+            let lastClose = rows.last?.close ?? 0
             comment += " \(signals.phase). 종가 \(MarketSignalEngine.formatPrice(lastClose)) / 추세선 \(MarketSignalEngine.formatPrice(trendPrice))."
             if !extras.isEmpty { comment += " \(extras.joined(separator: " · "))." }
             if !signals.lowComment.isEmpty { comment += " \(signals.lowComment)" }
+            if signals.isTrendTooSteep { comment += " 급경사 추세선 제외." }
         }
 
         return GogoZoneResult(
@@ -639,7 +707,14 @@ enum GogoZoneDetector {
             phase: signals?.phase ?? "",
             confirmedBreakout: signals?.confirmedBreakout ?? false,
             lowStructure: signals?.lowStructure ?? "",
-            lowComment: signals?.lowComment ?? ""
+            lowComment: signals?.lowComment ?? "",
+            trendSlopePer20Bars: signals?.trendSlopePer20Bars ?? 0,
+            isTrendTooSteep: signals?.isTrendTooSteep ?? false,
+            breakoutRate: signals?.breakoutRate ?? 0,
+            isVolumeConfirm: signals?.isVolumeConfirm ?? false,
+            isBullishCandle: signals?.isBullishCandle ?? false,
+            isLineSane: signals?.isLineSane ?? false,
+            isRealBreakout: signals?.isRealBreakout ?? false
         )
     }
 
@@ -718,6 +793,13 @@ enum GogoZoneDetector {
         var isBreakoutFailure: Bool
         var lowStructure: String
         var lowComment: String
+        var trendSlopePer20Bars: Double
+        var isTrendTooSteep: Bool
+        var breakoutRate: Double
+        var isVolumeConfirm: Bool
+        var isBullishCandle: Bool
+        var isLineSane: Bool
+        var isRealBreakout: Bool
     }
 
     private static func chartMethodSignals(
@@ -784,7 +866,22 @@ enum GogoZoneDetector {
         else if distanceToGJ >= -2 && distanceToGJ < 0 { phase = "돌파 임박" }
         else if above20 && !closeBreak { phase = "20선 지지 확인" }
         else if !above20 { phase = "눌림 또는 약세" }
+        let slope = trendSlopePer20Bars(p1: p1, p2: p2)
+        let steep = slope >= steepSlopeThreshold
         if isBreakoutFailure { phase = "돌파 실패" }
+        else if steep { phase = "급경사 추세선 제외" }
+
+        let breakoutRate = trendNow > 0 ? ((last.close - trendNow) / trendNow) * 100 : 0
+        let isVolumeConfirm = volumeRatio >= volumeConfirmRatio
+        let isBullishCandle = last.close > last.open
+        let lineSane = isLineSane(trendNow: trendNow, candles: candles, p1: p1, p2: p2)
+        let isRealBreakout = freshBreak
+            && !isBreakoutFailure
+            && !steep
+            && isVolumeConfirm
+            && isBullishCandle
+            && breakoutRate >= minBreakoutRatePct
+            && lineSane
 
         return GogoChartSignals(
             closeBreak: closeBreak,
@@ -793,10 +890,17 @@ enum GogoZoneDetector {
             volumeRatio: volumeRatio,
             trendLineNow: trendNow,
             phase: phase,
-            confirmedBreakout: closeBreak && !isBreakoutFailure,
+            confirmedBreakout: closeBreak && !isBreakoutFailure && !steep,
             isBreakoutFailure: isBreakoutFailure,
             lowStructure: lowStructure,
-            lowComment: lowComment
+            lowComment: lowComment,
+            trendSlopePer20Bars: slope,
+            isTrendTooSteep: steep,
+            breakoutRate: breakoutRate,
+            isVolumeConfirm: isVolumeConfirm,
+            isBullishCandle: isBullishCandle,
+            isLineSane: lineSane,
+            isRealBreakout: isRealBreakout
         )
     }
 }

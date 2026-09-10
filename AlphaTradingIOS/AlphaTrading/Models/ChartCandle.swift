@@ -63,6 +63,38 @@ struct ChartWindow: Equatable {
     static func isHorizontalPan(dx: CGFloat, dy: CGFloat) -> Bool {
         abs(dx) > abs(dy)
     }
+
+    /// Y-axis for the visible window only: high/low of those candles + tight padding (≈2–5%).
+    /// Does not use the full series min/max, so recent amplitude stays readable while zooming/panning.
+    static func yDomain(
+        candles: [ChartCandle],
+        paddingRatio: Double = 0.035
+    ) -> ClosedRange<Double> {
+        yDomain(
+            lows: candles.map(\.low),
+            highs: candles.map(\.high),
+            paddingRatio: paddingRatio
+        )
+    }
+
+    static func yDomain(
+        lows: [Double],
+        highs: [Double],
+        paddingRatio: Double = 0.035
+    ) -> ClosedRange<Double> {
+        guard let rawLo = lows.min(), let rawHi = highs.max() else { return 0...1 }
+        let lo = min(rawLo, rawHi)
+        let hi = max(rawLo, rawHi)
+        let span = hi - lo
+        let ratio = min(0.05, max(0.02, paddingRatio))
+        let pad: Double
+        if span <= 0 {
+            pad = max(abs(hi) * 0.02, 0.01)
+        } else {
+            pad = span * ratio
+        }
+        return (lo - pad)...(hi + pad)
+    }
 }
 
 /// 차트 오버레이 칩 상태 — 종목별 기기 로컬 저장

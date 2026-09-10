@@ -85,29 +85,67 @@ struct DashboardView: View {
         sectorTrends = await sectorTask
     }
 
-    // MARK: - 고고저 돌파 (관심종목 차트)
+    // MARK: - 고고저 돌파 (코스피 / 코스닥 / 해외)
 
     @ViewBuilder
     private var gogoBreakoutSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center) {
                 Image(systemName: "triangle.fill")
                     .foregroundStyle(AppTheme.up)
-                Text("고고저 돌파")
-                    .font(.paperlogy(16, weight: .semibold))
-                    .foregroundStyle(AppTheme.textPrimary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("고고저 돌파")
+                        .font(.paperlogy(16, weight: .semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Text(gogoBreakouts.scanSummary)
+                        .font(.paperlogy(10))
+                        .foregroundStyle(AppTheme.textSecondary)
+                    Text("신규 종가 돌파 · 거래량·양봉 확인 · 급경사 제외")
+                        .font(.paperlogy(10))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
                 Spacer()
                 if gogoBreakouts.isLoading {
                     ProgressView()
                         .scaleEffect(0.8)
                 }
             }
-            if gogoBreakouts.items.isEmpty {
-                Text(gogoEmptyText)
+
+            if gogoBreakouts.isLoading && !gogoBreakouts.didLoad {
+                Text("코스피·코스닥·해외 차트를 확인하는 중…")
                     .font(.paperlogy(12))
                     .foregroundStyle(AppTheme.textSecondary)
             } else {
-                ForEach(gogoBreakouts.items) { item in
+                ForEach(GogoMarketGroup.allCases) { group in
+                    gogoMarketGroup(group)
+                }
+            }
+        }
+        .padding(16)
+        .background(AppTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    @ViewBuilder
+    private func gogoMarketGroup(_ group: GogoMarketGroup) -> some View {
+        let rows = gogoBreakouts.items(in: group)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(group.title)
+                    .font(.paperlogy(13, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent)
+                Text("\(rows.count)")
+                    .font(.paperlogy(11, weight: .bold))
+                    .foregroundStyle(AppTheme.textSecondary)
+                Spacer()
+            }
+            if rows.isEmpty {
+                Text("종가 신규 돌파 없음")
+                    .font(.paperlogy(12))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.vertical, 2)
+            } else {
+                ForEach(rows) { item in
                     NavigationLink(value: item.asStock) {
                         HStack(alignment: .top, spacing: 8) {
                             Text(item.badgeLabel)
@@ -136,19 +174,7 @@ struct DashboardView: View {
                 }
             }
         }
-        .padding(16)
-        .background(AppTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-    }
-
-    private var gogoEmptyText: String {
-        if SignalInbox.watchlistCodes().isEmpty {
-            return "관심종목을 추가하면 고고저 추세선 종가 돌파 종목이 여기에 표시됩니다."
-        }
-        if gogoBreakouts.isLoading && !gogoBreakouts.didLoad {
-            return "관심종목 차트를 확인하는 중…"
-        }
-        return "관심종목 중 고고저 추세선을 종가 상향 돌파한 종목이 없습니다."
+        .padding(.top, 4)
     }
 
     // MARK: - 실시간 환율

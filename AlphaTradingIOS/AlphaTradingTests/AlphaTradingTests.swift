@@ -350,11 +350,36 @@ final class AlphaTradingTests: XCTestCase {
         XCTAssertEqual(info["kind"] as? String, "news")
     }
 
+    func testChartWindowYDomainFitsVisibleHighLowOnly() {
+        let recent = [
+            ChartCandle(date: "a", open: 101, high: 103, low: 100, close: 102, volume: 1),
+            ChartCandle(date: "b", open: 102, high: 104, low: 101, close: 103, volume: 1),
+        ]
+        let domain = ChartWindow.yDomain(candles: recent)
+        XCTAssertGreaterThan(domain.lowerBound, 96)
+        XCTAssertLessThan(domain.upperBound, 108)
+        let pad = (domain.upperBound - 104)
+        let span = 104.0 - 100.0
+        XCTAssertGreaterThan(pad, span * 0.019)
+        XCTAssertLessThan(pad, span * 0.051)
+    }
+
+    func testChartWindowYDomainIgnoresOldGlobalHigh() {
+        let visible = [
+            ChartCandle(date: "r1", open: 51000, high: 52000, low: 50500, close: 51500, volume: 1),
+            ChartCandle(date: "r2", open: 51500, high: 52200, low: 51200, close: 51800, volume: 1),
+        ]
+        let domain = ChartWindow.yDomain(candles: visible)
+        XCTAssertGreaterThan(domain.lowerBound, 48000)
+        XCTAssertLessThan(domain.upperBound, 54000)
+    }
+
     func testGogoBreakoutWhenCloseAboveTrendline() {
-        let candles = gogoTrendCandles(lastClose: 125)
+        let candles = gogoPairFixture(lastClose: 150, lastLow: 145, lastVolume: 2500, prevClose: 90, lastOpen: 140)
         let zones = GogoZoneDetector.detect(candles: candles)
         XCTAssertNotNil(zones)
         XCTAssertEqual(zones?.isBreakout, true)
+        XCTAssertEqual(zones?.isRealBreakout, true)
         let item = MarketSignalEngine.gogoBreakout(
             code: "005930",
             name: "테스트전자",
@@ -367,7 +392,7 @@ final class AlphaTradingTests: XCTestCase {
     }
 
     func testGogoBreakoutNilWhenCloseBelowTrendline() {
-        let candles = gogoTrendCandles(lastClose: 85)
+        let candles = gogoPairFixture(lastClose: 85, lastLow: 80, lastVolume: 2500, prevClose: 90, lastOpen: 88)
         let zones = GogoZoneDetector.detect(candles: candles)
         XCTAssertNotNil(zones)
         XCTAssertEqual(zones?.isBreakout, false)
@@ -380,7 +405,7 @@ final class AlphaTradingTests: XCTestCase {
     }
 
     func testGogoPrefersGlobalHighestThenLaterLowerPair() {
-        let candles = gogoPairFixture(lastClose: 150, lastLow: 145, lastVolume: 2500, prevClose: 90)
+        let candles = gogoPairFixture(lastClose: 150, lastLow: 145, lastVolume: 2500, prevClose: 90, lastOpen: 140)
         let pair = GogoZoneDetector.findGoGoJeoTrend(candles)
         XCTAssertEqual(pair?.0.price, 160)
         XCTAssertEqual(pair?.0.index, 8)
@@ -397,41 +422,102 @@ final class AlphaTradingTests: XCTestCase {
     }
 
     func testGogoDoesNotConfirmWhenLowStructureFails() {
-        let candles = gogoPairFixture(lastClose: 150, lastLow: 60, lastVolume: 2500, prevClose: 90)
+        let candles = gogoPairFixture(lastClose: 150, lastLow: 60, lastVolume: 2500, prevClose: 90, lastOpen: 140)
         let zones = GogoZoneDetector.detect(candles: candles)
         XCTAssertEqual(zones?.isBreakout, true)
         XCTAssertEqual(zones?.isBreakoutFailure, true)
         XCTAssertEqual(zones?.confirmedBreakout, false)
+        XCTAssertEqual(zones?.isRealBreakout, false)
         XCTAssertNil(MarketSignalEngine.gogoBreakout(code: "005930", name: "테스트전자", candles: candles))
+    }
+
+    func testGogoStaleAboveLineIsNotListedLikeAitech() {
+        // 에이텍형: 이미 오래 추세선 위(closeBreak+lowHold)지만 전일도 위 → freshBreak 없음
+        let candles = gogoPairFixture(lastClose: 150, lastLow: 145, lastVolume: 2500, prevClose: 140, lastOpen: 140)
+        let zones = GogoZoneDetector.detect(candles: candles)
+        XCTAssertEqual(zones?.isBreakout, true)
+        XCTAssertEqual(zones?.lowHold, true)
+        XCTAssertEqual(zones?.freshBreak, false)
+        XCTAssertEqual(zones?.isRealBreakout, false)
+        XCTAssertNil(MarketSignalEngine.gogoBreakout(code: "045660", name: "테스트텍", candles: candles))
+    }
+
+    func testGogoSteepTrendExcludedLikeDoosan() {
+        // 두산에너빌리티 참고: ① 139200 → ② 117000 (약 11봉) → slope/20봉 >= 18
+        let p1 = GogoPivot(index: 0, price: 139200, date: "20260507")
+        let p2 = GogoPivot(index: 11, price: 117000, date: "20260522")
+        let slope = GogoZoneDetector.trendSlopePer20Bars(p1: p1, p2: p2)
+        XCTAssertGreaterThanOrEqual(slope, 18)
+        XCTAssertTrue(GogoZoneDetector.isTrendTooSteep(p1: p1, p2: p2))
+
+        let candles = gogoSteepPairFixture()
+        let zones = GogoZoneDetector.detect(candles: candles)
+        XCTAssertEqual(zones?.isTrendTooSteep, true)
+        XCTAssertEqual(zones?.isRealBreakout, false)
+        XCTAssertNil(MarketSignalEngine.gogoBreakout(code: "034020", name: "테스트에너지", candles: candles))
+    }
+
+    func testGogoBreakoutRequiresVolumeAndBullish() {
+        let weakVol = gogoPairFixture(lastClose: 150, lastLow: 145, lastVolume: 1000, prevClose: 90, lastOpen: 140)
+        XCTAssertEqual(GogoZoneDetector.detect(candles: weakVol)?.isVolumeConfirm, false)
+        XCTAssertNil(MarketSignalEngine.gogoBreakout(code: "005930", name: "테스트전자", candles: weakVol))
+
+        let bearish = gogoPairFixture(lastClose: 150, lastLow: 145, lastVolume: 2500, prevClose: 90, lastOpen: 155)
+        XCTAssertEqual(GogoZoneDetector.detect(candles: bearish)?.isBullishCandle, false)
+        XCTAssertNil(MarketSignalEngine.gogoBreakout(code: "005930", name: "테스트전자", candles: bearish))
+    }
+
+    func testGogoUniverseGroupsKospiKosdaqOverseas() {
+        let merged = GogoBreakoutUniverse.mergeCandidates(
+            kospi: [Stock(code: "005930", name: "테스트전자")],
+            kosdaq: [Stock(code: "247540", name: "테스트비엠")],
+            overseas: [Stock(code: "NVDA", name: "TestGPU", assetType: "us")],
+            featured: [Stock(code: "035420", name: "테스트포털")],
+            watchlist: [Stock(code: "AAPL", name: "TestPhone", assetType: "us")],
+            kospiCodes: ["005930", "035420"],
+            kosdaqCodes: ["247540"]
+        )
+        XCTAssertEqual(merged.count, 5)
+        XCTAssertEqual(merged.first(where: { $0.stock.code == "005930" })?.group, .kospi)
+        XCTAssertEqual(merged.first(where: { $0.stock.code == "247540" })?.group, .kosdaq)
+        XCTAssertEqual(merged.first(where: { $0.stock.code == "NVDA" })?.group, .overseas)
+        XCTAssertEqual(merged.first(where: { $0.stock.code == "AAPL" })?.group, .overseas)
+        XCTAssertEqual(merged.first(where: { $0.stock.code == "035420" })?.group, .kospi)
     }
 
     private func gogoPairFixture(
         lastClose: Double,
         lastLow: Double,
         lastVolume: Double,
-        prevClose: Double
+        prevClose: Double,
+        lastOpen: Double? = nil
     ) -> [ChartCandle] {
         var candles: [ChartCandle] = []
         for i in 0..<40 {
             var high = 90 + Double(i) * 0.001
             var low = 80 - Double(i) * 0.001
             var close = 85.0
+            var open = close
             var volume = 1000.0
-            if i == 8 { high = 160; low = 140; close = 150 }
-            else if i == 22 { high = 140; low = 120; close = 128 }
-            else if i == 28 { high = 112; low = 100; close = 105 }
-            else if i == 34 { high = 104; low = 96; close = 100 }
-            else if i == 14 { high = 88; low = 70; close = 80 }
-            if i == 38 { close = prevClose }
+            if i == 8 { high = 160; low = 140; close = 150; open = 148 }
+            else if i == 22 { high = 140; low = 120; close = 128; open = 126 }
+            else if i == 28 { high = 112; low = 100; close = 105; open = 104 }
+            else if i == 34 { high = 104; low = 96; close = 100; open = 99 }
+            else if i == 14 { high = 88; low = 70; close = 80; open = 82 }
+            if i == 38 {
+                close = prevClose
+                open = prevClose
+            }
             if i == 39 {
                 close = lastClose
-                high = max(high, lastClose + 2)
+                open = lastOpen ?? lastClose
+                high = max(high, lastClose + 2, open)
                 low = lastLow
                 volume = lastVolume
             }
             candles.append(ChartCandle(
                 date: String(format: "d%02d", i),
-                open: close,
+                open: open,
                 high: high,
                 low: low,
                 close: close,
@@ -441,41 +527,34 @@ final class AlphaTradingTests: XCTestCase {
         return candles
     }
 
-    private func gogoTrendCandles(lastClose: Double) -> [ChartCandle] {
+    /// 짧은 급락 고점쌍 — 추세선이 가격 아래로 붕괴되어 closeBreak가 상시 true가 되는 형태
+    private func gogoSteepPairFixture() -> [ChartCandle] {
         var candles: [ChartCandle] = []
-        for i in 0..<36 {
-            var high = 105 + Double(i) * 0.01
-            var low = 90 + Double(i) * 0.01
-            var close = 100.0
-            if i == 5 {
-                high = 140; low = 120; close = 128
-            } else if i == 3 || i == 4 || i == 6 || i == 7 {
-                high = 110; low = 100; close = 105
-            } else if i == 20 {
-                high = 120; low = 105; close = 112
-            } else if i == 18 || i == 19 || i == 21 || i == 22 {
-                high = 108; low = 100; close = 104
-            } else if i == 12 {
-                high = 95; low = 80; close = 85
-            } else if i == 10 || i == 11 || i == 13 || i == 14 {
-                high = 100; low = 90; close = 94
-            } else if i == 28 {
-                high = 100; low = 88; close = 92
-            } else if i == 26 || i == 27 || i == 29 || i == 30 {
-                high = 102; low = 92; close = 96
-            }
-            if i == 35 {
-                close = lastClose
-                high = max(high, lastClose + 1)
-                low = min(low, lastClose - 1)
+        for i in 0..<40 {
+            var high = 94000.0 - Double(i) * 20
+            var low = high - 4000
+            var close = high - 1500
+            var open = close - 200
+            var volume = 2000.0
+            if i == 8 { high = 139200; low = 120000; close = 130000; open = 128000 }
+            else if i == 6 || i == 7 || i == 9 || i == 10 { high = 110000; low = 100000; close = 105000; open = 104000 }
+            else if i == 19 { high = 117000; low = 100000; close = 108000; open = 107000 }
+            else if i == 17 || i == 18 || i == 20 || i == 21 { high = 108000; low = 98000; close = 102000; open = 101000 }
+            if i == 38 { close = 80000; open = 79000; high = 81000; low = 78000 }
+            if i == 39 {
+                close = 82000
+                open = 80000
+                high = 83000
+                low = 79500
+                volume = 4000
             }
             candles.append(ChartCandle(
                 date: String(format: "d%02d", i),
-                open: close,
+                open: open,
                 high: high,
                 low: low,
                 close: close,
-                volume: 1000
+                volume: volume
             ))
         }
         return candles

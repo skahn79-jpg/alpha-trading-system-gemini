@@ -104,26 +104,28 @@ test("detectGogoZones finds declining high-to-high trendline", () => {
   assert.ok(String(zones.comment).includes("추세선") || String(zones.comment).includes("고점①"));
 });
 
-function gogoPairFixture({ lastClose = 150, lastLow = null, lastVolume = 1000, prevClose = null } = {}) {
+function gogoPairFixture({ lastClose = 150, lastLow = null, lastVolume = 1000, prevClose = null, lastOpen = null } = {}) {
   const candles = [];
   for (let i = 0; i < 40; i += 1) {
     let high = 90 + i * 0.001;
     let low = 80 - i * 0.001;
     let close = 85;
+    let open = close;
     let volume = 1000;
-    if (i === 8) { high = 160; low = 140; close = 150; } // 고점① global highest
-    else if (i === 22) { high = 140; low = 120; close = 128; } // 고점② later lower
-    else if (i === 28) { high = 112; low = 100; close = 105; } // later smaller pair (must not win)
-    else if (i === 34) { high = 104; low = 96; close = 100; }
-    else if (i === 14) { high = 88; low = 70; close = 80; } // swing low for band / structure
-    if (i === 38 && prevClose != null) close = prevClose;
+    if (i === 8) { high = 160; low = 140; close = 150; open = 148; } // 고점① global highest
+    else if (i === 22) { high = 140; low = 120; close = 128; open = 126; } // 고점② later lower
+    else if (i === 28) { high = 112; low = 100; close = 105; open = 104; } // later smaller pair (must not win)
+    else if (i === 34) { high = 104; low = 96; close = 100; open = 99; }
+    else if (i === 14) { high = 88; low = 70; close = 80; open = 82; } // swing low for band / structure
+    if (i === 38 && prevClose != null) { close = prevClose; open = prevClose; }
     if (i === 39) {
       close = lastClose;
-      high = Math.max(high, lastClose + 2);
+      open = lastOpen == null ? lastClose : lastOpen;
+      high = Math.max(high, lastClose + 2, open);
       low = lastLow == null ? Math.min(low, lastClose - 2) : lastLow;
       volume = lastVolume;
     }
-    candles.push({ date: `d${String(i).padStart(2, "0")}`, open: close, high, low, close, volume });
+    candles.push({ date: `d${String(i).padStart(2, "0")}`, open, high, low, close, volume });
   }
   return candles;
 }
@@ -160,7 +162,46 @@ test("detectGogoZones does not confirm breakout when low structure fails after c
   assert.equal(zones.isBreakout, true);
   assert.equal(zones.isBreakoutFailure, true);
   assert.equal(zones.confirmedBreakout, false);
+  assert.equal(zones.isRealBreakout, false);
   assert.equal(zones.phase, "돌파 실패");
+});
+
+test("dashboard 고고저 돌파 requires freshBreak volume bullish and rejects stale 에이텍-like hold", () => {
+  const real = gogoPairFixture({ lastClose: 150, lastLow: 145, lastVolume: 2500, prevClose: 90, lastOpen: 140 });
+  const realZones = NIndicators.detectGogoZones(real);
+  assert.equal(realZones.freshBreak, true);
+  assert.equal(realZones.isVolumeConfirm, true);
+  assert.equal(realZones.isBullishCandle, true);
+  assert.equal(realZones.isRealBreakout, true);
+
+  const stale = gogoPairFixture({ lastClose: 150, lastLow: 145, lastVolume: 2500, prevClose: 140, lastOpen: 140 });
+  const staleZones = NIndicators.detectGogoZones(stale);
+  assert.equal(staleZones.isBreakout, true);
+  assert.equal(staleZones.lowHold, true);
+  assert.equal(staleZones.freshBreak, false);
+  assert.equal(staleZones.isRealBreakout, false);
+});
+
+test("급경사 추세선 제외 matches Doosan-style 139200→117000 over ~11 bars", () => {
+  const slope = NIndicators.gogoTrendSlopePer20Bars(
+    { index: 0, price: 139200 },
+    { index: 11, price: 117000 }
+  );
+  assert.ok(slope >= 18);
+  assert.equal(NIndicators.isGogoTrendTooSteep({ index: 0, price: 139200 }, { index: 11, price: 117000 }), true);
+});
+
+test("priceRange fits visible highs/lows and ignores far overlay extras", () => {
+  const visible = [
+    { high: 52200, low: 50500, close: 51500 },
+    { high: 51800, low: 51200, close: 51600 },
+  ];
+  const range = NChart.priceRange(visible, [180000, 1200]);
+  assert.ok(range.max < 54000, `max ${range.max} should stay near visible highs`);
+  assert.ok(range.min > 49000, `min ${range.min} should stay near visible lows`);
+  const span = range.max - range.min;
+  const visSpan = 52200 - 50500;
+  assert.ok(span < visSpan * 1.12);
 });
 
 test("personalAlerts covers 급락 돌파 공포탐욕 뉴스", () => {

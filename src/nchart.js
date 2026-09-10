@@ -118,17 +118,21 @@ function priceRange(rows, extras = []) {
     hi = Math.max(hi, num(c.high, num(c.close)));
     lo = Math.min(lo, num(c.low, num(c.close)));
   }
+  // Overlay extras (고고저 전구간 고점대 등)는 보이는 봉 진폭을 납작하게 만들 수 있어
+  // 현재 윈도우 고저 근처(±15%)에 있는 값만 반영한다.
+  const span = Number.isFinite(hi) && Number.isFinite(lo) ? hi - lo : 0;
+  const band = Math.max(span * 0.15, Math.abs(hi) * 0.002);
   for (const v of extras) {
-    if (Number.isFinite(v)) {
-      hi = Math.max(hi, v);
-      lo = Math.min(lo, v);
-    }
+    if (!Number.isFinite(v)) continue;
+    if (span > 0 && (v > hi + band || v < lo - band)) continue;
+    hi = Math.max(hi, v);
+    lo = Math.min(lo, v);
   }
   if (!Number.isFinite(hi) || !Number.isFinite(lo)) {
     hi = 1;
     lo = 0;
   }
-  const pad = Math.max(1e-6, (hi - lo) * 0.06);
+  const pad = Math.max(1e-6, (hi - lo) * 0.035);
   return { max: hi + pad, min: Math.max(0, lo - pad) };
 }
 
