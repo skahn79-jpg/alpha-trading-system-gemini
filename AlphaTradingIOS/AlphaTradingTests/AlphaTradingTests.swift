@@ -133,6 +133,12 @@ final class AlphaTradingTests: XCTestCase {
         XCTAssertNotNil(zones)
         XCTAssertGreaterThan(zones!.highHigh, zones!.lowLow)
         XCTAssertFalse(zones!.comment.isEmpty)
+        XCTAssertFalse(zones!.swingHighs.isEmpty)
+        XCTAssertFalse(zones!.swingLows.isEmpty)
+        if let high1 = zones?.trendHigh1, let high2 = zones?.trendHigh2 {
+            XCTAssertGreaterThan(high1.price, high2.price)
+            XCTAssertLessThan(high1.index, high2.index)
+        }
     }
 
     func testSignalInboxCooldownRejectsDuplicateKind() {

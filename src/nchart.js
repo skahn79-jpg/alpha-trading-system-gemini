@@ -411,7 +411,7 @@ ChartEngine.prototype.draw = function draw() {
   }
   if (Array.isArray(this.options.overlayPrices)) extras.push(...this.options.overlayPrices);
   const gogoZones = this.options.showGogoZones === false ? null : NIndicators.detectGogoZones(this.full);
-  if (gogoZones) extras.push(gogoZones.highHigh, gogoZones.highLow, gogoZones.lowHigh, gogoZones.lowLow);
+  if (gogoZones) extras.push(gogoZones.highHigh, gogoZones.highLow, gogoZones.lowHigh, gogoZones.lowLow, gogoZones.trendLinePrice);
   const range = priceRange(visible, extras);
   const xAtIndex = (i) => layout.main.x + i * layout.step + layout.step * 0.5;
   const yAtPrice = (p) => layout.main.y + ((range.max - num(p, range.min)) / Math.max(1e-9, range.max - range.min)) * layout.main.h;
@@ -422,7 +422,7 @@ ChartEngine.prototype.draw = function draw() {
   ctx.fillRect(0, 0, cssW, cssH);
 
   this._drawGrid(ctx, layout, range);
-  if (gogoZones) this._drawGogoZones(ctx, layout, yAtPrice, gogoZones);
+  if (gogoZones) this._drawGogoZones(ctx, layout, yAtPrice, gogoZones, sliced, xAtIndex);
   if (this.options.showMaCloud) this._drawMaCloud(ctx, sliced, xAtIndex, yAtPrice);
   if (this.options.showRainbow) this._drawRainbow(ctx, sliced, xAtIndex, yAtPrice);
   if (this.options.showSma50) this._drawLine(ctx, sliced, this.computed?.ma50, xAtIndex, yAtPrice, COLORS.sma50, 1.6);
@@ -485,7 +485,7 @@ ChartEngine.prototype._drawLine = function drawLine(ctx, sliced, series, xAtInde
   ctx.restore();
 };
 
-ChartEngine.prototype._drawGogoZones = function drawGogoZones(ctx, layout, yAtPrice, zones) {
+ChartEngine.prototype._drawGogoZones = function drawGogoZones(ctx, layout, yAtPrice, zones, sliced, xAtIndex) {
   if (!zones) return;
   const left = layout.main.x;
   const right = layout.main.x + layout.main.w;
@@ -513,6 +513,43 @@ ChartEngine.prototype._drawGogoZones = function drawGogoZones(ctx, layout, yAtPr
   ctx.save();
   band(zones.highLow, zones.highHigh, COLORS.zoneHigh, COLORS.zoneHighLine, `고점대 ${formatPrice(zones.highLow)}~${formatPrice(zones.highHigh)}`, true);
   band(zones.lowLow, zones.lowHigh, COLORS.zoneLow, COLORS.zoneLowLine, `저점대 ${formatPrice(zones.lowLow)}~${formatPrice(zones.lowHigh)}`, false);
+
+  const plotPivot = (pivot, fill) => {
+    if (!pivot || !sliced || typeof xAtIndex !== "function") return;
+    const vis = pivot.i - sliced.start;
+    if (vis < 0 || vis >= sliced.visible.length) return;
+    const x = xAtIndex(vis);
+    const y = yAtPrice(pivot.price);
+    ctx.beginPath();
+    ctx.fillStyle = fill;
+    ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  (zones.swingHighs || []).forEach((p) => plotPivot(p, COLORS.zoneHighLine));
+  (zones.swingLows || []).forEach((p) => plotPivot(p, COLORS.zoneLowLine));
+
+  if (zones.trendHigh1 && zones.trendHigh2 && sliced && typeof xAtIndex === "function") {
+    const h1 = zones.trendHigh1;
+    const h2 = zones.trendHigh2;
+    const span = h2.i - h1.i;
+    if (span > 0) {
+      const slope = (h2.price - h1.price) / span;
+      const startVis = Math.max(0, h1.i - sliced.start);
+      const endVis = sliced.visible.length - 1;
+      if (endVis >= startVis) {
+        const pStart = h1.price + slope * (sliced.start + startVis - h1.i);
+        const pEnd = h1.price + slope * (sliced.start + endVis - h1.i);
+        ctx.strokeStyle = zones.isBreakout ? COLORS.zoneLowLine : COLORS.zoneHighLine;
+        ctx.lineWidth = 1.4;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(xAtIndex(startVis), yAtPrice(pStart));
+        ctx.lineTo(xAtIndex(endVis), yAtPrice(pEnd));
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+  }
   ctx.restore();
 };
 

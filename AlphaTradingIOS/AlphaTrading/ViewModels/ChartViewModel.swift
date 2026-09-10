@@ -6,10 +6,12 @@ final class ChartViewModel: ObservableObject {
     @Published var quote: Quote?
     @Published var isLoading = false
     @Published var errorMessage: String?
+    @Published var outlookLine: String?
 
     func load(code: String, period: String = "D", kind: AssetKind = .kr) async {
         isLoading = true
         errorMessage = nil
+        outlookLine = nil
         defer { isLoading = false }
         do {
             if kind == .kr {
@@ -28,6 +30,11 @@ final class ChartViewModel: ObservableObject {
                 let (chart, q) = try await (chartTask, quoteTask)
                 candles = chart.candles.reversed()
                 quote = q
+                if period == "D" {
+                    let outlookCode = code
+                    let outlookKind = kind
+                    Task { await self.loadOutlook(code: outlookCode, kind: outlookKind) }
+                }
             } else {
                 // 미국주식/코인 — Yahoo 캔들 (주봉/월봉은 period=W/M 그대로 지원)
                 async let chartTask: ChartResponse = APIClient.shared.get(
@@ -44,6 +51,11 @@ final class ChartViewModel: ObservableObject {
                 )
                 let (chart, gq) = try await (chartTask, quoteTask)
                 candles = chart.candles // Yahoo는 과거→현재 순
+                if period == "D" {
+                    let outlookCode = code
+                    let outlookKind = kind
+                    Task { await self.loadOutlook(code: outlookCode, kind: outlookKind) }
+                }
                 quote = Quote(
                     code: code, name: nil,
                     price: gq.price, change: gq.change, changeRate: gq.changeRate,
@@ -53,6 +65,20 @@ final class ChartViewModel: ObservableObject {
             }
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// 차트 랩 유사패턴 전망 한 줄 — 실패해도 메인 차트는 유지
+    private func loadOutlook(code: String, kind: AssetKind) async {
+        do {
+            let query: [URLQueryItem] = kind == .kr ? [] : [URLQueryItem(name: "type", value: kind.rawValue)]
+            let lab: ChartLabResponse = try await APIClient.shared.get("/api/chartlab/\(code)", query: query)
+            guard let outlook = lab.outlook, let avg = outlook.avgReturn else { return }
+            let horizon = outlook.horizon ?? 10
+            let up = outlook.upProbability ?? 0
+            outlookLine = String(format: "유사패턴 이후 %d일 평균 %+.1f%% · 상승확률 %d%%", horizon, avg, up)
+        } catch {
+            outlookLine = nil
         }
     }
 }

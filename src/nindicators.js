@@ -517,9 +517,31 @@ function accuracy(records = []) {
   };
 }
 
+function formatZonePrice(value) {
+  const n = num(value);
+  if (!Number.isFinite(n)) return "-";
+  if (Math.abs(n) >= 100) return String(Math.round(n));
+  return (Math.round(n * 100) / 100).toFixed(2);
+}
+
+function decliningHighPair(highs, minGaps = [10, 5, 3]) {
+  if (!Array.isArray(highs) || highs.length < 2) return null;
+  for (const gap of minGaps) {
+    for (let i = highs.length - 2; i >= 0; i -= 1) {
+      for (let j = highs.length - 1; j > i; j -= 1) {
+        const h1 = highs[i];
+        const h2 = highs[j];
+        if (h1.price > h2.price && h2.i - h1.i >= gap) return { high1: h1, high2: h2 };
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * detectGogoZones — 고점대/저점대 (고고저). Matches iOS GogoZoneDetector.
  * Swing highs/lows need 2-bar confirmation; last 3 of each form a band.
+ * Also finds 고점①→고점② declining trendline (reference chart.js parity).
  */
 function detectGogoZones(candles = []) {
   const rows = Array.isArray(candles) ? candles : [];
@@ -556,10 +578,27 @@ function detectGogoZones(candles = []) {
   const lowHigh = Math.max(...loPrices);
   const declining = recentHighs.length >= 2 && recentHighs[recentHighs.length - 1].price < recentHighs[0].price;
   const risingLows = recentLows.length >= 2 && recentLows[recentLows.length - 1].price > recentLows[0].price;
-  let comment = `고점대 ${highLow}~${highHigh}, 저점대 ${lowLow}~${lowHigh}.`;
+  const pair = decliningHighPair(highs);
+  let trendLinePrice = null;
+  let isBreakout = false;
+  if (pair) {
+    const span = pair.high2.i - pair.high1.i;
+    if (span > 0) {
+      const slope = (pair.high2.price - pair.high1.price) / span;
+      trendLinePrice = pair.high1.price + slope * (rows.length - 1 - pair.high1.i);
+      const lastClose = num(rows[rows.length - 1].close);
+      isBreakout = Number.isFinite(lastClose) && lastClose > trendLinePrice;
+    }
+  }
+  let comment = `고점대 ${formatZonePrice(highLow)}~${formatZonePrice(highHigh)}, 저점대 ${formatZonePrice(lowLow)}~${formatZonePrice(lowHigh)}.`;
   if (declining && risingLows) comment += " 고점은 낮아지고 저점은 높아지는 고고저 수렴.";
   else if (declining) comment += " 하락 고점 구조 — 추세선 아래 압력.";
   else if (risingLows) comment += " 상승 저점 구조 — 지지가 우상향.";
+  if (Number.isFinite(trendLinePrice)) {
+    comment += isBreakout
+      ? ` 종가가 고고저 추세선(${formatZonePrice(trendLinePrice)}) 위 — 돌파.`
+      : ` 종가가 고고저 추세선(${formatZonePrice(trendLinePrice)}) 아래 — 감시.`;
+  }
   return {
     highLow,
     highHigh,
@@ -570,6 +609,12 @@ function detectGogoZones(candles = []) {
     comment,
     zoneHigh: { low: highLow, high: highHigh },
     zoneLow: { low: lowLow, high: lowHigh },
+    swingHighs: recentHighs,
+    swingLows: recentLows,
+    trendHigh1: pair ? pair.high1 : null,
+    trendHigh2: pair ? pair.high2 : null,
+    trendLinePrice,
+    isBreakout,
   };
 }
 

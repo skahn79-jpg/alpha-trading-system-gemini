@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import NChart from "./nchart";
 
 /**
@@ -22,6 +22,7 @@ export default function ProChartCanvas({
 }) {
   const canvasRef = useRef(null);
   const chartRef = useRef(null);
+  const [gogoComment, setGogoComment] = useState("");
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -39,7 +40,8 @@ export default function ProChartCanvas({
       onViewChange,
     });
     chart.setData(candles, view);
-    chart.draw();
+    const first = chart.draw();
+    setGogoComment(first?.gogoZones?.comment || "");
     chartRef.current = chart;
     const onResize = () => chart.draw();
     window.addEventListener("resize", onResize);
@@ -58,14 +60,20 @@ export default function ProChartCanvas({
     chart.options.showHalving = showHalving;
     chart.options.showGogoZones = showGogoZones;
     chart.setData(candles, view);
-    chart.draw();
+    const next = chart.draw();
+    setGogoComment(showGogoZones ? (next?.gogoZones?.comment || "") : "");
   }, [candles, view, overlays, showRainbow, showHalving, showGogoZones]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="pro-chart-canvas"
-      style={{ width: "100%", height, display: "block", touchAction: "none" }}
-    />
+    <div>
+      <canvas
+        ref={canvasRef}
+        className="pro-chart-canvas"
+        style={{ width: "100%", height, display: "block", touchAction: "none" }}
+      />
+      {gogoComment ? (
+        <div style={{ color: "#8aa4b5", fontSize: 11, padding: "6px 4px 0" }}>{gogoComment}</div>
+      ) : null}
+    </div>
   );
 }

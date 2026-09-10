@@ -70,6 +70,37 @@ test("detectGogoZones builds high/low bands from swing pivots", () => {
   assert.ok(zones.zoneHigh.high >= zones.zoneHigh.low);
   assert.ok(zones.zoneLow.high >= zones.zoneLow.low);
   assert.ok(String(zones.comment).includes("고점대"));
+  assert.ok(Array.isArray(zones.swingHighs) && zones.swingHighs.length > 0);
+  assert.ok(Array.isArray(zones.swingLows) && zones.swingLows.length > 0);
+  if (zones.trendHigh1 && zones.trendHigh2) {
+    assert.ok(zones.trendHigh1.price > zones.trendHigh2.price);
+    assert.ok(zones.trendHigh1.i < zones.trendHigh2.i);
+  }
+});
+
+test("detectGogoZones finds declining high-to-high trendline", () => {
+  const candles = [];
+  for (let i = 0; i < 36; i += 1) {
+    let close = 100 + Math.sin(i / 3) * 2;
+    if (i === 6) close = 140;
+    else if (i === 20) close = 122;
+    else if (i === 13) close = 88;
+    else if (i === 28) close = 94;
+    candles.push({
+      date: `202603${String(i + 1).padStart(2, "0")}`,
+      open: close - 1,
+      high: close + 4,
+      low: close - 4,
+      close,
+      volume: 1000,
+    });
+  }
+  const zones = NIndicators.detectGogoZones(candles);
+  assert.ok(zones);
+  assert.ok(zones.trendHigh1 && zones.trendHigh2);
+  assert.ok(zones.trendHigh1.price > zones.trendHigh2.price);
+  assert.ok(Number.isFinite(zones.trendLinePrice));
+  assert.ok(String(zones.comment).includes("추세선"));
 });
 
 test("personalAlerts covers 급락 돌파 공포탐욕 뉴스", () => {

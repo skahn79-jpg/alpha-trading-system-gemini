@@ -333,6 +333,13 @@ enum MarketSignalEngine {
     }
 }
 
+struct GogoPivot: Equatable, Identifiable {
+    var index: Int
+    var price: Double
+    var date: String
+    var id: String { "\(index)-\(date)-\(price)" }
+}
+
 struct GogoZoneResult: Equatable {
     var highLow: Double
     var highHigh: Double
@@ -341,6 +348,12 @@ struct GogoZoneResult: Equatable {
     var highDates: [String]
     var lowDates: [String]
     var comment: String
+    var swingHighs: [GogoPivot]
+    var swingLows: [GogoPivot]
+    var trendHigh1: GogoPivot?
+    var trendHigh2: GogoPivot?
+    var trendLinePrice: Double?
+    var isBreakout: Bool
 
     var highBand: ClosedRange<Double> { min(highLow, highHigh)...max(highLow, highHigh) }
     var lowBand: ClosedRange<Double> { min(lowLow, lowHigh)...max(lowLow, lowHigh) }
@@ -349,44 +362,83 @@ struct GogoZoneResult: Equatable {
 enum GogoZoneDetector {
     static func detect(candles: [ChartCandle]) -> GogoZoneResult? {
         guard candles.count >= 12 else { return nil }
-        var highs: [(Int, Double, String)] = []
-        var lows: [(Int, Double, String)] = []
+        var highs: [GogoPivot] = []
+        var lows: [GogoPivot] = []
         for i in 2..<(candles.count - 2) {
             let c = candles[i]
             if c.high >= candles[i - 1].high && c.high >= candles[i - 2].high &&
                 c.high >= candles[i + 1].high && c.high >= candles[i + 2].high {
-                highs.append((i, c.high, c.date))
+                highs.append(GogoPivot(index: i, price: c.high, date: c.date))
             }
             if c.low <= candles[i - 1].low && c.low <= candles[i - 2].low &&
                 c.low <= candles[i + 1].low && c.low <= candles[i + 2].low {
-                lows.append((i, c.low, c.date))
+                lows.append(GogoPivot(index: i, price: c.low, date: c.date))
             }
         }
         let recentHighs = Array(highs.suffix(3))
         let recentLows = Array(lows.suffix(3))
-        guard let hiPrices = nonEmpty(recentHighs.map(\.1)), let loPrices = nonEmpty(recentLows.map(\.1)) else { return nil }
+        guard let hiPrices = nonEmpty(recentHighs.map(\.price)), let loPrices = nonEmpty(recentLows.map(\.price)) else { return nil }
         let highLo = hiPrices.min()!
         let highHi = hiPrices.max()!
         let lowLo = loPrices.min()!
         let lowHi = loPrices.max()!
-        let declining = recentHighs.count >= 2 && recentHighs[recentHighs.count - 1].1 < recentHighs[0].1
-        let risingLows = recentLows.count >= 2 && recentLows[recentLows.count - 1].1 > recentLows[0].1
+        let declining = recentHighs.count >= 2 && recentHighs[recentHighs.count - 1].price < recentHighs[0].price
+        let risingLows = recentLows.count >= 2 && recentLows[recentLows.count - 1].price > recentLows[0].price
+        let pair = decliningPair(highs: highs, minGaps: [10, 5, 3])
+        var trendPrice: Double?
+        var isBreakout = false
+        if let pair {
+            let span = Double(pair.1.index - pair.0.index)
+            if span > 0, let last = candles.last {
+                let slope = (pair.1.price - pair.0.price) / span
+                trendPrice = pair.0.price + slope * Double(candles.count - 1 - pair.0.index)
+                isBreakout = last.close > trendPrice!
+            }
+        }
         var comment = "고점대 \(MarketSignalEngine.formatPrice(highLo))~\(MarketSignalEngine.formatPrice(highHi)), 저점대 \(MarketSignalEngine.formatPrice(lowLo))~\(MarketSignalEngine.formatPrice(lowHi))."
         if declining && risingLows { comment += " 고점은 낮아지고 저점은 높아지는 고고저 수렴." }
         else if declining { comment += " 하락 고점 구조 — 추세선 아래 압력." }
         else if risingLows { comment += " 상승 저점 구조 — 지지가 우상향." }
+        if let trendPrice {
+            comment += isBreakout
+                ? " 종가가 고고저 추세선(\(MarketSignalEngine.formatPrice(trendPrice))) 위 — 돌파."
+                : " 종가가 고고저 추세선(\(MarketSignalEngine.formatPrice(trendPrice))) 아래 — 감시."
+        }
         return GogoZoneResult(
             highLow: highLo,
             highHigh: highHi,
             lowLow: lowLo,
             lowHigh: lowHi,
-            highDates: recentHighs.map(\.2),
-            lowDates: recentLows.map(\.2),
-            comment: comment
+            highDates: recentHighs.map(\.date),
+            lowDates: recentLows.map(\.date),
+            comment: comment,
+            swingHighs: recentHighs,
+            swingLows: recentLows,
+            trendHigh1: pair?.0,
+            trendHigh2: pair?.1,
+            trendLinePrice: trendPrice,
+            isBreakout: isBreakout
         )
     }
 
     private static func nonEmpty(_ values: [Double]) -> [Double]? {
         values.isEmpty ? nil : values
+    }
+
+    /// 높은 고점①과 이후 낮은 고점② (참고 차트 고고저 추세선)
+    private static func decliningPair(highs: [GogoPivot], minGaps: [Int]) -> (GogoPivot, GogoPivot)? {
+        guard highs.count >= 2 else { return nil }
+        for gap in minGaps {
+            for i in stride(from: highs.count - 2, through: 0, by: -1) {
+                for j in stride(from: highs.count - 1, to: i, by: -1) {
+                    let h1 = highs[i]
+                    let h2 = highs[j]
+                    if h1.price > h2.price && h2.index - h1.index >= gap {
+                        return (h1, h2)
+                    }
+                }
+            }
+        }
+        return nil
     }
 }

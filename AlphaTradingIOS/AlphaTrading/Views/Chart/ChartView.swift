@@ -148,8 +148,15 @@ struct ChartView: View {
                 .font(.paperlogy(10))
                 .foregroundStyle(AppTheme.textSecondary)
                 .padding(.horizontal, 12)
+                .padding(.bottom, viewModel.outlookLine == nil ? 8 : 2)
+        }
+        if let outlook = viewModel.outlookLine {
+            Text(outlook)
+                .font(.paperlogy(10))
+                .foregroundStyle(AppTheme.textSecondary)
+                .padding(.horizontal, 12)
                 .padding(.bottom, 8)
-        } else {
+        } else if MarketSignalEngine.multiTimeframeSummary(candles: viewModel.candles) == nil {
             Spacer().frame(height: 4)
         }
     }
@@ -250,6 +257,10 @@ struct ChartView: View {
             legendItem(color: AppTheme.accent, label: "MA20")
             legendItem(color: .purple, label: "MA60")
             legendItem(color: AppTheme.accent.opacity(0.3), label: "볼린저")
+            if showGogoZones {
+                legendItem(color: AppTheme.down.opacity(0.7), label: "고점대")
+                legendItem(color: AppTheme.up.opacity(0.7), label: "저점대")
+            }
             Spacer()
         }
         .padding(.horizontal, 12)
@@ -361,7 +372,45 @@ struct ChartView: View {
                         .font(.paperlogy(8))
                         .foregroundStyle(AppTheme.up)
                 }
+            ForEach(zones.swingHighs.filter { displayDateSet.contains($0.date) }) { pivot in
+                PointMark(x: .value("Date", pivot.date), y: .value("고점", pivot.price))
+                    .foregroundStyle(AppTheme.down)
+                    .symbolSize(28)
+            }
+            ForEach(zones.swingLows.filter { displayDateSet.contains($0.date) }) { pivot in
+                PointMark(x: .value("Date", pivot.date), y: .value("저점", pivot.price))
+                    .foregroundStyle(AppTheme.up)
+                    .symbolSize(28)
+            }
+            ForEach(gogoTrendPoints, id: \.date) { point in
+                LineMark(
+                    x: .value("Date", point.date),
+                    y: .value("고고저추세", point.value),
+                    series: .value("고고저", "고고저추세")
+                )
+                .foregroundStyle((gogoZones?.isBreakout == true ? AppTheme.up : AppTheme.down).opacity(0.85))
+                .lineStyle(StrokeStyle(lineWidth: 1.4, dash: [6, 4]))
+            }
         }
+    }
+
+    /// 고점①→고점② 하락 추세선을 표시 구간까지 연장
+    private var gogoTrendPoints: [MAPoint] {
+        guard let zones = gogoZones,
+              let h1 = zones.trendHigh1,
+              let h2 = zones.trendHigh2,
+              h2.index > h1.index else { return [] }
+        let slope = (h2.price - h1.price) / Double(h2.index - h1.index)
+        let candles = viewModel.candles
+        let visible = displayDateSet
+        var points: [MAPoint] = []
+        for i in h1.index..<candles.count {
+            let y = h1.price + slope * Double(i - h1.index)
+            if visible.contains(candles[i].date) {
+                points.append(MAPoint(date: candles[i].date, value: y))
+            }
+        }
+        return points
     }
 
     private var displayDateSet: Set<String> {
@@ -427,6 +476,10 @@ struct ChartView: View {
         if showGogoZones, let zones = gogoZones {
             lows.append(zones.lowLow)
             highs.append(zones.highHigh)
+            if let trend = zones.trendLinePrice {
+                lows.append(trend)
+                highs.append(trend)
+            }
         }
         if let poc = volumePOC {
             lows.append(poc)
@@ -1260,7 +1313,7 @@ private struct ChartGestureOverlay: UIViewRepresentable {
     }
 }
 
-final class ChartGestureUIView: UIView, UIGestureRecognizerDelegate {
+fileprivate final class ChartGestureUIView: UIView, UIGestureRecognizerDelegate {
     var coordinator: ChartGestureOverlay.Coordinator?
 
     override init(frame: CGRect) {
@@ -1323,7 +1376,7 @@ final class ChartGestureUIView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
         let t = pan.translation(in: self)
         let v = pan.velocity(in: self)
