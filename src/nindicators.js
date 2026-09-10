@@ -517,6 +517,55 @@ function accuracy(records = []) {
   };
 }
 
+/**
+ * personalAlerts — 급락 / 돌파 / 공포탐욕 / 뉴스 (분석 전용, 주문 없음)
+ * Mirrors the iOS MarketSignalEngine thresholds for the web chart banner.
+ */
+function personalAlerts(input = {}) {
+  const name = String(input.name || input.code || "");
+  const code = String(input.code || "");
+  const changeRate = num(input.changeRate, 0);
+  const lastClose = num(input.lastClose);
+  const recentHigh = num(input.recentHigh);
+  const fearGreed = Number.isFinite(Number(input.fearGreed)) ? Number(input.fearGreed) : null;
+  const titles = Array.isArray(input.newsTitles) ? input.newsTitles : [];
+  const out = [];
+
+  if (changeRate <= -5) {
+    out.push({ kind: "crash", label: "급락", severity: "high", opportunity: false, title: `${name} 급락`, detail: `등락률 ${changeRate.toFixed(1)}%` });
+  } else if (changeRate <= -3) {
+    out.push({ kind: "crash", label: "급락", severity: "medium", opportunity: false, title: `${name} 급락`, detail: `등락률 ${changeRate.toFixed(1)}%` });
+  }
+
+  if (Number.isFinite(lastClose) && lastClose > 0 && Number.isFinite(recentHigh) && recentHigh > 0 && lastClose >= recentHigh * 1.002) {
+    out.push({ kind: "breakout", label: "돌파", severity: "high", opportunity: true, title: `${name} 돌파`, detail: "최근 고점 상향 돌파" });
+  }
+
+  if (fearGreed != null) {
+    if (fearGreed <= 22) {
+      out.push({ kind: "fearGreed", label: "공포탐욕", severity: fearGreed <= 12 ? "high" : "medium", opportunity: true, title: "극단적 공포", detail: `공포탐욕 ${fearGreed}` });
+    } else if (fearGreed >= 78) {
+      out.push({ kind: "fearGreed", label: "공포탐욕", severity: fearGreed >= 88 ? "high" : "medium", opportunity: false, title: "극단적 탐욕", detail: `공포탐욕 ${fearGreed}` });
+    }
+  }
+
+  const riskWords = ["급락", "적자", "수사", "리콜", "제재", "감소", "하향", "위험"];
+  const oppWords = ["수주", "실적", "돌파", "승인", "계약", "흑자", "상향", "급등"];
+  const hits = titles.filter((t) => {
+    const s = String(t || "");
+    return (name && s.includes(name)) || (code && s.includes(code));
+  });
+  if (hits.length) {
+    const risk = hits.some((t) => riskWords.some((w) => t.includes(w)));
+    const opp = hits.some((t) => oppWords.some((w) => t.includes(w)));
+    if (risk || opp) {
+      out.push({ kind: "news", label: "뉴스", severity: risk ? "high" : "medium", opportunity: opp && !risk, title: `${name} 뉴스`, detail: hits[0] });
+    }
+  }
+
+  return out;
+}
+
 const NIndicators = {
   smaSeries,
   emaSeries,
@@ -534,6 +583,7 @@ const NIndicators = {
   buildSignals,
   currentZone,
   accuracy,
+  personalAlerts,
 };
 
 export default NIndicators;
@@ -551,4 +601,5 @@ export {
   buildSignals,
   currentZone,
   accuracy,
+  personalAlerts,
 };

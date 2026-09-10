@@ -1,5 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ChartGestures from "./chart-gestures.js";
+import NIndicators from "./nindicators.js";
 
 /**
  * ALPHA TRADING SYSTEM — 통합 확장 버전
@@ -11056,6 +11057,20 @@ const loadExtendedGogo = async (trigger = "manual") => {
   const rsiSeries = calcRSISeries(chartData, 14);
   const psych = analyzeMarketPsychology(chartData, rsiSeries);
   const psychPatterns = detectPsychPatterns(chartData);
+  const personalAlertRows = (() => {
+    const last = chartData[chartData.length - 1];
+    const prev = chartData[chartData.length - 2];
+    const changeRate = last && prev && prev.close ? ((last.close - prev.close) / prev.close) * 100 : 0;
+    const recentHigh = chartData.slice(0, -1).reduce((m, c) => Math.max(m, Number(c.high) || 0), 0);
+    return NIndicators.personalAlerts({
+      name: selected?.name || selected?.code || "",
+      code: selected?.code || "",
+      changeRate,
+      lastClose: last?.close,
+      recentHigh,
+      fearGreed: psych?.fearGreedScore,
+    });
+  })();
   const lastPsychLog = psychLog.filter((x) => String(x.code) === String(selected?.code || selected?.symbol)).slice(0, 20);
 
   const gogoSignal = calculateGogojeoSignal(chartData, {
@@ -11455,6 +11470,17 @@ const loadExtendedGogo = async (trigger = "manual") => {
             <div className="chart-pro-chip"><b>박스권</b><br />{boxInfo?.upper ? `${fmtPrice(boxInfo.lower)} ~ ${fmtPrice(boxInfo.upper)} · 폭 ${boxInfo.widthRate}%` : "-"}</div>
             <div className="chart-pro-chip"><b>심리</b><br /><span style={{ color: psych.phaseColor }}>{psych.phase}</span> · {psych.fearGreedScore}점</div>
           </div>
+          {personalAlertRows.length > 0 && (
+            <div className="error" style={{ borderColor: "#ffd44766", color: "#d9ecf5", background: "#ffd44711" }}>
+              위험·기회 알림 (분석 전용 · 급락/돌파/공포탐욕/뉴스)
+              {personalAlertRows.map((row) => (
+                <div key={row.kind} style={{ marginTop: 6 }}>
+                  <b style={{ color: row.opportunity ? "#00ff88" : "#ff4466" }}>{row.label}</b>
+                  {" · "}{row.title} — {row.detail}
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="technique-grid">
             {techniqueAI.ranked.map((t) => (

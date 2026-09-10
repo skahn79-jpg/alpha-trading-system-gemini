@@ -53,3 +53,15 @@ test("nindicators compute/buildSignals/currentZone/accuracy stay compatible", ()
   assert.ok(Array.isArray(computed.rsi));
   assert.ok(computed.td);
 });
+
+test("personalAlerts covers 급락 돌파 공포탐욕 뉴스", () => {
+  const crash = NIndicators.personalAlerts({ name: "테스트", code: "005930", changeRate: -6.1 });
+  assert.equal(crash[0].kind, "crash");
+  assert.equal(crash[0].label, "급락");
+  const brk = NIndicators.personalAlerts({ name: "테스트", lastClose: 111, recentHigh: 105 });
+  assert.equal(brk.some((s) => s.kind === "breakout"), true);
+  const fg = NIndicators.personalAlerts({ name: "테스트", fearGreed: 12 });
+  assert.equal(fg.some((s) => s.kind === "fearGreed" && s.opportunity), true);
+  const news = NIndicators.personalAlerts({ name: "테스트전자", code: "005930", newsTitles: ["테스트전자 실적 상향"] });
+  assert.equal(news.some((s) => s.kind === "news" && s.opportunity), true);
+});
