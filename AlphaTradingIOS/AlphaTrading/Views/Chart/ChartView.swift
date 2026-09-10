@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import UIKit
 
 struct ChartView: View {
     let code: String
@@ -8,11 +9,22 @@ struct ChartView: View {
     // 주봉/월봉 = 시트의 사이클 판단 타임프레임 (커뮤니티 앱에서는 구독 기능)
     @State private var period = "D"
 
-    // 표시 구간: 최근 60봉 (MA/볼린저 계산은 전체 데이터 사용)
-    private let displayCount = 60
+    // 표시 구간: pinch로 봉 수 변경, 좌우 드래그로 과거 이동 (MA/볼린저는 전체 데이터 사용)
+    @State private var chartWindow = ChartWindow(visibleCount: ChartWindow.defaultCount, offset: 0)
+    @State private var pinchBaseCount = ChartWindow.defaultCount
+    @State private var panStartOffset = 0
+    @State private var chartWidth: CGFloat = 320
 
     // 학습 모드: 켜진 오버레이 집합 (비어 있으면 기존 차트와 동일)
     @State private var learnModes: Set<LearnMode> = []
+    @State private var showGogoZones = true
+    /// Session override: user dragged 고고저 ①/②; auto-detect pauses until reset.
+    @State private var gogoUserAdjusted = false
+    @State private var gogoManualP1: GogoPivot?
+    @State private var gogoManualP2: GogoPivot?
+    @State private var gogoDragWhich: Int? // 1 or 2 while dragging
+    @State private var didAutoFitGogo = false
+    @State private var priceChartHeight: CGFloat = 260
 
     // AI 예측 (kr 전용) — 예측 칩을 켤 때 1회 로드
     @State private var prediction: PredictResponse?
@@ -30,6 +42,9 @@ struct ChartView: View {
             .padding(.top, 10)
 
             learnChipRow
+            SignalBannerPair(signals: chartSignals, showEmptySections: false) { signal in
+                NotificationRouter.shared.openSignal(signal)
+            }
 
             if viewModel.isLoading && viewModel.candles.isEmpty {
                 LoadingView(message: "차트 로딩...")
@@ -45,9 +60,8 @@ struct ChartView: View {
                     .foregroundStyle(AppTheme.textSecondary)
                     .padding()
             } else {
-                priceChart
+                interactiveCharts
                 legend
-                volumeChart
                 if !learnModes.isEmpty {
                     learnCard
                 }
@@ -55,7 +69,258 @@ struct ChartView: View {
         }
         .background(AppTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .task(id: "\(code)-\(period)-\(kind.rawValue)") { await viewModel.load(code: code, period: period, kind: kind) }
+        .task(id: "\(code)-\(period)-\(kind.rawValue)") {
+            let prefs = ChartOverlayPrefs.load(code: code)
+            showGogoZones = prefs.showGogo
+            learnModes = Set(prefs.modes.compactMap(LearnMode.init(rawValue:)))
+            gogoUserAdjusted = false
+            gogoManualP1 = nil
+            gogoManualP2 = nil
+            gogoDragWhich = nil
+            didAutoFitGogo = false
+            resetWindow()
+            await viewModel.load(code: code, period: period, kind: kind)
+            if showGogoZones { fitWindowToGogo(force: true) }
+        }
+        .onChange(of: viewModel.candles.count) { _ in
+            chartWindow = chartWindow.clamped(total: viewModel.candles.count)
+            if showGogoZones && !gogoUserAdjusted && !didAutoFitGogo {
+                fitWindowToGogo(force: true)
+            }
+        }
+        .onChange(of: showGogoZones) { on in
+            persistOverlayPrefs()
+            if on { fitWindowToGogo(force: true) }
+        }
+        .onChange(of: learnModes) { _ in persistOverlayPrefs() }
+    }
+
+    private var interactiveCharts: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            priceChart
+            volumeChart
+            chartWindowBar
+        }
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(key: ChartWidthPreferenceKey.self, value: geo.size.width)
+            }
+        )
+        .onPreferenceChange(ChartWidthPreferenceKey.self) { chartWidth = max(120, $0) }
+        .overlay {
+            ChartGestureOverlay(
+                onPinchBegan: { pinchBaseCount = chartWindow.visibleCount },
+                onPinchChanged: { scale in
+                    chartWindow = chartWindow.pinched(
+                        scale: scale,
+                        baseCount: pinchBaseCount,
+                        total: viewModel.candles.count
+                    )
+                },
+                onPinchEnded: { pinchBaseCount = chartWindow.visibleCount },
+                hitTestPivot: { point, size in
+                    showGogoZones ? hitTestGogoPivot(at: point, in: size) : nil
+                },
+                onPanBegan: { point, size in
+                    if showGogoZones, let which = hitTestGogoPivot(at: point, in: size) {
+                        gogoDragWhich = which
+                        ensureManualPivotsFromAuto()
+                        return true
+                    }
+                    gogoDragWhich = nil
+                    panStartOffset = chartWindow.offset
+                    return false
+                },
+                onPanChanged: { dx, point, size in
+                    if let which = gogoDragWhich {
+                        dragGogoPivot(which: which, to: point, in: size)
+                        return
+                    }
+                    chartWindow = chartWindow.panned(
+                        translationX: dx,
+                        chartWidth: chartWidth,
+                        startOffset: panStartOffset,
+                        total: viewModel.candles.count
+                    )
+                },
+                onPanEnded: {
+                    if gogoDragWhich != nil {
+                        gogoDragWhich = nil
+                        gogoUserAdjusted = true
+                        return
+                    }
+                    panStartOffset = chartWindow.offset
+                }
+            )
+        }
+        .accessibilityHint("두 손가락으로 확대 축소하고, 좌우로 밀어 과거 차트를 봅니다.")
+    }
+
+    @ViewBuilder
+    private var chartWindowBar: some View {
+        HStack(spacing: 8) {
+            Text("두 손가락 확대/축소 · 좌우로 밀어 과거 보기")
+                .font(.paperlogy(10))
+                .foregroundStyle(AppTheme.textSecondary)
+            Spacer()
+            Text("\(displayCandles.count)봉 / 전체 \(viewModel.candles.count)봉 · ATR \(String(format: "%.1f", atrPct * 100))%")
+                .font(.paperlogy(10, weight: .medium))
+                .foregroundStyle(AppTheme.textSecondary)
+            if chartWindow.offset > 0 {
+                Button("최근") {
+                    chartWindow = ChartWindow(visibleCount: chartWindow.visibleCount, offset: 0)
+                        .clamped(total: viewModel.candles.count)
+                }
+                .font(.paperlogy(10, weight: .semibold))
+                .foregroundStyle(AppTheme.accent)
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 4)
+        if let zones = gogoZones, showGogoZones {
+            Text(zones.comment)
+                .font(.paperlogy(10))
+                .foregroundStyle(AppTheme.textSecondary)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 2)
+            Text(gogoUserAdjusted
+                 ? "①·②를 드래그해 구조를 맞춘 상태 · 초기화/자동으로 복원"
+                 : "①·② 마커를 드래그하면 추세선·국면을 수동 조정")
+                .font(.paperlogy(9))
+                .foregroundStyle(AppTheme.textSecondary.opacity(0.85))
+                .padding(.horizontal, 12)
+                .padding(.bottom, 4)
+        }
+        if let gap = openingGap {
+            Text(String(format: "시초 갭 %+.1f%% (전일 %@ → 시가 %@)", gap.pct, Self.priceLabel(gap.prevClose), Self.priceLabel(gap.open)))
+                .font(.paperlogy(10))
+                .foregroundStyle(gap.pct >= 0 ? AppTheme.up : AppTheme.down)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 4)
+        }
+        if let vp = volumeProfile {
+            Text(vp.comment)
+                .font(.paperlogy(10))
+                .foregroundStyle(AppTheme.textSecondary)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 2)
+        }
+        if let tf = MarketSignalEngine.multiTimeframeSummary(
+            candles: viewModel.candles,
+            weekly: viewModel.weeklyCandles
+        ) {
+            Text(tf)
+                .font(.paperlogy(10))
+                .foregroundStyle(AppTheme.textSecondary)
+                .padding(.horizontal, 12)
+                .padding(.bottom, viewModel.outlookLine == nil ? 8 : 2)
+        }
+        if let outlook = viewModel.outlookLine {
+            Text(outlook)
+                .font(.paperlogy(10))
+                .foregroundStyle(AppTheme.textSecondary)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+        } else if MarketSignalEngine.multiTimeframeSummary(
+            candles: viewModel.candles,
+            weekly: viewModel.weeklyCandles
+        ) == nil && volumeProfile == nil {
+            Spacer().frame(height: 4)
+        }
+    }
+
+    private func resetWindow() {
+        chartWindow = ChartWindow(visibleCount: ChartWindow.defaultCount, offset: 0)
+        pinchBaseCount = ChartWindow.defaultCount
+        panStartOffset = 0
+    }
+
+    /// Zoom/pan window so pivot ① (with padding) through the latest bar are visible.
+    private func fitWindowToGogo(force: Bool = false) {
+        guard showGogoZones else { return }
+        guard force || !didAutoFitGogo else { return }
+        guard let p1 = gogoZones?.trendHigh1 ?? gogoManualP1 else { return }
+        chartWindow = ChartWindow.covering(
+            fromIndex: p1.index,
+            total: viewModel.candles.count,
+            paddingBefore: GogoZoneDetector.fitPaddingBefore
+        )
+        pinchBaseCount = chartWindow.visibleCount
+        panStartOffset = chartWindow.offset
+        didAutoFitGogo = true
+    }
+
+    private func resetGogoToAuto() {
+        gogoUserAdjusted = false
+        gogoManualP1 = nil
+        gogoManualP2 = nil
+        gogoDragWhich = nil
+        didAutoFitGogo = false
+        fitWindowToGogo(force: true)
+    }
+
+    private func ensureManualPivotsFromAuto() {
+        if gogoManualP1 == nil || gogoManualP2 == nil {
+            let auto = GogoZoneDetector.detect(candles: viewModel.candles, period: period)
+            gogoManualP1 = gogoManualP1 ?? auto?.trendHigh1
+            gogoManualP2 = gogoManualP2 ?? auto?.trendHigh2
+        }
+    }
+
+    /// Hit-test near ①/② markers in the price chart plot area (pure; no state mutation).
+    private func hitTestGogoPivot(at point: CGPoint, in size: CGSize) -> Int? {
+        guard showGogoZones else { return nil }
+        let p1 = gogoManualP1 ?? gogoZones?.trendHigh1
+        let p2 = gogoManualP2 ?? gogoZones?.trendHigh2
+        guard let p1, let p2 else { return nil }
+        let plotH = priceChartHeight
+        guard point.y >= 0, point.y <= plotH + 16 else { return nil }
+        let plotW = max(1, size.width)
+        func screenPoint(for pivot: GogoPivot) -> CGPoint? {
+            guard let vis = displayCandles.firstIndex(where: { $0.date == pivot.date }) else { return nil }
+            let n = max(1, displayCandles.count)
+            let x = (CGFloat(vis) + 0.5) / CGFloat(n) * plotW
+            let domain = yDomain
+            let span = max(1e-9, domain.upperBound - domain.lowerBound)
+            let yFrac = CGFloat((domain.upperBound - pivot.price) / span)
+            let y = 8 + yFrac * (plotH - 8)
+            return CGPoint(x: x, y: y)
+        }
+        let threshold: CGFloat = 28
+        if let sp = screenPoint(for: p1), hypot(sp.x - point.x, sp.y - point.y) <= threshold { return 1 }
+        if let sp = screenPoint(for: p2), hypot(sp.x - point.x, sp.y - point.y) <= threshold { return 2 }
+        return nil
+    }
+
+    private func dragGogoPivot(which: Int, to point: CGPoint, in size: CGSize) {
+        let candles = viewModel.candles
+        guard !candles.isEmpty, !displayCandles.isEmpty else { return }
+        let plotW = max(1, size.width)
+        let n = displayCandles.count
+        let vis = min(max(0, Int((point.x / plotW) * CGFloat(n))), n - 1)
+        let candle = displayCandles[vis]
+        guard let absIdx = candles.firstIndex(where: { $0.date == candle.date }) else { return }
+        // Snap to candle high (고고저 pivots are swing highs).
+        let snapped = GogoPivot(index: absIdx, price: candle.high, date: candle.date)
+        if which == 1 {
+            if let p2 = gogoManualP2, snapped.index >= p2.index - GogoZoneDetector.minPivotGap {
+                let capped = max(0, p2.index - GogoZoneDetector.minPivotGap - 1)
+                let c = candles[capped]
+                gogoManualP1 = GogoPivot(index: capped, price: c.high, date: c.date)
+            } else {
+                gogoManualP1 = snapped
+            }
+        } else {
+            if let p1 = gogoManualP1, snapped.index <= p1.index + GogoZoneDetector.minPivotGap {
+                let capped = min(candles.count - 1, p1.index + GogoZoneDetector.minPivotGap + 1)
+                let c = candles[capped]
+                gogoManualP2 = GogoPivot(index: capped, price: c.high, date: c.date)
+            } else {
+                gogoManualP2 = snapped
+            }
+        }
+        gogoUserAdjusted = true
     }
 
     // MARK: - 가격 차트 (캔들 + MA + 볼린저밴드)
@@ -86,7 +351,7 @@ struct ChartView: View {
                     x: .value("Date", candle.date),
                     yStart: .value("BodyLow", min(candle.open, candle.close)),
                     yEnd: .value("BodyHigh", max(candle.open, candle.close)),
-                    width: 5
+                    width: MarkDimension(floatLiteral: Double(candleBodyWidth))
                 )
                 .foregroundStyle(candle.isUp ? AppTheme.up : AppTheme.down)
             }
@@ -108,6 +373,27 @@ struct ChartView: View {
                     .lineStyle(StrokeStyle(lineWidth: 1.2))
             }
 
+            if showGogoZones { gogoZoneOverlay }
+            if let poc = volumePOC {
+                RuleMark(y: .value("POC", poc))
+                    .foregroundStyle(Color.orange.opacity(0.7))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 3]))
+                    .annotation(position: .trailing, alignment: .trailing) {
+                        Text("POC \(Self.priceLabel(poc))")
+                            .font(.paperlogy(8))
+                            .foregroundStyle(Color.orange)
+                    }
+            }
+            ForEach(Array(hvnLevels.enumerated()), id: \.offset) { index, price in
+                RuleMark(y: .value("HVN\(index)", price))
+                    .foregroundStyle(Color.orange.opacity(0.35))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [1, 4]))
+            }
+            ForEach(savedDrawings.filter { $0.type == "hline" && $0.price != nil }) { drawing in
+                RuleMark(y: .value("그림-\(drawing.id)", drawing.price!))
+                    .foregroundStyle(Color.yellow.opacity(0.7))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            }
             // 학습 오버레이 (켜진 모드만 그림)
             learnOverlays
         }
@@ -129,6 +415,12 @@ struct ChartView: View {
         .frame(height: 260)
         .padding(.horizontal, 8)
         .padding(.top, 8)
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(key: PriceChartHeightPreferenceKey.self, value: geo.size.height)
+            }
+        )
+        .onPreferenceChange(PriceChartHeightPreferenceKey.self) { priceChartHeight = max(120, $0) }
     }
 
     private var legend: some View {
@@ -137,6 +429,10 @@ struct ChartView: View {
             legendItem(color: AppTheme.accent, label: "MA20")
             legendItem(color: .purple, label: "MA60")
             legendItem(color: AppTheme.accent.opacity(0.3), label: "볼린저")
+            if showGogoZones {
+                legendItem(color: AppTheme.down.opacity(0.7), label: "고점대")
+                legendItem(color: AppTheme.up.opacity(0.7), label: "저점대")
+            }
             Spacer()
         }
         .padding(.horizontal, 12)
@@ -156,7 +452,7 @@ struct ChartView: View {
             BarMark(
                 x: .value("Date", candle.date),
                 y: .value("Volume", candle.volume),
-                width: 4
+                width: MarkDimension(floatLiteral: Double(max(1.5, candleBodyWidth - 1)))
             )
             .foregroundStyle((candle.isUp ? AppTheme.up : AppTheme.down).opacity(0.6))
         }
@@ -172,7 +468,174 @@ struct ChartView: View {
     // MARK: - 계산 (candles는 과거→현재 순)
 
     private var displayCandles: [ChartCandle] {
-        Array(viewModel.candles.suffix(displayCount))
+        Array(chartWindow.clamped(total: viewModel.candles.count).slice(viewModel.candles))
+    }
+
+    private var candleBodyWidth: CGFloat {
+        let n = max(1, displayCandles.count)
+        if n <= 40 { return 6 }
+        if n <= 80 { return 5 }
+        if n <= 140 { return 3 }
+        return 2
+    }
+
+    private var gogoZones: GogoZoneResult? {
+        if gogoUserAdjusted, let p1 = gogoManualP1, let p2 = gogoManualP2 {
+            return GogoZoneDetector.evaluatePair(
+                candles: viewModel.candles,
+                p1: p1,
+                p2: p2,
+                period: period,
+                userAdjusted: true
+            )
+        }
+        return GogoZoneDetector.detect(candles: viewModel.candles, period: period)
+    }
+
+    private var volumeProfile: MarketSignalEngine.VolumeProfileResult? {
+        MarketSignalEngine.volumeProfile(candles: displayCandles)
+    }
+
+    private var volumePOC: Double? {
+        volumeProfile?.poc
+    }
+
+    private var hvnLevels: [Double] {
+        guard let profile = volumeProfile else { return [] }
+        let poc = profile.poc
+        return profile.hvnMids.filter { abs($0 - poc) / max(poc, 1) > 0.004 }.prefix(2).map { $0 }
+    }
+
+    private var savedDrawings: [ChartDrawing] {
+        ChartDrawingStore.load(code: code)
+    }
+
+    private func persistOverlayPrefs() {
+        ChartOverlayPrefs.save(
+            code: code,
+            showGogo: showGogoZones,
+            modes: learnModes.map(\.rawValue).sorted()
+        )
+    }
+
+    private var openingGap: (prevClose: Double, open: Double, pct: Double)? {
+        MarketSignalEngine.openingGap(candles: viewModel.candles)
+    }
+
+    private var chartSignals: [PersonalSignal] {
+        let rate: Double? = {
+            guard viewModel.candles.count >= 2 else { return viewModel.quote?.changeRate }
+            let prev = viewModel.candles[viewModel.candles.count - 2].close
+            let last = viewModel.candles[viewModel.candles.count - 1].close
+            guard prev > 0 else { return viewModel.quote?.changeRate }
+            return ((last - prev) / prev) * 100
+        }()
+        return MarketSignalEngine.evaluate(
+            code: code,
+            name: viewModel.quote?.name ?? code,
+            changeRate: rate,
+            analysis: nil,
+            candles: viewModel.candles,
+            lastPrice: viewModel.candles.last?.close ?? viewModel.quote?.price
+        )
+    }
+
+    @ChartContentBuilder
+    private var gogoZoneOverlay: some ChartContent {
+        if let zones = gogoZones {
+            ForEach(displayCandles) { candle in
+                AreaMark(
+                    x: .value("Date", candle.date),
+                    yStart: .value("HighZoneLow", zones.highLow),
+                    yEnd: .value("HighZoneHigh", zones.highHigh)
+                )
+                .foregroundStyle(AppTheme.down.opacity(0.12))
+            }
+            ForEach(displayCandles) { candle in
+                AreaMark(
+                    x: .value("Date", candle.date),
+                    yStart: .value("LowZoneLow", zones.lowLow),
+                    yEnd: .value("LowZoneHigh", zones.lowHigh)
+                )
+                .foregroundStyle(AppTheme.up.opacity(0.12))
+            }
+            RuleMark(y: .value("고점대", (zones.highLow + zones.highHigh) / 2))
+                .foregroundStyle(AppTheme.down.opacity(0.55))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                .annotation(position: .top, alignment: .leading) {
+                    Text("고점대 \(Self.priceLabel(zones.highLow))~\(Self.priceLabel(zones.highHigh))")
+                        .font(.paperlogy(8))
+                        .foregroundStyle(AppTheme.down)
+                }
+            RuleMark(y: .value("저점대", (zones.lowLow + zones.lowHigh) / 2))
+                .foregroundStyle(AppTheme.up.opacity(0.55))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                .annotation(position: .bottom, alignment: .leading) {
+                    Text("저점대 \(Self.priceLabel(zones.lowLow))~\(Self.priceLabel(zones.lowHigh))")
+                        .font(.paperlogy(8))
+                        .foregroundStyle(AppTheme.up)
+                }
+            ForEach(zones.swingHighs.filter { displayDateSet.contains($0.date) }) { pivot in
+                PointMark(x: .value("Date", pivot.date), y: .value("고점", pivot.price))
+                    .foregroundStyle(AppTheme.down)
+                    .symbolSize(28)
+            }
+            ForEach(zones.swingLows.filter { displayDateSet.contains($0.date) }) { pivot in
+                PointMark(x: .value("Date", pivot.date), y: .value("저점", pivot.price))
+                    .foregroundStyle(AppTheme.up)
+                    .symbolSize(28)
+            }
+            if let h1 = zones.trendHigh1, displayDateSet.contains(h1.date) {
+                PointMark(x: .value("Date", h1.date), y: .value("고점①", h1.price))
+                    .foregroundStyle(AppTheme.down)
+                    .symbolSize(gogoDragWhich == 1 ? 72 : 54)
+                    .annotation(position: .top, spacing: 2) {
+                        Text("①")
+                            .font(.paperlogy(10, weight: .bold))
+                            .foregroundStyle(AppTheme.down)
+                    }
+            }
+            if let h2 = zones.trendHigh2, displayDateSet.contains(h2.date) {
+                PointMark(x: .value("Date", h2.date), y: .value("고점②", h2.price))
+                    .foregroundStyle(AppTheme.down)
+                    .symbolSize(gogoDragWhich == 2 ? 72 : 54)
+                    .annotation(position: .top, spacing: 2) {
+                        Text("②")
+                            .font(.paperlogy(10, weight: .bold))
+                            .foregroundStyle(AppTheme.down)
+                    }
+            }
+            ForEach(gogoTrendPoints, id: \.date) { point in
+                LineMark(
+                    x: .value("Date", point.date),
+                    y: .value("고고저추세", point.value),
+                    series: .value("고고저", "고고저추세")
+                )
+                .foregroundStyle((gogoZones?.isBreakout == true ? AppTheme.up : AppTheme.down).opacity(0.85))
+                .lineStyle(StrokeStyle(lineWidth: 1.4, dash: [6, 4]))
+            }
+        }
+    }
+
+    /// 고점①→고점② 하락 추세선을 표시 구간까지 연장 (급경사/비정상 투영은 숨김)
+    private var gogoTrendPoints: [MAPoint] {
+        guard let zones = gogoZones,
+              let h1 = zones.trendHigh1,
+              let h2 = zones.trendHigh2,
+              h2.index > h1.index else { return [] }
+        // Auto mode hides 급경사; manual drag keeps the line and shows warning in comment.
+        if zones.isTrendTooSteep && !gogoUserAdjusted { return [] }
+        let slope = (h2.price - h1.price) / Double(h2.index - h1.index)
+        let candles = viewModel.candles
+        let visible = displayDateSet
+        var points: [MAPoint] = []
+        for i in h1.index..<candles.count {
+            let y = h1.price + slope * Double(i - h1.index)
+            if visible.contains(candles[i].date) {
+                points.append(MAPoint(date: candles[i].date, value: y))
+            }
+        }
+        return points
     }
 
     private var displayDateSet: Set<String> {
@@ -231,25 +694,10 @@ struct ChartView: View {
         return dates
     }
 
-    /// 캔들 저가~고가 + 볼린저밴드 + (켜진 경우) 일목구름·예측 콘 범위를 모두 포함하는 y축 스케일
+    /// 표시 중인 봉의 고가·저가만으로 Y축을 맞춘다 (줌/팬 시 실시간 재계산).
+    /// 고고저 밴드·볼린저·일목 등 전체 시계열 오버레이는 도메인에 넣지 않아 최근 진폭이 납작해지지 않는다.
     private var yDomain: ClosedRange<Double> {
-        var lows = displayCandles.map { Double($0.low) } + bollingerSeries.map(\.lower)
-        var highs = displayCandles.map { Double($0.high) } + bollingerSeries.map(\.upper)
-        if learnModes.contains(.ichimoku) {
-            let cloud = ichimokuSeries
-            lows += cloud.map { min($0.spanA, $0.spanB) }
-            highs += cloud.map { max($0.spanA, $0.spanB) }
-        }
-        if learnModes.contains(.predict) {
-            let cone = forecastPoints
-            lows += cone.map(\.lower)
-            highs += cone.map(\.upper)
-        }
-        guard let minLow = lows.min(), let maxHigh = highs.max(), minLow < maxHigh else {
-            return 0...1
-        }
-        let padding = max(1, (maxHigh - minLow) / 50)
-        return (minLow - padding)...(maxHigh + padding)
+        ChartWindow.yDomain(candles: displayCandles)
     }
 
     /// 카테고리 X축에 전체 날짜 라벨이 겹쳐 그려지지 않도록 4개만 고르게 표시
@@ -319,6 +767,32 @@ struct ChartView: View {
     private var learnChipRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+            Button {
+                showGogoZones.toggle()
+            } label: {
+                Text("고고저")
+                    .font(.paperlogy(11, weight: .medium))
+                    .foregroundStyle(showGogoZones ? AppTheme.background : AppTheme.textSecondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(showGogoZones ? AppTheme.accent : Color.white.opacity(0.06)))
+                    .overlay(Capsule().stroke(showGogoZones ? Color.clear : AppTheme.line, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            if showGogoZones && gogoUserAdjusted {
+                Button {
+                    resetGogoToAuto()
+                } label: {
+                    Text("초기화/자동")
+                        .font(.paperlogy(11, weight: .medium))
+                        .foregroundStyle(AppTheme.background)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(AppTheme.down.opacity(0.85)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("고고저 자동 탐지로 초기화")
+            }
             ForEach(availableLearnModes, id: \.self) { mode in
                 let isOn = learnModes.contains(mode)
                 Button {
@@ -978,5 +1452,181 @@ struct ChartView: View {
         formatter.numberStyle = .decimal
         formatter.maximumFractionDigits = value < 100 ? 2 : 0
         return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)
+    }
+}
+
+private struct ChartWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 320
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct PriceChartHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 260
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+/// UIKit overlay so pinch + horizontal pan win over the parent SwiftUI ScrollView.
+/// Vertical pans do not begin, so the page can still scroll.
+/// When a 고고저 ①/② hit succeeds, pan is consumed as pivot drag instead of window pan.
+private struct ChartGestureOverlay: UIViewRepresentable {
+    var onPinchBegan: () -> Void
+    var onPinchChanged: (CGFloat) -> Void
+    var onPinchEnded: () -> Void
+    /// Pure hit-test used from gestureRecognizerShouldBegin (no SwiftUI state writes).
+    var hitTestPivot: (CGPoint, CGSize) -> Int?
+    /// Return true to claim the pan as a pivot drag (skip chart window pan).
+    var onPanBegan: (CGPoint, CGSize) -> Bool
+    var onPanChanged: (_ dx: CGFloat, _ point: CGPoint, _ size: CGSize) -> Void
+    var onPanEnded: () -> Void
+
+    func makeUIView(context: Context) -> ChartGestureUIView {
+        let view = ChartGestureUIView()
+        view.coordinator = context.coordinator
+        return view
+    }
+
+    func updateUIView(_ uiView: ChartGestureUIView, context: Context) {
+        context.coordinator.onPinchBegan = onPinchBegan
+        context.coordinator.onPinchChanged = onPinchChanged
+        context.coordinator.onPinchEnded = onPinchEnded
+        context.coordinator.hitTestPivot = hitTestPivot
+        context.coordinator.onPanBegan = onPanBegan
+        context.coordinator.onPanChanged = onPanChanged
+        context.coordinator.onPanEnded = onPanEnded
+        uiView.coordinator = context.coordinator
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            onPinchBegan: onPinchBegan,
+            onPinchChanged: onPinchChanged,
+            onPinchEnded: onPinchEnded,
+            hitTestPivot: hitTestPivot,
+            onPanBegan: onPanBegan,
+            onPanChanged: onPanChanged,
+            onPanEnded: onPanEnded
+        )
+    }
+
+    final class Coordinator {
+        var onPinchBegan: () -> Void
+        var onPinchChanged: (CGFloat) -> Void
+        var onPinchEnded: () -> Void
+        var hitTestPivot: (CGPoint, CGSize) -> Int?
+        var onPanBegan: (CGPoint, CGSize) -> Bool
+        var onPanChanged: (CGFloat, CGPoint, CGSize) -> Void
+        var onPanEnded: () -> Void
+        var draggingPivot = false
+
+        init(
+            onPinchBegan: @escaping () -> Void,
+            onPinchChanged: @escaping (CGFloat) -> Void,
+            onPinchEnded: @escaping () -> Void,
+            hitTestPivot: @escaping (CGPoint, CGSize) -> Int?,
+            onPanBegan: @escaping (CGPoint, CGSize) -> Bool,
+            onPanChanged: @escaping (CGFloat, CGPoint, CGSize) -> Void,
+            onPanEnded: @escaping () -> Void
+        ) {
+            self.onPinchBegan = onPinchBegan
+            self.onPinchChanged = onPinchChanged
+            self.onPinchEnded = onPinchEnded
+            self.hitTestPivot = hitTestPivot
+            self.onPanBegan = onPanBegan
+            self.onPanChanged = onPanChanged
+            self.onPanEnded = onPanEnded
+        }
+    }
+}
+
+fileprivate final class ChartGestureUIView: UIView, UIGestureRecognizerDelegate {
+    var coordinator: ChartGestureOverlay.Coordinator?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isMultipleTouchEnabled = true
+        isExclusiveTouch = false
+
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch))
+        pinch.delegate = self
+        addGestureRecognizer(pinch)
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
+        pan.delegate = self
+        pan.maximumNumberOfTouches = 1
+        addGestureRecognizer(pan)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        var node: UIView? = superview
+        while let current = node {
+            if let scroll = current as? UIScrollView {
+                scroll.delaysContentTouches = false
+            }
+            node = current.superview
+        }
+    }
+
+    @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            coordinator?.onPinchBegan()
+            coordinator?.onPinchChanged(gesture.scale)
+        case .changed:
+            coordinator?.onPinchChanged(gesture.scale)
+        case .ended, .cancelled:
+            coordinator?.onPinchChanged(gesture.scale)
+            coordinator?.onPinchEnded()
+        default:
+            break
+        }
+    }
+
+    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        let dx = gesture.translation(in: self).x
+        let point = gesture.location(in: self)
+        let size = bounds.size
+        switch gesture.state {
+        case .began:
+            let claimed = coordinator?.onPanBegan(point, size) ?? false
+            coordinator?.draggingPivot = claimed
+            coordinator?.onPanChanged(dx, point, size)
+        case .changed:
+            coordinator?.onPanChanged(dx, point, size)
+        case .ended, .cancelled:
+            coordinator?.onPanChanged(dx, point, size)
+            coordinator?.onPanEnded()
+            coordinator?.draggingPivot = false
+        default:
+            break
+        }
+    }
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+        let point = pan.location(in: self)
+        if coordinator?.hitTestPivot(point, bounds.size) != nil {
+            return true
+        }
+        let t = pan.translation(in: self)
+        let v = pan.velocity(in: self)
+        let dx = abs(t.x) > 0.5 ? t.x : v.x
+        let dy = abs(t.y) > 0.5 ? t.y : v.y
+        return ChartWindow.isHorizontalPan(dx: dx, dy: dy)
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        false
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        otherGestureRecognizer.view is UIScrollView
     }
 }

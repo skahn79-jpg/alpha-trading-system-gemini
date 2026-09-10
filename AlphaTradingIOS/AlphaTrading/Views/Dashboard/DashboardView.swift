@@ -8,6 +8,11 @@ struct DashboardView: View {
     @State private var trumpNews: TrumpNewsResponse?
     @State private var fx: FxResponse?
     @State private var sectorTrends: SectorTrendsResponse?
+    @State private var macro: MacroReport?
+    @ObservedObject private var inbox = SignalInboxStore.shared
+    @ObservedObject private var gogoBreakouts = GogoBreakoutStore.shared
+    @State private var gogoListMode: GogoBreakoutListMode = .today
+    private let gogoPreviewLimit = 3
     // 환율 실시간 갱신 (30초)
     private let fxTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
@@ -18,6 +23,12 @@ struct DashboardView: View {
                     Text("시장 요약")
                         .font(.paperlogy(22, weight: .bold))
                         .foregroundStyle(AppTheme.textPrimary)
+
+                    SignalBannerPair(signals: inbox.signals, showEmptySections: true) { signal in
+                        NotificationRouter.shared.openSignal(signal)
+                    }
+
+                    gogoBreakoutSection
 
                     if viewModel.isLoading && viewModel.indices.isEmpty {
                         LoadingView()
@@ -36,6 +47,7 @@ struct DashboardView: View {
 
                     fxSection
                     tradeSummarySection
+                    macroSummarySection
                     featuredSection
                     sectorTrendsSection
                     axiosNewsSection
@@ -65,6 +77,10 @@ struct DashboardView: View {
         async let trumpTask = try? APIClient.shared.get("/api/news/trump") as TrumpNewsResponse
         async let fxTask = try? APIClient.shared.get("/api/fx") as FxResponse
         async let sectorTask = try? APIClient.shared.get("/api/sector/trends") as SectorTrendsResponse
+        async let macroTask = try? APIClient.shared.get("/api/macro/indicators") as MacroReport
+        async let gogoTask: Void = gogoBreakouts.refresh()
+        await AlertMonitor.checkWatchlistSignals()
+        await gogoTask
         _ = await indexTask
         tradeReport = await tradeTask
         featured = await featuredTask
@@ -72,6 +88,143 @@ struct DashboardView: View {
         trumpNews = await trumpTask
         fx = await fxTask
         sectorTrends = await sectorTask
+        macro = await macroTask
+    }
+
+    // MARK: - 고고저 돌파 (코스피 / 코스닥 / 해외)
+
+    @ViewBuilder
+    private var gogoBreakoutSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center) {
+                Image(systemName: "triangle.fill")
+                    .foregroundStyle(AppTheme.up)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("고고저 돌파")
+                        .font(.paperlogy(16, weight: .semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Text(gogoBreakouts.scanSummary)
+                        .font(.paperlogy(10))
+                        .foregroundStyle(AppTheme.textSecondary)
+                    Text(gogoListMode.subtitle + " · 거래량·양봉 · 급경사 제외")
+                        .font(.paperlogy(10))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                Spacer()
+                if gogoBreakouts.isLoading {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                }
+                NavigationLink {
+                    GogoBreakoutFullListView(initialMode: gogoListMode)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("전체")
+                            .font(.paperlogy(11, weight: .semibold))
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(AppTheme.accent)
+                }
+            }
+
+            Picker("고고저 목록", selection: $gogoListMode) {
+                ForEach(GogoBreakoutListMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            if gogoBreakouts.isLoading && !gogoBreakouts.didLoad {
+                Text("코스피·코스닥·해외 차트를 확인하는 중…")
+                    .font(.paperlogy(12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            } else {
+                ForEach(GogoMarketGroup.allCases) { group in
+                    gogoMarketGroup(group)
+                }
+                if gogoBreakouts.items(mode: gogoListMode).count > gogoPreviewLimit * GogoMarketGroup.allCases.count {
+                    NavigationLink {
+                        GogoBreakoutFullListView(initialMode: gogoListMode)
+                    } label: {
+                        Text("전체 \(gogoBreakouts.items(mode: gogoListMode).count)종목 보기")
+                            .font(.paperlogy(12, weight: .semibold))
+                            .foregroundStyle(AppTheme.accent)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 4)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(AppTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    @ViewBuilder
+    private func gogoMarketGroup(_ group: GogoMarketGroup) -> some View {
+        let rows = gogoBreakouts.items(in: group, mode: gogoListMode)
+        let preview = Array(rows.prefix(gogoPreviewLimit))
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(group.title)
+                    .font(.paperlogy(13, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent)
+                Text("\(rows.count)")
+                    .font(.paperlogy(11, weight: .bold))
+                    .foregroundStyle(AppTheme.textSecondary)
+                Spacer()
+                if rows.count > gogoPreviewLimit {
+                    NavigationLink {
+                        GogoBreakoutFullListView(initialMode: gogoListMode, focusGroup: group)
+                    } label: {
+                        Text("더보기")
+                            .font(.paperlogy(11, weight: .semibold))
+                            .foregroundStyle(AppTheme.accent)
+                    }
+                }
+            }
+            if rows.isEmpty {
+                Text(gogoListMode == .today ? "오늘 신규 돌파 없음" : "최근 \(GogoZoneDetector.recentBreakoutLookbackTradingDays)거래일 돌파 없음")
+                    .font(.paperlogy(12))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.vertical, 2)
+            } else {
+                ForEach(preview) { item in
+                    NavigationLink(value: item.asStock) {
+                        gogoBreakoutRow(item)
+                    }
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    @ViewBuilder
+    private func gogoBreakoutRow(_ item: GogoBreakoutItem) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(item.ageBadge)
+                .font(.paperlogy(10, weight: .bold))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(AppTheme.up.opacity(0.2))
+                .foregroundStyle(AppTheme.up)
+                .clipShape(Capsule())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name)
+                    .font(.paperlogy(14, weight: .semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                Text("\(item.code) · \(item.detail)")
+                    .font(.paperlogy(10))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .lineLimit(2)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption2)
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .padding(.vertical, 4)
     }
 
     // MARK: - 실시간 환율
@@ -259,6 +412,89 @@ struct DashboardView: View {
         }
     }
 
+    // MARK: - 거시지표 요약
+
+    @ViewBuilder
+    private var macroSummarySection: some View {
+        if let macro, macro.ok, !macro.dashboardHeadlines.isEmpty {
+            NavigationLink {
+                MacroView()
+            } label: {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Image(systemName: "globe.americas.fill")
+                            .foregroundStyle(AppTheme.accent)
+                        Text("거시지표 요약")
+                            .font(.paperlogy(16, weight: .semibold))
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Text(macro.moodLabel ?? "혼조")
+                            .font(.paperlogy(11, weight: .bold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(macroMoodColor(macro.mood).opacity(0.2))
+                            .foregroundStyle(macroMoodColor(macro.mood))
+                            .clipShape(Capsule())
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    HStack(spacing: 10) {
+                        Text("우호 \(macro.supportive ?? 0)")
+                            .font(.paperlogy(11, weight: .semibold))
+                            .foregroundStyle(AppTheme.up)
+                        Text("부담 \(macro.headwind ?? 0)")
+                            .font(.paperlogy(11, weight: .semibold))
+                            .foregroundStyle(AppTheme.down)
+                    }
+                    ForEach(macro.dashboardHeadlines) { item in
+                        HStack(spacing: 8) {
+                            Text(item.name)
+                                .font(.paperlogy(13, weight: .medium))
+                                .foregroundStyle(AppTheme.textPrimary)
+                                .lineLimit(1)
+                            Spacer()
+                            if let change = item.changeText {
+                                Text(change)
+                                    .font(.paperlogy(10, weight: .semibold))
+                                    .foregroundStyle((item.change ?? 0) >= 0 ? AppTheme.up : AppTheme.down)
+                            }
+                            Text(item.valueText)
+                                .font(.paperlogy(13, weight: .bold))
+                                .foregroundStyle(AppTheme.textPrimary)
+                            Text(item.stanceLabel)
+                                .font(.paperlogy(10, weight: .bold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(macroStanceColor(item.stance).opacity(0.2))
+                                .foregroundStyle(macroStanceColor(item.stance))
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+                .padding(16)
+                .background(AppTheme.card)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+        }
+    }
+
+    private func macroMoodColor(_ mood: String?) -> Color {
+        switch mood {
+        case "risk_on": return AppTheme.up
+        case "risk_off": return AppTheme.down
+        default: return AppTheme.accent
+        }
+    }
+
+    private func macroStanceColor(_ stance: String?) -> Color {
+        switch stance {
+        case "supportive": return AppTheme.up
+        case "headwind": return AppTheme.down
+        default: return AppTheme.accent
+        }
+    }
+
     private func dashboardStat(_ title: String, _ value: String, _ yoy: Double?) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
@@ -421,4 +657,81 @@ struct SectorTrend: Decodable {
 struct SectorLeader: Decodable {
     let code: String
     let name: String
+}
+
+// MARK: - 고고저 전체 목록
+
+struct GogoBreakoutFullListView: View {
+    @ObservedObject private var store = GogoBreakoutStore.shared
+    @State private var mode: GogoBreakoutListMode
+    var focusGroup: GogoMarketGroup?
+
+    init(initialMode: GogoBreakoutListMode = .today, focusGroup: GogoMarketGroup? = nil) {
+        _mode = State(initialValue: initialMode)
+        self.focusGroup = focusGroup
+    }
+
+    private var groups: [GogoMarketGroup] {
+        if let focusGroup { return [focusGroup] }
+        return GogoMarketGroup.allCases
+    }
+
+    var body: some View {
+        List {
+            Section {
+                Picker("고고저 목록", selection: $mode) {
+                    ForEach(GogoBreakoutListMode.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text(mode.subtitle + " · 거래량·양봉 확인 · 급경사 제외")
+                    .font(.paperlogy(11))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            ForEach(groups) { group in
+                gogoFullSection(group)
+            }
+        }
+        .navigationTitle("고고저 돌파")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(for: Stock.self) { stock in
+            StockDetailView(stock: stock)
+        }
+    }
+
+    @ViewBuilder
+    private func gogoFullSection(_ group: GogoMarketGroup) -> some View {
+        let rows = store.items(in: group, mode: mode)
+        Section(group.title + " (\(rows.count))") {
+            if rows.isEmpty {
+                Text(mode == .today ? "오늘 신규 돌파 없음" : "최근 돌파 없음")
+                    .font(.paperlogy(12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            } else {
+                ForEach(rows) { item in
+                    NavigationLink(value: item.asStock) {
+                        HStack(alignment: .top, spacing: 8) {
+                            Text(item.ageBadge)
+                                .font(.paperlogy(10, weight: .bold))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(AppTheme.up.opacity(0.2))
+                                .foregroundStyle(AppTheme.up)
+                                .clipShape(Capsule())
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.name)
+                                    .font(.paperlogy(14, weight: .semibold))
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                Text("\(item.code) · \(item.detail)")
+                                    .font(.paperlogy(11))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                    .lineLimit(3)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

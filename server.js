@@ -3198,6 +3198,11 @@ app.get("/api/alerts/check", async (req, res) => {
           const push = await apns.sendPushToAll({
             title: `${alert.name || quote.name || alert.code} 알림`,
             body: message.replace(/\n+/g, " ").slice(0, 160),
+            code: alert.code,
+            name: alert.name || quote.name || alert.code,
+            kind: alert.type || "price",
+            id: alert.id,
+            detail: message.replace(/\n+/g, " ").slice(0, 160),
           }).catch((e) => ({ ok: false, error: e.message }));
           const updated = {
             ...alert,

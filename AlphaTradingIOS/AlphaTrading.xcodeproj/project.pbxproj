@@ -83,6 +83,18 @@
 		A10000000000000000000055 /* AdminAuthGateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000055 /* AdminAuthGateView.swift */; };
 		A10000000000000000000056 /* BrokerStatusViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000056 /* BrokerStatusViewModel.swift */; };
 		A10000000000000000000057 /* BrokerStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000057 /* BrokerStatusView.swift */; };
+		A10000000000000000000058 /* MarketSignal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000058 /* MarketSignal.swift */; };
+		A10000000000000000000059 /* SignalInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000059 /* SignalInbox.swift */; };
+		A1000000000000000000005A /* WatchBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005A /* WatchBridge.swift */; };
+		A1000000000000000000005B /* SignalBannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005B /* SignalBannerView.swift */; };
+		A1000000000000000000005C /* NotificationRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005C /* NotificationRouter.swift */; };
+		A1000000000000000000005D /* NotificationDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005D /* NotificationDetailView.swift */; };
+		A1000000000000000000005E /* GogoBreakoutStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000005E /* GogoBreakoutStore.swift */; };
+		C10000000000000000000001 /* AlphaTradingWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* AlphaTradingWatchApp.swift */; };
+		C10000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000002 /* ContentView.swift */; };
+		C10000000000000000000003 /* WatchSignalModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* WatchSignalModels.swift */; };
+		C10000000000000000000004 /* WatchSignalInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000004 /* WatchSignalInbox.swift */; };
+		C10000000000000000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000005 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -167,6 +179,20 @@
 		B20000000000000000000005 /* APIClientAuthTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClientAuthTests.swift; sourceTree = "<group>"; };
 		B30000000000000000000001 /* AlphaTradingTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AlphaTradingTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A30000000000000000000001 /* AlphaTrading.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AlphaTrading.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000058 /* MarketSignal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketSignal.swift; sourceTree = "<group>"; };
+		A20000000000000000000059 /* SignalInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalInbox.swift; sourceTree = "<group>"; };
+		A2000000000000000000005A /* WatchBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchBridge.swift; sourceTree = "<group>"; };
+		A2000000000000000000005B /* SignalBannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalBannerView.swift; sourceTree = "<group>"; };
+		A2000000000000000000005C /* NotificationRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationRouter.swift; sourceTree = "<group>"; };
+		A2000000000000000000005D /* NotificationDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationDetailView.swift; sourceTree = "<group>"; };
+		A2000000000000000000005E /* GogoBreakoutStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GogoBreakoutStore.swift; sourceTree = "<group>"; };
+		C20000000000000000000001 /* AlphaTradingWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlphaTradingWatchApp.swift; sourceTree = "<group>"; };
+		C20000000000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		C20000000000000000000003 /* WatchSignalModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSignalModels.swift; sourceTree = "<group>"; };
+		C20000000000000000000004 /* WatchSignalInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSignalInbox.swift; sourceTree = "<group>"; };
+		C20000000000000000000005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C20000000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		C30000000000000000000001 /* AlphaTradingWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AlphaTradingWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXContainerItemProxy section */
@@ -194,6 +220,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C40000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -202,6 +235,7 @@
 			children = (
 				A50000000000000000000002 /* AlphaTrading */,
 				B50000000000000000000001 /* AlphaTradingTests */,
+				C50000000000000000000001 /* AlphaTradingWatch */,
 				A50000000000000000000003 /* Config */,
 				A50000000000000000000004 /* Products */,
 			);
@@ -235,6 +269,7 @@
 			children = (
 				A30000000000000000000001 /* AlphaTrading.app */,
 				B30000000000000000000001 /* AlphaTradingTests.xctest */,
+				C30000000000000000000001 /* AlphaTradingWatch.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -270,6 +305,10 @@
 				A20000000000000000000029 /* SecureSessionFactory.swift */,
 				A20000000000000000000048 /* AlertMonitor.swift */,
 				A20000000000000000000049 /* FavoritesStore.swift */,
+				A20000000000000000000059 /* SignalInbox.swift */,
+				A2000000000000000000005A /* WatchBridge.swift */,
+				A2000000000000000000005C /* NotificationRouter.swift */,
+				A2000000000000000000005E /* GogoBreakoutStore.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -291,6 +330,7 @@
 				A20000000000000000000046 /* FeaturedSignals.swift */,
 				A2000000000000000000004A /* ChartLab.swift */,
 				A2000000000000000000004C /* CryptoReport.swift */,
+				A20000000000000000000058 /* MarketSignal.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -399,6 +439,8 @@
 				A2000000000000000000000F /* IndexCardView.swift */,
 				A20000000000000000000010 /* LoadingView.swift */,
 				A20000000000000000000011 /* StockRowView.swift */,
+				A2000000000000000000005B /* SignalBannerView.swift */,
+				A2000000000000000000005D /* NotificationDetailView.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -428,6 +470,19 @@
 			path = Fonts;
 			sourceTree = "<group>";
 		};
+		C50000000000000000000001 /* AlphaTradingWatch */ = {
+			isa = PBXGroup;
+			children = (
+				C20000000000000000000001 /* AlphaTradingWatchApp.swift */,
+				C20000000000000000000002 /* ContentView.swift */,
+				C20000000000000000000003 /* WatchSignalModels.swift */,
+				C20000000000000000000004 /* WatchSignalInbox.swift */,
+				C20000000000000000000005 /* Assets.xcassets */,
+				C20000000000000000000006 /* Info.plist */,
+			);
+			path = AlphaTradingWatch;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -439,6 +494,7 @@
 				A70000000000000000000001 /* Sources */,
 				A40000000000000000000001 /* Frameworks */,
 				A70000000000000000000002 /* Resources */,
+				E10000000000000000000001 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
@@ -466,6 +522,24 @@
 			productReference = B30000000000000000000001 /* AlphaTradingTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		C60000000000000000000001 /* AlphaTradingWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D80000000000000000000001 /* Build configuration list for PBXNativeTarget "AlphaTradingWatch" */;
+			buildPhases = (
+				C70000000000000000000001 /* Sources */,
+				C40000000000000000000001 /* Frameworks */,
+				C80000000000000000000001 /* Resources */,
+				E20000000000000000000001 /* Ensure Watch Info.plist */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AlphaTradingWatch;
+			productName = AlphaTradingWatch;
+			productReference = C30000000000000000000001 /* AlphaTradingWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXTargetDependency section */
@@ -491,6 +565,9 @@
 						CreatedOnToolsVersion = 15.0;
 						TestTargetID = A60000000000000000000001;
 					};
+					C60000000000000000000001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
 				};
 			};
 			buildConfigurationList = A80000000000000000000001 /* Build configuration list for PBXProject "AlphaTrading" */;
@@ -509,6 +586,7 @@
 			targets = (
 				A60000000000000000000001 /* AlphaTrading */,
 				B60000000000000000000001 /* AlphaTradingTests */,
+				C60000000000000000000001 /* AlphaTradingWatch */,
 			);
 		};
 /* End PBXProject section */
@@ -525,6 +603,14 @@
 				A1000000000000000000001C /* Paperlogy-6SemiBold.ttf in Resources */,
 				A1000000000000000000001D /* Paperlogy-7Bold.ttf in Resources */,
 				A10000000000000000000030 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C80000000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C10000000000000000000005 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -561,6 +647,36 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "set -e\nGEN=\"${SRCROOT}/Config/Generated.xcconfig\"\nEXAMPLE=\"${SRCROOT}/Config/Generated.xcconfig.example\"\nmkdir -p \"${SRCROOT}/Config\"\nif [ ! -f \"$GEN\" ] && [ -f \"$EXAMPLE\" ]; then cp \"$EXAMPLE\" \"$GEN\"; fi\nif [ ! -f \"$GEN\" ]; then\n  printf '%s\\n' 'API_BASE_URL = https://alpha-trading-server.onrender.com' 'APP_API_KEY =' > \"$GEN\"\nfi\nif command -v node >/dev/null 2>&1 && [ -f \"${SRCROOT}/../scripts/sync-ios-api-config.mjs\" ]; then\n  MODE=\"release\"\n  [ \"${CONFIGURATION}\" = \"Debug\" ] && MODE=\"debug\"\n  (cd \"${SRCROOT}/..\" && node scripts/sync-ios-api-config.mjs \"$MODE\") || true\nfi\n";
+		};
+		E10000000000000000000001 /* Embed Watch Content */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Embed Watch Content";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nif [ \"${PLATFORM_NAME}\" = \"iphonesimulator\" ]; then\n  echo \"note: skip Watch embed on iOS Simulator\"\n  exit 0\nfi\nWATCH_APP=\"${BUILT_PRODUCTS_DIR}/AlphaTradingWatch.app\"\nDEST_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Watch\"\nif [ ! -d \"${WATCH_APP}\" ]; then\n  echo \"warning: AlphaTradingWatch.app missing; skip embed\"\n  exit 0\nfi\nmkdir -p \"${DEST_DIR}\"\nrsync -a --delete \"${WATCH_APP}/\" \"${DEST_DIR}/AlphaTradingWatch.app/\"\n";
+		};
+		E20000000000000000000001 /* Ensure Watch Info.plist */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Ensure Watch Info.plist";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nAPP=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\"\nmkdir -p \"${APP}\"\nif [ ! -f \"${APP}/Info.plist\" ]; then\n  cat > \"${APP}/Info.plist\" <<'PLIST'\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n<key>CFBundleDisplayName</key><string>ALPHA</string>\n<key>CFBundleExecutable</key><string>AlphaTradingWatch</string>\n<key>CFBundleIdentifier</key><string>com.alpha.trading.ios.watchkitapp</string>\n<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>\n<key>CFBundleName</key><string>AlphaTradingWatch</string>\n<key>CFBundlePackageType</key><string>APPL</string>\n<key>CFBundleShortVersionString</key><string>1.0.0</string>\n<key>CFBundleVersion</key><string>126</string>\n<key>WKApplication</key><true/>\n<key>WKCompanionAppBundleIdentifier</key><string>com.alpha.trading.ios</string>\n</dict></plist>\nPLIST\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -633,6 +749,24 @@
 				A1000000000000000000002D /* GlobalMarketView.swift in Sources */,
 				A1000000000000000000002E /* AlertCenterView.swift in Sources */,
 				A1000000000000000000002F /* AIReportView.swift in Sources */,
+				A10000000000000000000058 /* MarketSignal.swift in Sources */,
+				A10000000000000000000059 /* SignalInbox.swift in Sources */,
+				A1000000000000000000005A /* WatchBridge.swift in Sources */,
+				A1000000000000000000005B /* SignalBannerView.swift in Sources */,
+				A1000000000000000000005C /* NotificationRouter.swift in Sources */,
+				A1000000000000000000005D /* NotificationDetailView.swift in Sources */,
+				A1000000000000000000005E /* GogoBreakoutStore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C70000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C10000000000000000000001 /* AlphaTradingWatchApp.swift in Sources */,
+				C10000000000000000000002 /* ContentView.swift in Sources */,
+				C10000000000000000000003 /* WatchSignalModels.swift in Sources */,
+				C10000000000000000000004 /* WatchSignalInbox.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -661,7 +795,7 @@
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -687,7 +821,7 @@
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -724,6 +858,8 @@
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				WATCHOS_DEPLOYMENT_TARGET = 9.0;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 			};
 			name = Debug;
@@ -753,7 +889,9 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
 				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 9.0;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 			};
 			name = Release;
@@ -763,7 +901,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 75;
+				CURRENT_PROJECT_VERSION = 126;
 				DEVELOPMENT_TEAM = VWAZ3CVW5Z;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -772,7 +910,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AlphaTrading.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AlphaTrading";
 			};
 			name = Debug;
@@ -782,7 +920,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 75;
+				CURRENT_PROJECT_VERSION = 126;
 				DEVELOPMENT_TEAM = VWAZ3CVW5Z;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -791,8 +929,70 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AlphaTrading.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AlphaTrading";
+			};
+			name = Release;
+		};
+		DA0000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 126;
+				DEVELOPMENT_TEAM = VWAZ3CVW5Z;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AlphaTradingWatch/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ALPHA;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.alpha.trading.ios;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alpha.trading.ios.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 9.0;
+			};
+			name = Debug;
+		};
+		DA0000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 126;
+				DEVELOPMENT_TEAM = VWAZ3CVW5Z;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AlphaTradingWatch/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ALPHA;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.alpha.trading.ios;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alpha.trading.ios.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 9.0;
 			};
 			name = Release;
 		};
@@ -822,6 +1022,15 @@
 			buildConfigurations = (
 				BA0000000000000000000001 /* Debug */,
 				BA0000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D80000000000000000000001 /* Build configuration list for PBXNativeTarget "AlphaTradingWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DA0000000000000000000001 /* Debug */,
+				DA0000000000000000000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

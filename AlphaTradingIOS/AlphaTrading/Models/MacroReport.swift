@@ -44,4 +44,28 @@ struct MacroIndicator: Decodable, Identifiable {
         default: return "중립"
         }
     }
+
+    var valueText: String {
+        let number = value == value.rounded() ? String(Int(value)) : String(format: "%.2f", value)
+        if let unit, !unit.isEmpty {
+            return "\(number) \(unit)"
+        }
+        return number
+    }
+
+    var changeText: String? {
+        guard let change else { return nil }
+        return String(format: "%+.1f", change)
+    }
+}
+
+extension MacroReport {
+    /// 대시보드 요약용 핵심 지표 (4–6개).
+    var dashboardHeadlines: [MacroIndicator] {
+        let preferred = ["VIXCLS", "DFF", "DGS10", "CPIAUCSL", "WALCL", "DTWEXBGS"]
+        let all = indicators ?? []
+        let picked = preferred.compactMap { id in all.first { $0.id == id } }
+        if picked.count >= 4 { return Array(picked.prefix(6)) }
+        return Array(all.prefix(6))
+    }
 }

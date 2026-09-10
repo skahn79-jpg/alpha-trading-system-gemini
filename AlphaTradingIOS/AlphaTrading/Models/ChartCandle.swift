@@ -19,3 +19,165 @@ struct ChartResponse: Decodable {
     let period: String?
     let candles: [ChartCandle]
 }
+
+/// Visible window over oldest→newest candles. offset 0 = latest bars.
+struct ChartWindow: Equatable {
+    var visibleCount: Int
+    var offset: Int
+
+    static let minCount = 20
+    static let defaultCount = 60
+
+    func clamped(total: Int) -> ChartWindow {
+        let safeTotal = max(0, total)
+        let count = min(max(Self.minCount, visibleCount), max(Self.minCount, safeTotal))
+        let boundedCount = min(count, max(1, safeTotal))
+        let maxOffset = max(0, safeTotal - boundedCount)
+        return ChartWindow(visibleCount: boundedCount, offset: min(max(0, offset), maxOffset))
+    }
+
+    func slice<T>(_ items: [T]) -> ArraySlice<T> {
+        let w = clamped(total: items.count)
+        guard !items.isEmpty else { return items[...] }
+        let start = max(0, items.count - w.visibleCount - w.offset)
+        let end = min(items.count, start + w.visibleCount)
+        return items[start..<end]
+    }
+
+    /// Pinch out (scale > 1) zooms in → fewer bars.
+    func pinched(scale: CGFloat, baseCount: Int, total: Int) -> ChartWindow {
+        let safeScale = max(0.05, scale)
+        let next = Int((Double(baseCount) / Double(safeScale)).rounded())
+        return ChartWindow(visibleCount: next, offset: offset).clamped(total: total)
+    }
+
+    /// Drag right (positive x) reveals older candles → larger offset.
+    func panned(translationX: CGFloat, chartWidth: CGFloat, startOffset: Int, total: Int) -> ChartWindow {
+        let current = clamped(total: total)
+        let barWidth = max(2, chartWidth / CGFloat(max(1, current.visibleCount)))
+        let deltaBars = Int((translationX / barWidth).rounded())
+        return ChartWindow(visibleCount: current.visibleCount, offset: startOffset + deltaBars).clamped(total: total)
+    }
+
+    /// Horizontal pan wins only when |dx| > |dy| so the parent ScrollView can still scroll vertically.
+    static func isHorizontalPan(dx: CGFloat, dy: CGFloat) -> Bool {
+        abs(dx) > abs(dy)
+    }
+
+    /// Visible window covering fromIndex (with padding before) through the latest candle.
+    /// Used when 고고저 is on so pivot ①/② stay in view, not only recent bars near price.
+    static func covering(
+        fromIndex: Int,
+        total: Int,
+        paddingBefore: Int = 8,
+        minimumCount: Int = ChartWindow.minCount
+    ) -> ChartWindow {
+        let safeTotal = max(0, total)
+        guard safeTotal > 0 else {
+            return ChartWindow(visibleCount: defaultCount, offset: 0)
+        }
+        let start = max(0, min(fromIndex, safeTotal - 1) - max(0, paddingBefore))
+        let needed = max(minimumCount, safeTotal - start)
+        return ChartWindow(visibleCount: needed, offset: 0).clamped(total: safeTotal)
+    }
+
+    /// Y-axis for the visible window only: high/low of those candles + tight padding (≈2–5%).
+    /// Does not use the full series min/max, so recent amplitude stays readable while zooming/panning.
+    static func yDomain(
+        candles: [ChartCandle],
+        paddingRatio: Double = 0.035
+    ) -> ClosedRange<Double> {
+        yDomain(
+            lows: candles.map(\.low),
+            highs: candles.map(\.high),
+            paddingRatio: paddingRatio
+        )
+    }
+
+    static func yDomain(
+        lows: [Double],
+        highs: [Double],
+        paddingRatio: Double = 0.035
+    ) -> ClosedRange<Double> {
+        guard let rawLo = lows.min(), let rawHi = highs.max() else { return 0...1 }
+        let lo = min(rawLo, rawHi)
+        let hi = max(rawLo, rawHi)
+        let span = hi - lo
+        let ratio = min(0.05, max(0.02, paddingRatio))
+        let pad: Double
+        if span <= 0 {
+            pad = max(abs(hi) * 0.02, 0.01)
+        } else {
+            pad = span * ratio
+        }
+        return (lo - pad)...(hi + pad)
+    }
+}
+
+/// 차트 오버레이 칩 상태 — 종목별 기기 로컬 저장
+struct ChartOverlayPrefs: Equatable {
+    var showGogo: Bool
+    var modes: [String]
+
+    static func key(_ code: String) -> String { "alpha.chart.overlay.\(code)" }
+
+    static func load(code: String) -> ChartOverlayPrefs {
+        guard let data = UserDefaults.standard.data(forKey: key(code)),
+              let prefs = try? JSONDecoder().decode(ChartOverlayPrefs.self, from: data) else {
+            return ChartOverlayPrefs(showGogo: true, modes: [])
+        }
+        return prefs
+    }
+
+    static func save(code: String, showGogo: Bool, modes: [String]) {
+        let prefs = ChartOverlayPrefs(showGogo: showGogo, modes: modes)
+        if let data = try? JSONEncoder().encode(prefs) {
+            UserDefaults.standard.set(data, forKey: key(code))
+        }
+    }
+}
+
+extension ChartOverlayPrefs: Codable {}
+
+/// 수평선 등 그림 도구 — 기기 로컬. iOS에 그리기 UI가 생기면 이 저장소를 사용.
+struct ChartDrawing: Codable, Equatable, Identifiable {
+    var id: String
+    var code: String
+    var type: String
+    var price: Double?
+    var date: String?
+}
+
+enum ChartDrawingStore {
+    static func key(_ code: String) -> String { "alpha.chart.drawings.\(code)" }
+
+    static func load(code: String) -> [ChartDrawing] {
+        guard let data = UserDefaults.standard.data(forKey: key(code)),
+              let list = try? JSONDecoder().decode([ChartDrawing].self, from: data) else { return [] }
+        return list
+    }
+
+    static func save(code: String, drawings: [ChartDrawing]) {
+        guard let data = try? JSONEncoder().encode(drawings) else { return }
+        UserDefaults.standard.set(data, forKey: key(code))
+    }
+
+    static func upsert(_ drawing: ChartDrawing) {
+        var list = load(code: drawing.code)
+        if let idx = list.firstIndex(where: { $0.id == drawing.id }) {
+            list[idx] = drawing
+        } else {
+            list.append(drawing)
+        }
+        save(code: drawing.code, drawings: list)
+    }
+
+    static func remove(code: String, id: String) {
+        save(code: code, drawings: load(code: code).filter { $0.id != id })
+    }
+
+    static func resetForTests(code: String) {
+        UserDefaults.standard.removeObject(forKey: key(code))
+        UserDefaults.standard.removeObject(forKey: ChartOverlayPrefs.key(code))
+    }
+}

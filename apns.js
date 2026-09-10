@@ -126,11 +126,25 @@ function sendToToken(token, payload) {
   });
 }
 
-/** 등록된 모든 기기로 알림 발송 */
-async function sendPushToAll({ title, body, sound = "default" }) {
+function buildApnsPayload({ title, body, sound = "default", code, name, kind, id, detail }) {
+  const payload = {
+    aps: { alert: { title, body }, sound },
+    title,
+    body,
+    detail: detail || body,
+    kind: kind || "remote",
+  };
+  if (id) payload.id = String(id);
+  if (code) payload.code = String(code);
+  if (name) payload.name = String(name);
+  return payload;
+}
+
+/** 등록된 모든 기기로 알림 발송 — 탭 시 앱이 제목/본문/종목을 재구성할 수 있게 커스텀 키를 함께 실음 */
+async function sendPushToAll({ title, body, sound = "default", code, name, kind, id, detail }) {
   if (!isConfigured()) return { ok: false, sent: 0, reason: "APNS_KEY_ID / APNS_PRIVATE_KEY 환경변수 미설정" };
   if (!tokens.size) return { ok: false, sent: 0, reason: "등록된 기기가 없습니다 (앱을 한 번 실행해 알림 권한을 허용하세요)" };
-  const payload = { aps: { alert: { title, body }, sound } };
+  const payload = buildApnsPayload({ title, body, sound, code, name, kind, id, detail });
   const results = [];
   for (const t of [...tokens]) {
     results.push(await sendToToken(t, payload));
@@ -139,4 +153,4 @@ async function sendPushToAll({ title, body, sound = "default" }) {
   return { ok: sent > 0, sent, total: results.length, results };
 }
 
-module.exports = { registerToken, sendPushToAll, tokenCount, isConfigured };
+module.exports = { registerToken, sendPushToAll, tokenCount, isConfigured, buildApnsPayload };

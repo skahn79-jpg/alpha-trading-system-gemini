@@ -31,6 +31,14 @@ final class BrokerStatusTests: XCTestCase {
         XCTAssertTrue((40...72).contains(MainTabBarLayout.contentClearance))
     }
 
+    func testMainTabBarStartsWithDashboard() {
+        XCTAssertEqual(MainAppTab.allCases.first, .dashboard)
+        XCTAssertEqual(
+            MainAppTab.allCases.map(\.title),
+            ["대시보드", "관심", "종목", "포트폴리오", "더보기"]
+        )
+    }
+
     func testMoreViewSourceHidesInternalImplementation() throws {
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

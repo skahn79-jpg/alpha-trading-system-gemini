@@ -33,7 +33,7 @@ jobs:
 
   ios-simulator:
     name: iOS Simulator build
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -45,16 +45,52 @@ jobs:
       - name: Sync iOS API config
         run: node scripts/sync-ios-api-config.mjs release
 
+      - name: Resolve iOS Simulator destination
+        id: sim
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available
+          python3 - <<'PY'
+          import json, subprocess, os
+          raw = subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"], text=True)
+          data = json.loads(raw)
+          preferred = ["iPhone 16 Pro", "iPhone 16", "iPhone 17 Pro", "iPhone 17", "iPhone 15 Pro", "iPhone 15"]
+          found = []
+          for runtime, devices in (data.get("devices") or {}).items():
+              if "iOS" not in runtime and "iphonesimulator" not in runtime.lower():
+                  continue
+              for d in devices:
+                  if d.get("isAvailable") is False:
+                      continue
+                  name = d.get("name") or ""
+                  if name.startswith("iPhone"):
+                      found.append(name)
+          dest_name = None
+          for want in preferred:
+              if want in found:
+                  dest_name = want
+                  break
+          if not dest_name and found:
+              dest_name = found[0]
+          if not dest_name:
+              raise SystemExit("No available iPhone simulator")
+          dest = f"platform=iOS Simulator,name={dest_name}"
+          print(f"Resolved destination: {dest}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"destination={dest}\n")
+          PY
+
       - name: Build and test for Simulator
         run: |
           cd AlphaTradingIOS
           xcodebuild -project AlphaTrading.xcodeproj \
             -scheme AlphaTrading \
-            -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+            -destination '${{ steps.sim.outputs.destination }}' \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            SWIFT_VERSION=5.0 \
             test
 
       - name: Dump build diagnostics on failure
@@ -63,8 +99,14 @@ jobs:
           bundle=$(find "$HOME/Library/Developer/Xcode/DerivedData" -name "*.xcresult" -print0 | xargs -0 ls -td | head -1)
           if [ -n "$bundle" ]; then
             echo "Result bundle: $bundle"
-            xcrun xcresulttool get --legacy --format json --path "$bundle" > /tmp/xcresult.json || true
-            python3 "$GITHUB_WORKSPACE/scripts/dump-xcresult-issues.py" /tmp/xcresult.json
+            xcrun xcresulttool get --format json --path "$bundle" > /tmp/xcresult.json 2>/dev/null \
+              || xcrun xcresulttool get --legacy --format json --path "$bundle" > /tmp/xcresult.json 2>/dev/null \
+              || true
+            if [ -s /tmp/xcresult.json ]; then
+              python3 "$GITHUB_WORKSPACE/scripts/dump-xcresult-issues.py" /tmp/xcresult.json || true
+            else
+              echo "xcresulttool JSON dump unavailable"
+            fi
           else
             echo "No .xcresult bundle found"
           fi

@@ -48,7 +48,7 @@
 		</dict>
 	</dict>
 	<key>NSUserNotificationsUsageDescription</key>
-	<string>가격 알림을 받기 위해 알림 권한이 필요합니다.</string>
+	<string>관심종목의 급락·돌파·공포탐욕·뉴스 위험/기회 알림을 받기 위해 알림 권한이 필요합니다.</string>
 	<key>PINNED_API_HOST</key>
 	<string>alpha-trading-server.onrender.com</string>
 	<key>PINNED_PUBLIC_KEY_HASHES</key>
@@ -81,6 +81,13 @@
 	<key>UISupportedInterfaceOrientations~iphone</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 </dict>
 </plist>

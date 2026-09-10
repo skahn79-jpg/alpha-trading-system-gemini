@@ -1,4 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ChartGestures from "./chart-gestures.js";
+import NIndicators from "./nindicators.js";
 
 /**
  * ALPHA TRADING SYSTEM — 통합 확장 버전
@@ -961,7 +963,8 @@ const styles = `
 .forecast-stat-note{color:#8fa6bd;flex:1 1 100%}
 .forecast-stat-error{color:#ff4466;font-size:12px}
 .chart-svg-wrap{position:relative}
-.pro-chart-svg{cursor:grab;touch-action:pan-y;user-select:none}
+.chart-svg-wrap,.chart-box.pro-chart-box,.pro-chart-svg,.pro-chart-canvas{touch-action:none;-webkit-user-select:none;user-select:none}
+.pro-chart-svg{cursor:grab;touch-action:none;user-select:none}
 .pro-chart-svg.dragging{cursor:grabbing}
 @media(max-width:900px){
   .chart-pro-toolbar{grid-template-columns:1fr 1fr}
@@ -7324,6 +7327,37 @@ function projectTrendValue(trend, targetIndex) {
 }
 
 
+function gogoTrendSlopePer20BarsTP(p1, p2) {
+  const high1 = Number(p1?.value ?? p1?.price);
+  const high2 = Number(p2?.value ?? p2?.price);
+  if (!(high1 > 0) || !Number.isFinite(high2)) return 0;
+  const trendDropRate = ((high1 - high2) / high1) * 100;
+  const trendBars = Math.max(1, Number(p2.index) - Number(p1.index));
+  return (trendDropRate / trendBars) * 20;
+}
+
+function projectGoGoTrendTP(p1, p2, targetIndex) {
+  const span = Math.max(1, Number(p2.index) - Number(p1.index));
+  const v1 = Number(p1.value ?? p1.price);
+  const v2 = Number(p2.value ?? p2.price);
+  const slope = (v2 - v1) / span;
+  return v1 + slope * (targetIndex - Number(p1.index));
+}
+
+function isUsableGoGoPairTP(p1, p2, data) {
+  if (!p1 || !p2 || !(p2.index > p1.index)) return false;
+  const v1 = Number(p1.value ?? p1.price);
+  const v2 = Number(p2.value ?? p2.price);
+  if (!(v1 > 0) || !(v2 < v1)) return false;
+  if (p2.index - p1.index < 5) return false;
+  if (gogoTrendSlopePer20BarsTP(p1, p2) >= 18) return false;
+  const trendNow = projectGoGoTrendTP(p1, p2, data.length - 1);
+  if (!(trendNow > 0)) return false;
+  const recentLows = data.slice(-20).map((d) => Number(d.low)).filter((n) => n > 0);
+  if (recentLows.length && trendNow < Math.min(...recentLows) * 0.5) return false;
+  return true;
+}
+
 function findGoGoJeoTrend(data) {
   if (!data || data.length < 10) return null;
 
@@ -7345,24 +7379,30 @@ function findGoGoJeoTrend(data) {
     pivots.push({ index: maxIndex, value: data[maxIndex].high, date: data[maxIndex].date });
   }
 
-  const highest = pivots.reduce((best, p) => (p.value > best.value ? p : best), pivots[0]);
-  const after = pivots.filter((p) => p.index > highest.index + 3);
+  const p1Candidates = [...pivots].sort((a, b) => b.value - a.value);
+  for (const p1 of p1Candidates) {
+    const after = pivots
+      .filter((p) => p.index > p1.index + 3 && p.value < p1.value)
+      .sort((a, b) => a.index - b.index);
+    for (const p2 of after) {
+      if (isUsableGoGoPairTP(p1, p2, data)) return { p1, p2 };
+    }
+  }
 
-  let second = after.find((p) => p.value < highest.value);
-  if (!second && after.length) second = after[0];
-
-  if (!second) {
+  const highest = p1Candidates[0];
+  if (highest) {
     const tailStart = Math.min(data.length - 1, highest.index + Math.max(5, Math.floor((data.length - highest.index) / 2)));
     let bestIdx = tailStart;
     for (let i = tailStart; i < data.length; i++) {
       if (data[i].high > data[bestIdx].high) bestIdx = i;
     }
-    second = { index: bestIdx, value: data[bestIdx].high, date: data[bestIdx].date };
+    const second = { index: bestIdx, value: data[bestIdx].high, date: data[bestIdx].date };
+    if (second.index > highest.index && second.value < highest.value && isUsableGoGoPairTP(highest, second, data)) {
+      return { p1: highest, p2: second };
+    }
   }
 
-  if (!second || second.index <= highest.index) return null;
-
-  return { p1: highest, p2: second };
+  return null;
 }
 
 function countByPeriod(period, range) {
@@ -7599,32 +7639,6 @@ function calculateGogojeoSignal(candles, options = {}) {
     return avg(slice.map(d => Number(d[field])));
   }
 
-  function findSwingHighs() {
-    const highs = [];
-
-    for (let i = swingWindow; i < data.length - swingWindow; i++) {
-      const currentHigh = Number(data[i].high);
-      let isSwingHigh = true;
-
-      for (let j = i - swingWindow; j <= i + swingWindow; j++) {
-        if (j !== i && Number(data[j].high) >= currentHigh) {
-          isSwingHigh = false;
-          break;
-        }
-      }
-
-      if (isSwingHigh) {
-        highs.push({
-          index: i,
-          date: data[i].date,
-          price: currentHigh
-        });
-      }
-    }
-
-    return highs;
-  }
-
   function findSwingLows() {
     const lows = [];
 
@@ -7651,43 +7665,18 @@ function calculateGogojeoSignal(candles, options = {}) {
     return lows;
   }
 
-  const swingHighs = findSwingHighs();
   const swingLows = findSwingLows();
+  const trendPair = findGoGoJeoTrend(data);
 
-  if (swingHighs.length < 2) {
-    return {
-      status: "NO_SIGNAL",
-      message: "유효한 스윙 고점이 부족합니다."
-    };
-  }
-
-  let selectedHigh1 = null;
-  let selectedHigh2 = null;
-
-  for (let i = swingHighs.length - 2; i >= 0; i--) {
-    for (let j = swingHighs.length - 1; j > i; j--) {
-      const h1 = swingHighs[i];
-      const h2 = swingHighs[j];
-
-      if (
-        h1.price > h2.price &&
-        h2.index - h1.index >= minGap
-      ) {
-        selectedHigh1 = h1;
-        selectedHigh2 = h2;
-        break;
-      }
-    }
-
-    if (selectedHigh1 && selectedHigh2) break;
-  }
-
-  if (!selectedHigh1 || !selectedHigh2) {
+  if (!trendPair) {
     return {
       status: "NO_SIGNAL",
       message: "하락 추세선을 만들 수 있는 고점 구조가 없습니다."
     };
   }
+
+  const selectedHigh1 = { index: trendPair.p1.index, date: trendPair.p1.date, price: trendPair.p1.value };
+  const selectedHigh2 = { index: trendPair.p2.index, date: trendPair.p2.date, price: trendPair.p2.value };
 
   const lastIndex = data.length - 1;
   const lastCandle = data[lastIndex];
@@ -10867,6 +10856,9 @@ function ChartView({ selected, stocks, selectedCode, setSelectedCode }) {
   const [hoverIndex, setHoverIndex] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const dragStateRef = useRef(null);
+  const pinchRef = useRef(null);
+  const chartSurfaceRef = useRef(null);
+  const viewRef = useRef({ offset: 0, count: 80, maxOffset: 0, total: 0, step: 1, width: 900 });
   const [predictionInfo, setPredictionInfo] = useState(null);
   const [aiForecast, setAiForecast] = useState(null);
   const [aiForecastLoading, setAiForecastLoading] = useState(false);
@@ -11036,7 +11028,13 @@ const loadExtendedGogo = async (trigger = "manual") => {
     const bt = parseChartDateValue(b.date, 0);
     return at - bt;
   });
-  const gogoLookback = period === "Y" ? rawData.length : Math.min(rawData.length, countByPeriod(period, range));
+  // Period-aware 고고저 window: D~160, W~78, M~36 (avoid monthly ATH→last-bar crash lines).
+  const gogoPeriodLookback =
+    period === "Y" ? rawData.length :
+    period === "W" ? 78 :
+    period === "M" ? 36 :
+    160;
+  const gogoLookback = Math.min(rawData.length, gogoPeriodLookback);
   const fullChartData = rawData.slice(-gogoLookback);
   const safeVisibleCount = Math.min(fullChartData.length, Math.max(20, visibleCount));
   const maxOffset = Math.max(0, fullChartData.length - safeVisibleCount);
@@ -11051,6 +11049,20 @@ const loadExtendedGogo = async (trigger = "manual") => {
   const rsiSeries = calcRSISeries(chartData, 14);
   const psych = analyzeMarketPsychology(chartData, rsiSeries);
   const psychPatterns = detectPsychPatterns(chartData);
+  const personalAlertRows = (() => {
+    const last = chartData[chartData.length - 1];
+    const prev = chartData[chartData.length - 2];
+    const changeRate = last && prev && prev.close ? ((last.close - prev.close) / prev.close) * 100 : 0;
+    const recentHigh = chartData.slice(0, -1).reduce((m, c) => Math.max(m, Number(c.high) || 0), 0);
+    return NIndicators.personalAlerts({
+      name: selected?.name || selected?.code || "",
+      code: selected?.code || "",
+      changeRate,
+      lastClose: last?.close,
+      recentHigh,
+      fearGreed: psych?.fearGreedScore,
+    });
+  })();
   const lastPsychLog = psychLog.filter((x) => String(x.code) === String(selected?.code || selected?.symbol)).slice(0, 20);
 
   const gogoSignal = calculateGogojeoSignal(chartData, {
@@ -11293,10 +11305,89 @@ const loadExtendedGogo = async (trigger = "manual") => {
     const zoomIn = e.deltaY < 0;
     setVisibleCount((n) => {
       const base = Math.max(20, Math.min(fullChartData.length, n));
-      const next = zoomIn ? Math.round(base * 0.85) : Math.round(base * 1.18);
-      return Math.max(20, Math.min(fullChartData.length, next));
+      const scale = zoomIn ? 1 / 0.85 : 1 / 1.18;
+      return ChartGestures.nextVisibleCount(base, scale, fullChartData.length);
     });
   };
+
+  viewRef.current = {
+    offset: safeOffset,
+    count: safeVisibleCount,
+    maxOffset,
+    total: fullChartData.length,
+    step,
+    width,
+  };
+
+  useEffect(() => {
+    const el = chartSurfaceRef.current;
+    if (!el) return;
+
+    const onTouchStart = (e) => {
+      if (e.touches.length >= 2) {
+        dragStateRef.current = null;
+        setIsDragging(false);
+        pinchRef.current = {
+          dist: ChartGestures.touchDistance(e.touches[0], e.touches[1]),
+          count: viewRef.current.count,
+        };
+        e.preventDefault();
+        return;
+      }
+      if (e.touches.length === 1) {
+        const t = e.touches[0];
+        dragStateRef.current = {
+          startClientX: t.clientX,
+          startClientY: t.clientY,
+          startOffset: viewRef.current.offset,
+          locked: null,
+        };
+      }
+    };
+
+    const onTouchMove = (e) => {
+      if (e.touches.length >= 2 && pinchRef.current) {
+        e.preventDefault();
+        const dist = ChartGestures.touchDistance(e.touches[0], e.touches[1]);
+        const scale = dist / Math.max(1, pinchRef.current.dist);
+        setVisibleCount(ChartGestures.nextVisibleCount(pinchRef.current.count, scale, viewRef.current.total));
+        return;
+      }
+      const drag = dragStateRef.current;
+      if (!drag || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      const dx = t.clientX - drag.startClientX;
+      const dy = t.clientY - drag.startClientY;
+      if (drag.locked == null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+        drag.locked = ChartGestures.isHorizontalPan(dx, dy) ? "x" : "y";
+      }
+      if (drag.locked === "x") {
+        e.preventDefault();
+        setIsDragging(true);
+        const rect = el.getBoundingClientRect();
+        const svgScale = viewRef.current.width / Math.max(1, rect.width);
+        const deltaBars = Math.round((dx * svgScale) / Math.max(1, viewRef.current.step));
+        setWindowOffset(Math.max(0, Math.min(viewRef.current.maxOffset, drag.startOffset + deltaBars)));
+      }
+    };
+
+    const onTouchEnd = () => {
+      pinchRef.current = null;
+      dragStateRef.current = null;
+      setIsDragging(false);
+    };
+
+    el.addEventListener("touchstart", onTouchStart, { passive: false });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd);
+    el.addEventListener("touchcancel", onTouchEnd);
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, []);
 
   const lastTradeLabel = last?.date || "마지막 거래 시점";
   const ma20Last = ma20[ma20.length - 1];
@@ -11371,6 +11462,17 @@ const loadExtendedGogo = async (trigger = "manual") => {
             <div className="chart-pro-chip"><b>박스권</b><br />{boxInfo?.upper ? `${fmtPrice(boxInfo.lower)} ~ ${fmtPrice(boxInfo.upper)} · 폭 ${boxInfo.widthRate}%` : "-"}</div>
             <div className="chart-pro-chip"><b>심리</b><br /><span style={{ color: psych.phaseColor }}>{psych.phase}</span> · {psych.fearGreedScore}점</div>
           </div>
+          {personalAlertRows.length > 0 && (
+            <div className="error" style={{ borderColor: "#ffd44766", color: "#d9ecf5", background: "#ffd44711" }}>
+              위험·기회 알림 (분석 전용 · 급락/돌파/공포탐욕/뉴스)
+              {personalAlertRows.map((row) => (
+                <div key={row.kind} style={{ marginTop: 6 }}>
+                  <b style={{ color: row.opportunity ? "#00ff88" : "#ff4466" }}>{row.label}</b>
+                  {" · "}{row.title} — {row.detail}
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="technique-grid">
             {techniqueAI.ranked.map((t) => (
@@ -11453,7 +11555,7 @@ const loadExtendedGogo = async (trigger = "manual") => {
             />
             <span className="chart-window-label">{chartData.length}봉 표시 / 전체 {fullChartData.length}봉</span>
           </div>
-          <div className="chart-drag-hint">차트 위에서 마우스로 드래그하면 과거/최근 구간으로 이동하고, 마우스 휠로 확대·축소할 수 있습니다.</div>
+          <div className="chart-drag-hint">차트 위에서 좌우로 밀면 과거/최근 구간으로 이동하고, 두 손가락 핀치 또는 마우스 휠로 확대·축소할 수 있습니다. 위아래 스크롤은 페이지가 받습니다.</div>
 
           <div className={`chart-box pro-chart-box ${chartFullscreen ? "chart-box-fullscreen" : ""}`}>
             {chartFullscreen && <button className="chart-back-btn" onClick={() => setChartFullscreen(false)}>돌아가기</button>}
@@ -11465,7 +11567,7 @@ const loadExtendedGogo = async (trigger = "manual") => {
                 거래량: {fmtPrice(hoverCandle.volume)}
               </div>
             )}
-            <div className="chart-svg-wrap">
+            <div className="chart-svg-wrap" ref={chartSurfaceRef}>
             <svg
               className={`chart-svg pro-chart-svg${isDragging ? " dragging" : ""}`}
               viewBox={`0 0 ${width} ${height}`}

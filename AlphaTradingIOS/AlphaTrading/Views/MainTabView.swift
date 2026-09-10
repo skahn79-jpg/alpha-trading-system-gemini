@@ -16,25 +16,61 @@ extension View {
     }
 }
 
+enum MainAppTab: Int, CaseIterable, Hashable, Identifiable {
+    case dashboard
+    case favorites
+    case stocks
+    case portfolio
+    case more
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .dashboard: return "대시보드"
+        case .favorites: return "관심"
+        case .stocks: return "종목"
+        case .portfolio: return "포트폴리오"
+        case .more: return "더보기"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .dashboard: return "chart.line.uptrend.xyaxis"
+        case .favorites: return "star.fill"
+        case .stocks: return "list.bullet"
+        case .portfolio: return "briefcase.fill"
+        case .more: return "ellipsis.circle"
+        }
+    }
+}
+
 struct MainTabView: View {
     @StateObject private var stockListVM = StockListViewModel()
+    @State private var selectedTab: MainAppTab = .dashboard
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
+            DashboardView()
+                .tabItem { Label(MainAppTab.dashboard.title, systemImage: MainAppTab.dashboard.systemImage) }
+                .tag(MainAppTab.dashboard)
+
             FavoritesView(viewModel: stockListVM)
-                .tabItem { Label("관심", systemImage: "star.fill") }
+                .tabItem { Label(MainAppTab.favorites.title, systemImage: MainAppTab.favorites.systemImage) }
+                .tag(MainAppTab.favorites)
 
             StockListView(viewModel: stockListVM)
-                .tabItem { Label("종목", systemImage: "list.bullet") }
-
-            DashboardView()
-                .tabItem { Label("대시보드", systemImage: "chart.line.uptrend.xyaxis") }
+                .tabItem { Label(MainAppTab.stocks.title, systemImage: MainAppTab.stocks.systemImage) }
+                .tag(MainAppTab.stocks)
 
             PortfolioView()
-                .tabItem { Label("포트폴리오", systemImage: "briefcase.fill") }
+                .tabItem { Label(MainAppTab.portfolio.title, systemImage: MainAppTab.portfolio.systemImage) }
+                .tag(MainAppTab.portfolio)
 
             MoreView()
-                .tabItem { Label("더보기", systemImage: "ellipsis.circle") }
+                .tabItem { Label(MainAppTab.more.title, systemImage: MainAppTab.more.systemImage) }
+                .tag(MainAppTab.more)
         }
         .tint(AppTheme.accent)
     }
