@@ -197,13 +197,6 @@
 			remoteGlobalIDString = A60000000000000000000001;
 			remoteInfo = AlphaTrading;
 		};
-		D30000000000000000000001 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = A90000000000000000000001 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = C60000000000000000000001;
-			remoteInfo = AlphaTradingWatch;
-		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -497,7 +490,6 @@
 			buildRules = (
 			);
 			dependencies = (
-				D20000000000000000000001 /* PBXTargetDependency */,
 			);
 			name = AlphaTrading;
 			productName = AlphaTrading;
@@ -528,6 +520,7 @@
 				C70000000000000000000001 /* Sources */,
 				C40000000000000000000001 /* Frameworks */,
 				C80000000000000000000001 /* Resources */,
+				E20000000000000000000001 /* Ensure Watch Info.plist */,
 			);
 			buildRules = (
 			);
@@ -545,11 +538,6 @@
 			isa = PBXTargetDependency;
 			target = A60000000000000000000001 /* AlphaTrading */;
 			targetProxy = BC0000000000000000000002 /* PBXContainerItemProxy */;
-		};
-		D20000000000000000000001 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = C60000000000000000000001 /* AlphaTradingWatch */;
-			targetProxy = D30000000000000000000001 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -593,8 +581,6 @@
 			);
 		};
 /* End PBXProject section */
-
-/* End unused copy-files section */
 
 /* Begin PBXResourcesBuildPhase section */
 		A70000000000000000000002 /* Resources */ = {
@@ -666,7 +652,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\nif [ \"${PLATFORM_NAME}\" = \"iphonesimulator\" ]; then\n  echo \"note: skip Watch embed on iOS Simulator (Watch is built as iOS and Info.plist copy fails)\"\n  exit 0\nfi\nWATCH_APP=\"${BUILT_PRODUCTS_DIR}/AlphaTradingWatch.app\"\nDEST_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Watch\"\nif [ ! -d \"${WATCH_APP}\" ]; then\n  echo \"warning: AlphaTradingWatch.app missing; skip embed\"\n  exit 0\nfi\nif [ ! -f \"${WATCH_APP}/Info.plist\" ]; then\n  cat > \"${WATCH_APP}/Info.plist\" <<'PLIST'\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n<key>CFBundleDisplayName</key><string>ALPHA</string>\n<key>CFBundleExecutable</key><string>AlphaTradingWatch</string>\n<key>CFBundleIdentifier</key><string>com.alpha.trading.ios.watchkitapp</string>\n<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>\n<key>CFBundleName</key><string>AlphaTradingWatch</string>\n<key>CFBundlePackageType</key><string>APPL</string>\n<key>CFBundleShortVersionString</key><string>1.0.0</string>\n<key>CFBundleVersion</key><string>75</string>\n<key>WKApplication</key><true/>\n<key>WKCompanionAppBundleIdentifier</key><string>com.alpha.trading.ios</string>\n</dict></plist>\nPLIST\nfi\nmkdir -p \"${DEST_DIR}\"\nrsync -a --delete \"${WATCH_APP}/\" \"${DEST_DIR}/AlphaTradingWatch.app/\"\n";
+			shellScript = "set -e\nif [ \"${PLATFORM_NAME}\" = \"iphonesimulator\" ]; then\n  echo \"note: skip Watch embed on iOS Simulator\"\n  exit 0\nfi\nWATCH_APP=\"${BUILT_PRODUCTS_DIR}/AlphaTradingWatch.app\"\nDEST_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Watch\"\nif [ ! -d \"${WATCH_APP}\" ]; then\n  echo \"warning: AlphaTradingWatch.app missing; skip embed\"\n  exit 0\nfi\nmkdir -p \"${DEST_DIR}\"\nrsync -a --delete \"${WATCH_APP}/\" \"${DEST_DIR}/AlphaTradingWatch.app/\"\n";
+		};
+		E20000000000000000000001 /* Ensure Watch Info.plist */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Ensure Watch Info.plist";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nAPP=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\"\nmkdir -p \"${APP}\"\nif [ ! -f \"${APP}/Info.plist\" ]; then\n  cat > \"${APP}/Info.plist\" <<'PLIST'\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n<key>CFBundleDisplayName</key><string>ALPHA</string>\n<key>CFBundleExecutable</key><string>AlphaTradingWatch</string>\n<key>CFBundleIdentifier</key><string>com.alpha.trading.ios.watchkitapp</string>\n<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>\n<key>CFBundleName</key><string>AlphaTradingWatch</string>\n<key>CFBundlePackageType</key><string>APPL</string>\n<key>CFBundleShortVersionString</key><string>1.0.0</string>\n<key>CFBundleVersion</key><string>75</string>\n<key>WKApplication</key><true/>\n<key>WKCompanionAppBundleIdentifier</key><string>com.alpha.trading.ios</string>\n</dict></plist>\nPLIST\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -1009,6 +1010,15 @@
 			buildConfigurations = (
 				BA0000000000000000000001 /* Debug */,
 				BA0000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D80000000000000000000001 /* Build configuration list for PBXNativeTarget "AlphaTradingWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DA0000000000000000000001 /* Debug */,
+				DA0000000000000000000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
