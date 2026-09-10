@@ -874,12 +874,12 @@ app.get("/api/news/trump", async (req, res) => {
       return res.json(trumpNewsCache.data);
     }
     const topics = [
-      { topic: "트럼프 정책·관세", query: "트럼프 관세 증시" },
-      { topic: "트럼프 미디어(TMTG)", query: "트럼프 미디어 테크놀로지 트루스소셜" },
+      { topic: "트럼프 정책·관세", query: "트럼프 관세" },
+      { topic: "트럼프 미디어(TMTG)", query: "DJT OR TMTG OR \"Truth Social\" OR 트루스소셜" },
     ];
     const out = [];
     for (const t of topics) {
-      const items = await cryptoReport.fetchGoogleNews(t.query, 5).catch(() => []);
+      const items = await cryptoReport.fetchNewsWithFallback(t.query, 5).catch(() => []);
       if (items.length) out.push({ topic: t.topic, items });
     }
     const result = { ok: out.length > 0, topics: out, updatedAt: new Date().toISOString() };
@@ -1168,7 +1168,7 @@ app.get("/api/macro/indicators", async (req, res) => {
   }
 });
 
-// 한국 수출입 리포트 (총괄: FRED 공개 데이터, 품목별: 관세청 API 키 설정 시)
+// 한국 수출입 리포트 (총괄: FRED + 관세청 잠정통계로 최신월 보완, 품목별: 관세청 API 키 설정 시)
 // GET /api/trade/report
 app.get("/api/trade/report", async (req, res) => {
   try {

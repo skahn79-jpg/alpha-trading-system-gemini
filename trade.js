@@ -1,8 +1,11 @@
 /**
  * ALPHA TRADING SYSTEM - 한국 수출입 리포트 모듈
  *
- * 총괄 수출입: FRED 공개 CSV (OECD MEI, 한국 월별 상품 수출/수입, USD) — API 키 불필요
- *   수출: XTEXVA01KRM667S / 수입: XTIMVA01KRM667S
+ * 총괄 수출입:
+ *   장기 시계열 — FRED 공개 CSV (OECD MEI, 한국 월별 상품 수출/수입, USD) — API 키 불필요
+ *     수출: XTEXVA01KRM667S / 수입: XTIMVA01KRM667S
+ *   최신월 보완 — FRED가 1–2개월 지연되면 관세청 잠정통계(tradedata.go.kr, 백만 달러)로
+ *     공표된 월을 이어 붙임. TRADE_API_KEY가 있으면 신성질별 「총계」도 보조 소스로 사용.
  * 품목별(선택): 관세청 수출입무역통계 API — TRADE_API_KEY(data.go.kr) 설정 시 사용
  *
  * 투자 검토·종목 선정 참고용 정보이며 투자 권유가 아닙니다.
@@ -12,6 +15,7 @@ const axios = require("axios");
 
 const FRED_EXPORT_ID = "XTEXVA01KRM667S";
 const FRED_IMPORT_ID = "XTIMVA01KRM667S";
+const CUSTOMS_PPRC_URL = "https://tradedata.go.kr/cts/hmpg/retrieveTradePprc.do";
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12시간
 
 let cache = { at: 0, data: null };
@@ -61,6 +65,165 @@ function mom(series, idx) {
   const prev = series[idx - 1];
   if (!cur || !prev || !prev.value) return null;
   return Math.round(((cur.value - prev.value) / prev.value) * 1000) / 10;
+}
+
+function parseLooseNumber(v) {
+  if (v == null || v === "") return null;
+  const n = Number(String(v).replace(/,/g, "").replace(/[^\d.+-]/g, "").trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Asia/Seoul 기준 현재 YYYY-MM — 당월 잠정(월중) 값은 총괄에 넣지 않음 */
+function currentYearMonthKst(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(now);
+  const y = parts.find((p) => p.type === "year")?.value;
+  const m = parts.find((p) => p.type === "month")?.value;
+  return y && m ? `${y}-${m}` : null;
+}
+
+function monthFromAcptMm(acptMm, year) {
+  const m = String(acptMm || "").match(/(\d{1,2})/);
+  const y = parseLooseNumber(year);
+  if (!m || !y) return null;
+  return `${y}-${String(Number(m[1])).padStart(2, "0")}`;
+}
+
+/**
+ * 관세청 금액 → 백만 달러. FRED 같은 달과 비교해 스케일을 추정하고,
+ * 겹치는 달이 없으면 자릿수로 판별한다 (USD / 천달러 / 이미 백만 달러).
+ */
+function scaleToMillionUsd(raw, referenceMillion) {
+  const v = Number(raw);
+  if (!Number.isFinite(v) || v === 0) return null;
+  if (referenceMillion && referenceMillion > 0) {
+    const r = Math.abs(v / referenceMillion);
+    if (r > 5e5 && r < 5e7) return Math.round(v / 1e6);
+    if (r > 50 && r < 2000) return Math.round(v / 1e3);
+    if (r > 0.3 && r < 3) return Math.round(v);
+  }
+  if (Math.abs(v) >= 1e8) return Math.round(v / 1e6);
+  return Math.round(v);
+}
+
+function isGrandTotalName(name) {
+  const n = String(name || "");
+  if (!n) return false;
+  if (n.includes("소계")) return false;
+  return n.includes("총계") || n.includes("합계");
+}
+
+/**
+ * tradedata.go.kr 홈 잠정통계 JSON → 월별 수출/수입 (백만 달러).
+ * pprcExpMonthList / pprcImpMonthList 의 cnyyUsdAmt 가 이미 백만 달러.
+ */
+function parseCustomsPrelim(payload, now = new Date()) {
+  try {
+    const data = typeof payload === "string" ? JSON.parse(payload) : payload;
+    if (!data || typeof data !== "object") return [];
+    const cutoff = currentYearMonthKst(now);
+    const overallYear = parseLooseNumber(data.pprcOverall?.cnyy)
+      || parseLooseNumber(data.pprcExpMonthList?.[0]?.yearCheck);
+
+    const byMonth = new Map();
+    const ingestSide = (list, side) => {
+      for (const item of list || []) {
+        const year = item.yearCheck || overallYear;
+        const month = monthFromAcptMm(item.acptMm, year);
+        if (!month) continue;
+        if (cutoff && month >= cutoff) continue;
+        const amt = parseLooseNumber(item.cnyyUsdAmt);
+        const yoyPct = parseLooseNumber(item.icdcRt);
+        if (amt == null) continue;
+        const cur = byMonth.get(month) || { month, exports: null, imports: null, exportsYoY: null, importsYoY: null };
+        cur[side] = amt;
+        if (side === "exports" && yoyPct != null) cur.exportsYoY = yoyPct;
+        if (side === "imports" && yoyPct != null) cur.importsYoY = yoyPct;
+        byMonth.set(month, cur);
+      }
+    };
+    ingestSide(data.pprcExpMonthList, "exports");
+    ingestSide(data.pprcImpMonthList, "imports");
+    return [...byMonth.values()]
+      .filter((r) => r.exports != null && r.imports != null)
+      .sort((a, b) => a.month.localeCompare(b.month));
+  } catch {
+    return [];
+  }
+}
+
+async function fetchCustomsPrelimMonthly(now = new Date()) {
+  const { data } = await axios.get(CUSTOMS_PPRC_URL, {
+    timeout: 15000,
+    headers: {
+      Accept: "application/json, text/javascript, */*; q=0.01",
+      "User-Agent": "AlphaTrading/1.0 (trade-report)",
+      "X-Requested-With": "XMLHttpRequest",
+      Referer: "https://tradedata.go.kr/cts/index.do",
+    },
+  });
+  return parseCustomsPrelim(data, now);
+}
+
+async function fetchCustomsPrelimMonthlySafe(now = new Date()) {
+  try {
+    return await fetchCustomsPrelimMonthly(now);
+  } catch (e) {
+    console.error("[trade-customs]", e.message);
+    return [];
+  }
+}
+
+/** FRED(USD) 시계열에, FRED보다 최신인 공식 월(백만 달러)만 이어 붙인다. 기존 FRED 월은 유지. */
+function extendMergedWithOfficial(mergedUsd, officialMillionRows) {
+  const extendedMonths = [];
+  if (!officialMillionRows || !officialMillionRows.length) {
+    return { merged: mergedUsd, extendedMonths };
+  }
+  const fredLatest = mergedUsd.length ? mergedUsd[mergedUsd.length - 1].month : "";
+  const have = new Set(mergedUsd.map((r) => r.month));
+  const extra = [];
+  for (const row of officialMillionRows) {
+    if (!row?.month || have.has(row.month)) continue;
+    if (fredLatest && row.month <= fredLatest) continue;
+    extra.push({
+      month: row.month,
+      exports: row.exports * 1e6,
+      imports: row.imports * 1e6,
+      officialExportsYoY: row.exportsYoY ?? null,
+      officialImportsYoY: row.importsYoY ?? null,
+    });
+    have.add(row.month);
+    extendedMonths.push(row.month);
+  }
+  extra.sort((a, b) => a.month.localeCompare(b.month));
+  return { merged: mergedUsd.concat(extra), extendedMonths };
+}
+
+function mergeOfficialMillionRows(...lists) {
+  const by = new Map();
+  for (const list of lists) {
+    for (const row of list || []) {
+      if (!row?.month || by.has(row.month)) continue;
+      by.set(row.month, row);
+    }
+  }
+  return [...by.values()].sort((a, b) => a.month.localeCompare(b.month));
+}
+
+function totalsMapToMillion(totalsByMonth, fredMillionByMonth) {
+  const rows = [];
+  for (const [month, v] of totalsByMonth || []) {
+    const ref = fredMillionByMonth?.get(month);
+    const exports = scaleToMillionUsd(v.exports, ref?.exports);
+    const imports = scaleToMillionUsd(v.imports, ref?.imports);
+    if (exports == null || imports == null) continue;
+    rows.push({ month, exports, imports, exportsYoY: null, importsYoY: null });
+  }
+  return rows.sort((a, b) => a.month.localeCompare(b.month));
 }
 
 /**
@@ -145,16 +308,25 @@ async function fetchCategoryTrade() {
     // (품목, 월)별 수출/수입 병합 — 페이지를 받는 즉시 집계하고 원본 행은 버려
     // 무료 인스턴스(512MB)에서 수만 행을 들고 있지 않도록 함
     const byName = new Map();
+    const totalsByMonth = new Map(); // 총계/합계 (계층이 있으면 금액이 큰 쪽 = 총괄)
     let totalRows = 0;
     const ingest = (items, side) => {
       for (const it of items) {
         const name = String(it[nameKey] || "").trim();
         const period = String(it[periodKey] || "").replace(/[^0-9]/g, "");
-        if (!name || period.length < 6 || name.includes("총계") || name.includes("합계")) continue;
+        if (period.length < 6) continue;
         const month = `${period.slice(0, 4)}-${period.slice(4, 6)}`;
+        const amt = Number(it[amountKey]) || 0;
+        if (isGrandTotalName(name)) {
+          const cur = totalsByMonth.get(month) || { exports: 0, imports: 0 };
+          cur[side] = Math.max(cur[side], amt);
+          totalsByMonth.set(month, cur);
+          continue;
+        }
+        if (!name) continue;
         if (!byName.has(name)) byName.set(name, new Map());
         const cur = byName.get(name).get(month) || { exports: 0, imports: 0 };
-        cur[side] += Number(it[amountKey]) || 0;
+        cur[side] += amt;
         byName.get(name).set(month, cur);
       }
     };
@@ -266,7 +438,12 @@ async function fetchCategoryTrade() {
     }
 
     categories.sort((a, b) => b.exports - a.exports);
-    return categories.slice(0, 20);
+    const sliced = categories.slice(0, 20);
+    if (!sliced.length && !totalsByMonth.size) {
+      categoryLastError = "관세청 API 응답에 품목 데이터 없음 (기간 내 데이터 미제공 가능)";
+      return null;
+    }
+    return { categories: sliced, totals: totalsByMonth };
   } catch (e) {
     const status = e.response?.status;
     if (status === 403) {
@@ -282,7 +459,7 @@ async function fetchCategoryTrade() {
 }
 
 // 품목별 수집은 관세청 호출이 최대 24회라 리포트 요청을 블로킹하지 않도록 백그라운드 빌드
-const categoriesCache = { at: 0, data: null, building: false };
+const categoriesCache = { at: 0, data: null, totals: [], building: false };
 const CATEGORIES_TTL_MS = 6 * 60 * 60 * 1000;
 
 function kickCategoryBuild() {
@@ -290,10 +467,19 @@ function kickCategoryBuild() {
   if (categoriesCache.data && Date.now() - categoriesCache.at < CATEGORIES_TTL_MS) return;
   categoriesCache.building = true;
   fetchCategoryTrade()
-    .then((cats) => {
-      if (cats && cats.length) {
-        categoriesCache.data = cats;
+    .then((result) => {
+      if (!result) return;
+      if (result.categories && result.categories.length) {
+        categoriesCache.data = result.categories;
         categoriesCache.at = Date.now();
+      }
+      if (result.totals && result.totals.size) {
+        categoriesCache.totals = result.totals;
+        const latestTotal = [...result.totals.keys()].sort().pop();
+        // 품목 총계가 캐시된 총괄보다 최신이면 12h FRED 캐시를 버려 다음 요청에서 이어 붙임
+        if (cache.data?.latest?.month && latestTotal && latestTotal > cache.data.latest.month) {
+          cache.at = 0;
+        }
       }
     })
     .catch((e) => {
@@ -306,15 +492,28 @@ function kickCategoryBuild() {
 async function buildTradeReport() {
   if (cache.data && Date.now() - cache.at < CACHE_TTL_MS) return cache.data;
 
-  const [exportsSeries, importsSeries] = await Promise.all([
+  const [exportsSeries, importsSeries, customsPrelim] = await Promise.all([
     fetchFredSeries(FRED_EXPORT_ID),
     fetchFredSeries(FRED_IMPORT_ID),
+    fetchCustomsPrelimMonthlySafe(),
   ]);
 
   const importsByMonth = new Map(importsSeries.map((r) => [r.month, r.value]));
-  const merged = exportsSeries
+  let merged = exportsSeries
     .filter((r) => importsByMonth.has(r.month))
     .map((r) => ({ month: r.month, exports: r.value, imports: importsByMonth.get(r.month) }));
+
+  const fredMillionByMonth = new Map(
+    merged.map((r) => [r.month, { exports: Math.round(r.exports / 1e6), imports: Math.round(r.imports / 1e6) }])
+  );
+  const categoryTotalsMillion = totalsMapToMillion(categoriesCache.totals, fredMillionByMonth);
+  // 잠정통계(키 불필요, 보통 품목 API보다 1개월 더 빠름)를 우선하고, 신성질별 총계로 빈 달을 채움
+  const officialMillion = mergeOfficialMillionRows(customsPrelim, categoryTotalsMillion);
+  const officialLabel = customsPrelim.length
+    ? "관세청 잠정통계"
+    : (categoryTotalsMillion.length ? "관세청 신성질별 총계" : null);
+  const extended = extendMergedWithOfficial(merged, officialMillion);
+  merged = extended.merged;
 
   const recentCount = Math.min(25, merged.length);
   const recent = merged.slice(-recentCount);
@@ -328,8 +527,8 @@ async function buildTradeReport() {
       exports: Math.round(row.exports / 1e6), // 백만 달러 단위
       imports: Math.round(row.imports / 1e6),
       balance: Math.round((row.exports - row.imports) / 1e6),
-      exportsYoY: yoy(expSeries, globalIdx),
-      importsYoY: yoy(impSeries, globalIdx),
+      exportsYoY: row.officialExportsYoY ?? yoy(expSeries, globalIdx),
+      importsYoY: row.officialImportsYoY ?? yoy(impSeries, globalIdx),
       exportsMoM: mom(expSeries, globalIdx),
     };
   }).slice(-13); // 최근 13개월 (YoY 계산 후)
@@ -383,9 +582,17 @@ async function buildTradeReport() {
     }
   }
 
+  const sourceParts = ["FRED(OECD 월별 상품무역, USD)"];
+  if (extended.extendedMonths.length && officialLabel) {
+    const lo = extended.extendedMonths[0];
+    const hi = extended.extendedMonths[extended.extendedMonths.length - 1];
+    sourceParts.push(`${officialLabel} 최신월(${lo === hi ? lo : `${lo}~${hi}`})`);
+  }
+  if (categories) sourceParts.push("관세청 품목");
+
   const report = {
     ok: true,
-    source: categories ? "FRED(OECD) + 관세청" : "FRED(OECD 월별 상품무역, USD)",
+    source: sourceParts.join(" + "),
     unit: "백만 달러 (USD million)",
     updatedAt: new Date().toISOString(),
     trend,
@@ -417,4 +624,28 @@ async function buildTradeReport() {
   return report;
 }
 
-module.exports = { buildTradeReport };
+function __resetForTest() {
+  cache = { at: 0, data: null };
+  categoriesCache.at = 0;
+  categoriesCache.data = null;
+  categoriesCache.totals = [];
+  categoriesCache.building = false;
+  categoryLastError = null;
+}
+
+module.exports = {
+  buildTradeReport,
+  parseFredCsv,
+  parseCustomsPrelim,
+  parseLooseNumber,
+  currentYearMonthKst,
+  monthFromAcptMm,
+  scaleToMillionUsd,
+  isGrandTotalName,
+  extendMergedWithOfficial,
+  mergeOfficialMillionRows,
+  totalsMapToMillion,
+  yoy,
+  mom,
+  __resetForTest,
+};
