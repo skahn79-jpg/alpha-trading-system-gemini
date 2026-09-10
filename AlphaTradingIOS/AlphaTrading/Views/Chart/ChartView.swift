@@ -338,7 +338,7 @@ struct ChartView: View {
     }
 
     private var gogoZones: GogoZoneResult? {
-        GogoZoneDetector.detect(candles: viewModel.candles)
+        GogoZoneDetector.detect(candles: viewModel.candles, period: period)
     }
 
     private var volumeProfile: MarketSignalEngine.VolumeProfileResult? {
@@ -446,9 +446,10 @@ struct ChartView: View {
         }
     }
 
-    /// 고점①→고점② 하락 추세선을 표시 구간까지 연장
+    /// 고점①→고점② 하락 추세선을 표시 구간까지 연장 (급경사/비정상 투영은 숨김)
     private var gogoTrendPoints: [MAPoint] {
         guard let zones = gogoZones,
+              !zones.isTrendTooSteep,
               let h1 = zones.trendHigh1,
               let h2 = zones.trendHigh2,
               h2.index > h1.index else { return [] }

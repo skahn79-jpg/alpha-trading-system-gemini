@@ -288,6 +288,27 @@ enum GogoBreakoutScanner {
     }
 }
 
+enum GogoBreakoutListMode: String, CaseIterable, Identifiable {
+    case today
+    case recent
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .today: return "오늘 돌파"
+        case .recent: return "최근 돌파"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .today: return "당일 신규 종가 돌파"
+        case .recent: return "최근 \(GogoZoneDetector.recentBreakoutLookbackTradingDays)거래일 돌파·유지"
+        }
+    }
+}
+
 @MainActor
 final class GogoBreakoutStore: ObservableObject {
     static let shared = GogoBreakoutStore()
@@ -301,6 +322,19 @@ final class GogoBreakoutStore: ObservableObject {
 
     func items(in group: GogoMarketGroup) -> [GogoBreakoutItem] {
         items.filter { $0.marketGroup == group }
+    }
+
+    func items(mode: GogoBreakoutListMode) -> [GogoBreakoutItem] {
+        switch mode {
+        case .today:
+            return items.filter(\.isTodayBreak)
+        case .recent:
+            return items.filter { !$0.isTodayBreak && $0.breakoutBarsAgo >= 1 }
+        }
+    }
+
+    func items(in group: GogoMarketGroup, mode: GogoBreakoutListMode) -> [GogoBreakoutItem] {
+        items(mode: mode).filter { $0.marketGroup == group }
     }
 
     var scanSummary: String {
@@ -335,6 +369,9 @@ final class GogoBreakoutStore: ObservableObject {
                 return (GogoMarketGroup.allCases.firstIndex(of: lhs.marketGroup) ?? 0)
                     < (GogoMarketGroup.allCases.firstIndex(of: rhs.marketGroup) ?? 0)
             }
+            let leftAge = lhs.breakoutBarsAgo < 0 ? 99 : lhs.breakoutBarsAgo
+            let rightAge = rhs.breakoutBarsAgo < 0 ? 99 : rhs.breakoutBarsAgo
+            if leftAge != rightAge { return leftAge < rightAge }
             return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
         }
     }

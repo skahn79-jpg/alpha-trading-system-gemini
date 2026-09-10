@@ -7327,6 +7327,37 @@ function projectTrendValue(trend, targetIndex) {
 }
 
 
+function gogoTrendSlopePer20BarsTP(p1, p2) {
+  const high1 = Number(p1?.value ?? p1?.price);
+  const high2 = Number(p2?.value ?? p2?.price);
+  if (!(high1 > 0) || !Number.isFinite(high2)) return 0;
+  const trendDropRate = ((high1 - high2) / high1) * 100;
+  const trendBars = Math.max(1, Number(p2.index) - Number(p1.index));
+  return (trendDropRate / trendBars) * 20;
+}
+
+function projectGoGoTrendTP(p1, p2, targetIndex) {
+  const span = Math.max(1, Number(p2.index) - Number(p1.index));
+  const v1 = Number(p1.value ?? p1.price);
+  const v2 = Number(p2.value ?? p2.price);
+  const slope = (v2 - v1) / span;
+  return v1 + slope * (targetIndex - Number(p1.index));
+}
+
+function isUsableGoGoPairTP(p1, p2, data) {
+  if (!p1 || !p2 || !(p2.index > p1.index)) return false;
+  const v1 = Number(p1.value ?? p1.price);
+  const v2 = Number(p2.value ?? p2.price);
+  if (!(v1 > 0) || !(v2 < v1)) return false;
+  if (p2.index - p1.index < 5) return false;
+  if (gogoTrendSlopePer20BarsTP(p1, p2) >= 18) return false;
+  const trendNow = projectGoGoTrendTP(p1, p2, data.length - 1);
+  if (!(trendNow > 0)) return false;
+  const recentLows = data.slice(-20).map((d) => Number(d.low)).filter((n) => n > 0);
+  if (recentLows.length && trendNow < Math.min(...recentLows) * 0.5) return false;
+  return true;
+}
+
 function findGoGoJeoTrend(data) {
   if (!data || data.length < 10) return null;
 
@@ -7348,24 +7379,30 @@ function findGoGoJeoTrend(data) {
     pivots.push({ index: maxIndex, value: data[maxIndex].high, date: data[maxIndex].date });
   }
 
-  const highest = pivots.reduce((best, p) => (p.value > best.value ? p : best), pivots[0]);
-  const after = pivots.filter((p) => p.index > highest.index + 3);
+  const p1Candidates = [...pivots].sort((a, b) => b.value - a.value);
+  for (const p1 of p1Candidates) {
+    const after = pivots
+      .filter((p) => p.index > p1.index + 3 && p.value < p1.value)
+      .sort((a, b) => a.index - b.index);
+    for (const p2 of after) {
+      if (isUsableGoGoPairTP(p1, p2, data)) return { p1, p2 };
+    }
+  }
 
-  let second = after.find((p) => p.value < highest.value);
-  if (!second && after.length) second = after[0];
-
-  if (!second) {
+  const highest = p1Candidates[0];
+  if (highest) {
     const tailStart = Math.min(data.length - 1, highest.index + Math.max(5, Math.floor((data.length - highest.index) / 2)));
     let bestIdx = tailStart;
     for (let i = tailStart; i < data.length; i++) {
       if (data[i].high > data[bestIdx].high) bestIdx = i;
     }
-    second = { index: bestIdx, value: data[bestIdx].high, date: data[bestIdx].date };
+    const second = { index: bestIdx, value: data[bestIdx].high, date: data[bestIdx].date };
+    if (second.index > highest.index && second.value < highest.value && isUsableGoGoPairTP(highest, second, data)) {
+      return { p1: highest, p2: second };
+    }
   }
 
-  if (!second || second.index <= highest.index) return null;
-
-  return { p1: highest, p2: second };
+  return null;
 }
 
 function countByPeriod(period, range) {
@@ -10991,7 +11028,13 @@ const loadExtendedGogo = async (trigger = "manual") => {
     const bt = parseChartDateValue(b.date, 0);
     return at - bt;
   });
-  const gogoLookback = period === "Y" ? rawData.length : Math.min(rawData.length, countByPeriod(period, range));
+  // Period-aware 고고저 window: D~160, W~78, M~36 (avoid monthly ATH→last-bar crash lines).
+  const gogoPeriodLookback =
+    period === "Y" ? rawData.length :
+    period === "W" ? 78 :
+    period === "M" ? 36 :
+    160;
+  const gogoLookback = Math.min(rawData.length, gogoPeriodLookback);
   const fullChartData = rawData.slice(-gogoLookback);
   const safeVisibleCount = Math.min(fullChartData.length, Math.max(20, visibleCount));
   const maxOffset = Math.max(0, fullChartData.length - safeVisibleCount);

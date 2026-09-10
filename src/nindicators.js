@@ -529,12 +529,9 @@ function gogoPivot(index, price, date) {
   return { i: index, index, price, value: price, date };
 }
 
-/**
- * findGoGoJeoTrend — APK / trading-platform.jsx reference.
- * ±2 pivot highs → 고점① = global highest → 고점② = later lower (tail high fallback).
- */
-function findGoGoJeoTrend(data) {
-  if (!data || data.length < 10) return null;
+const GOGO_MIN_PIVOT_GAP = 3;
+
+function collectGogoHighPivots(data) {
   const pivots = [];
   for (let i = 2; i < data.length - 2; i += 1) {
     const hi = num(data[i].high);
@@ -548,15 +545,32 @@ function findGoGoJeoTrend(data) {
       pivots.push(gogoPivot(i, hi, data[i].date));
     }
   }
-  if (!pivots.length) {
+  if (!pivots.length && data.length) {
     let maxIndex = 0;
     for (let i = 1; i < data.length; i += 1) {
       if (num(data[i].high) > num(data[maxIndex].high)) maxIndex = i;
     }
     pivots.push(gogoPivot(maxIndex, num(data[maxIndex].high), data[maxIndex].date));
   }
+  return pivots;
+}
+
+function isUsableGogoTrendPair(p1, p2, candles) {
+  if (!p1 || !p2) return false;
+  if (!(p2.index > p1.index) || !(p1.price > 0) || !(p2.price < p1.price)) return false;
+  if (p2.index - p1.index < GOGO_MIN_TREND_BARS) return false;
+  if (isGogoTrendTooSteep(p1, p2)) return false;
+  const trendNow = projectGogoTrendValue(p1, p2, candles.length - 1);
+  return isGogoLineSane(trendNow, candles, p1, p2);
+}
+
+/** Classic ATH→later lower (no steep filter) — 급경사 labeling only. */
+function findGoGoJeoTrendRaw(data) {
+  if (!data || data.length < 10) return null;
+  const pivots = collectGogoHighPivots(data);
+  if (!pivots.length) return null;
   const highest = pivots.reduce((best, p) => (p.price > best.price ? p : best), pivots[0]);
-  const after = pivots.filter((p) => p.index > highest.index + 3);
+  const after = pivots.filter((p) => p.index > highest.index + GOGO_MIN_PIVOT_GAP);
   let second = after.find((p) => p.price < highest.price);
   if (!second && after.length) second = after[0];
   if (!second) {
@@ -574,6 +588,43 @@ function findGoGoJeoTrend(data) {
   return { p1: highest, p2: second };
 }
 
+/**
+ * findGoGoJeoTrend — trading-platform ATH→later lower first, then next valid
+ * descending pivot pair when ①② is 급경사 or projects nonsense (LG이노텍 class).
+ */
+function findGoGoJeoTrend(data) {
+  if (!data || data.length < 10) return null;
+  const pivots = collectGogoHighPivots(data);
+  if (!pivots.length) return null;
+  const p1Candidates = [...pivots].sort((a, b) => b.price - a.price);
+  for (const p1 of p1Candidates) {
+    const after = pivots
+      .filter((p) => p.index > p1.index + GOGO_MIN_PIVOT_GAP && p.price < p1.price)
+      .sort((a, b) => a.index - b.index);
+    for (const p2 of after) {
+      if (isUsableGogoTrendPair(p1, p2, data)) return { p1, p2 };
+    }
+  }
+  const highest = p1Candidates[0];
+  if (highest) {
+    const tailStart = Math.min(
+      data.length - 1,
+      highest.index + Math.max(5, Math.floor((data.length - highest.index) / 2))
+    );
+    if (tailStart < data.length) {
+      let bestIdx = tailStart;
+      for (let i = tailStart; i < data.length; i += 1) {
+        if (num(data[i].high) > num(data[bestIdx].high)) bestIdx = i;
+      }
+      const p2 = gogoPivot(bestIdx, num(data[bestIdx].high), data[bestIdx].date);
+      if (p2.index > highest.index && p2.price < highest.price && isUsableGogoTrendPair(highest, p2, data)) {
+        return { p1: highest, p2 };
+      }
+    }
+  }
+  return null;
+}
+
 function projectGogoTrendValue(p1, p2, targetIndex) {
   if (!p1 || !p2) return null;
   const span = Math.max(1, p2.index - p1.index);
@@ -584,10 +635,18 @@ function projectGogoTrendValue(p1, p2, targetIndex) {
 /** trading-platform isTrendTooSteep: drop% per bar × 20. Threshold 18 → 급경사 추세선 제외. */
 const GOGO_STEEP_SLOPE_THRESHOLD = 18;
 const GOGO_LOOKBACK = 160;
+/** D~120–180, W~52–104, M~24–60 */
+function gogoLookbackForPeriod(period) {
+  const p = String(period || "D").toUpperCase();
+  if (p === "W") return 78;
+  if (p === "M") return 36;
+  return GOGO_LOOKBACK;
+}
 const GOGO_VOLUME_CONFIRM = 1.25;
 const GOGO_MIN_BREAKOUT_RATE = 0.3;
 const GOGO_MIN_TREND_BARS = 5;
 const GOGO_LINE_VS_RECENT_LOW = 0.5;
+const GOGO_RECENT_BREAKOUT_LOOKBACK = 5;
 
 function gogoTrendSlopePer20Bars(p1, p2) {
   const high1 = num(p1 && p1.price);
@@ -752,15 +811,17 @@ function calcGogoChartMethodSignals(data, p1, p2, swingLows) {
   const isVolumeConfirm = volumeRatio >= GOGO_VOLUME_CONFIRM;
   const isBullishCandle = currentClose > num(last.open);
   const lineSane = isGogoLineSane(trendLineNow, data, p1, p2);
+  const recent = findMostRecentQualifyingGogoBreak(data, p1, p2, swingLows, GOGO_RECENT_BREAKOUT_LOOKBACK);
   const isRealBreakout = Boolean(
-    freshBreak
+    closeBreak
     && !lowInfo.isBreakoutFailure
     && !isTrendTooSteep
-    && isVolumeConfirm
-    && isBullishCandle
-    && breakoutRate >= GOGO_MIN_BREAKOUT_RATE
     && lineSane
+    && recent
   );
+  if (isRealBreakout && recent && recent.barsAgo > 0 && (phase === "돌파 후 유지" || phase === "관찰")) {
+    phase = "최근 돌파";
+  }
 
   return {
     closeBreak,
@@ -782,7 +843,40 @@ function calcGogoChartMethodSignals(data, p1, p2, swingLows) {
     isLineSane: lineSane,
     isRealBreakout,
     confirmedBreakout: Boolean(closeBreak && !lowInfo.isBreakoutFailure && !isTrendTooSteep),
+    breakoutBarsAgo: recent ? recent.barsAgo : -1,
+    breakoutDate: recent ? recent.date : "",
   };
+}
+
+function findMostRecentQualifyingGogoBreak(data, p1, p2, swingLows, lookback) {
+  if (!data || data.length < 2) return null;
+  if (gogoTrendSlopePer20Bars(p1, p2) >= GOGO_STEEP_SLOPE_THRESHOLD) return null;
+  const lastIndex = data.length - 1;
+  const minIndex = Math.max(1, lastIndex - (lookback - 1));
+  for (let i = lastIndex; i >= minIndex; i -= 1) {
+    const bar = data[i] || {};
+    const prev = data[i - 1] || {};
+    const trendNow = projectGogoTrendValue(p1, p2, i);
+    const trendPrev = projectGogoTrendValue(p1, p2, i - 1);
+    if (!(trendNow > 0)) continue;
+    const closeBreak = num(bar.close) >= trendNow;
+    const prevBelow = num(prev.close) < trendPrev;
+    if (!(closeBreak && prevBelow)) continue;
+    const prefix = data.slice(0, i + 1);
+    if (!isGogoLineSane(trendNow, prefix, p1, p2)) continue;
+    const volAvg = avgVolumeLast(prefix, 20);
+    const volumeRatio = volAvg > 0 ? num(bar.volume) / volAvg : 0;
+    const isVolumeConfirm = volumeRatio >= GOGO_VOLUME_CONFIRM;
+    const isBullishCandle = num(bar.close) > num(bar.open);
+    const breakoutRate = ((num(bar.close) - trendNow) / trendNow) * 100;
+    const recentSwingLow = (swingLows || []).filter((p) => p.index < i).slice(-1)[0];
+    const isLowBreakdown = recentSwingLow ? num(bar.low) < num(recentSwingLow.price) : false;
+    const isBreakoutFailure = closeBreak && isLowBreakdown;
+    if (isVolumeConfirm && isBullishCandle && breakoutRate >= GOGO_MIN_BREAKOUT_RATE && !isBreakoutFailure) {
+      return { barsAgo: lastIndex - i, date: bar.date || "" };
+    }
+  }
+  return null;
 }
 
 function swingPivots(rows, kind) {
@@ -817,16 +911,23 @@ function swingPivots(rows, kind) {
  * detectGogoZones — 고점대/저점대 overlay + 고고저 추세선.
  * Pair = findGoGoJeoTrend (highest then later lower). Breakout = calcChartMethodSignals.
  */
-function detectGogoZones(candles = []) {
+function detectGogoZones(candles = [], period = "D") {
   const all = Array.isArray(candles) ? candles : [];
-  const rows = all.length > GOGO_LOOKBACK ? all.slice(-GOGO_LOOKBACK) : all;
+  const lookback = gogoLookbackForPeriod(period);
+  const rows = all.length > lookback ? all.slice(-lookback) : all;
   if (rows.length < 10) return null;
   const highs = swingPivots(rows, "high");
   const lows = swingPivots(rows, "low");
   const recentHighs = highs.slice(-3);
   const recentLows = lows.slice(-3);
   const trend = findGoGoJeoTrend(rows);
-  if (!recentHighs.length && !trend) return null;
+  const rawPair = trend ? null : findGoGoJeoTrendRaw(rows);
+  const rawSteepOnly = (() => {
+    if (trend || !rawPair) return false;
+    const projected = projectGogoTrendValue(rawPair.p1, rawPair.p2, rows.length - 1);
+    return isGogoTrendTooSteep(rawPair.p1, rawPair.p2) || !isGogoLineSane(projected, rows, rawPair.p1, rawPair.p2);
+  })();
+  if (!recentHighs.length && !trend && !rawSteepOnly) return null;
 
   const hiPrices = recentHighs.length ? recentHighs.map((x) => x.price) : highs.map((x) => x.price);
   const loSource = recentLows.length ? recentLows : rows.slice(-10).map((c, idx) => (
@@ -850,6 +951,8 @@ function detectGogoZones(candles = []) {
   let comment = `고점대 ${formatZonePrice(highLow)}~${formatZonePrice(highHigh)}, 저점대 ${formatZonePrice(lowLow)}~${formatZonePrice(lowHigh)}.`;
   if (p1 && p2) {
     comment += ` 고점① ${p1.date || ""} → 고점② ${p2.date || ""} (높은 고점 이후 낮은 고점).`;
+  } else if (rawSteepOnly && rawPair) {
+    comment += ` 고점① ${rawPair.p1.date || ""} → 고점② ${rawPair.p2.date || ""} 구조는 급경사/비정상 투영이라 표시하지 않음.`;
   }
   if (declining && risingLows) comment += " 고점은 낮아지고 저점은 높아지는 고고저 수렴.";
   else if (declining) comment += " 하락 고점 구조 — 추세선 아래 압력.";
@@ -885,17 +988,21 @@ function detectGogoZones(candles = []) {
     lowHold: Boolean(signals && signals.lowHold),
     isBreakoutFailure: Boolean(signals && signals.lowInfo && signals.lowInfo.isBreakoutFailure),
     volumeRatio: signals ? signals.volumeRatio : 0,
-    phase: signals ? signals.phase : "",
+    phase: signals ? signals.phase : (rawSteepOnly ? "급경사 추세선 제외" : ""),
     confirmedBreakout: Boolean(signals && signals.confirmedBreakout),
     lowStructure: signals && signals.lowInfo ? signals.lowInfo.lowStructure : "",
     lowComment: signals && signals.lowInfo ? signals.lowInfo.lowComment : "",
-    trendSlopePer20Bars: signals ? signals.trendSlopePer20Bars : 0,
-    isTrendTooSteep: Boolean(signals && signals.isTrendTooSteep),
+    trendSlopePer20Bars: signals
+      ? signals.trendSlopePer20Bars
+      : (rawPair ? Number(gogoTrendSlopePer20Bars(rawPair.p1, rawPair.p2).toFixed(2)) : 0),
+    isTrendTooSteep: Boolean((signals && signals.isTrendTooSteep) || rawSteepOnly),
     breakoutRate: signals ? signals.breakoutRate : 0,
     isVolumeConfirm: Boolean(signals && signals.isVolumeConfirm),
     isBullishCandle: Boolean(signals && signals.isBullishCandle),
     isLineSane: Boolean(signals && signals.isLineSane),
     isRealBreakout: Boolean(signals && signals.isRealBreakout),
+    breakoutBarsAgo: signals && Number.isFinite(signals.breakoutBarsAgo) ? signals.breakoutBarsAgo : -1,
+    breakoutDate: (signals && signals.breakoutDate) || "",
   };
 }
 
@@ -1011,12 +1118,15 @@ const NIndicators = {
   personalAlerts,
   detectGogoZones,
   findGoGoJeoTrend,
+  findGoGoJeoTrendRaw,
+  gogoLookbackForPeriod,
   volumeProfile,
   gogoTrendSlopePer20Bars,
   isGogoTrendTooSteep,
   isGogoLineSane,
   GOGO_STEEP_SLOPE_THRESHOLD,
   GOGO_LOOKBACK,
+  GOGO_RECENT_BREAKOUT_LOOKBACK,
 };
 
 export default NIndicators;

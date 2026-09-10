@@ -416,7 +416,9 @@ ChartEngine.prototype.draw = function draw() {
     extras.push(this.computed.ma200?.[sliced.start + visible.length - 1]);
   }
   if (Array.isArray(this.options.overlayPrices)) extras.push(...this.options.overlayPrices);
-  const gogoZones = this.options.showGogoZones === false ? null : NIndicators.detectGogoZones(this.full);
+  const gogoZones = this.options.showGogoZones === false
+    ? null
+    : NIndicators.detectGogoZones(this.full, this.options.period || this.options.chartPeriod || "D");
   const volumeProfile = NIndicators.volumeProfile(visible);
   if (gogoZones) extras.push(gogoZones.highHigh, gogoZones.highLow, gogoZones.lowHigh, gogoZones.lowLow, gogoZones.trendLinePrice);
   if (volumeProfile) extras.push(volumeProfile.poc, ...(volumeProfile.hvn || []));
@@ -538,17 +540,18 @@ ChartEngine.prototype._drawGogoZones = function drawGogoZones(ctx, layout, yAtPr
   (zones.swingHighs || []).forEach((p) => plotPivot(p, COLORS.zoneHighLine));
   (zones.swingLows || []).forEach((p) => plotPivot(p, COLORS.zoneLowLine));
 
-  if (zones.trendHigh1 && zones.trendHigh2 && sliced && typeof xAtIndex === "function") {
+  if (zones.trendHigh1 && zones.trendHigh2 && !zones.isTrendTooSteep && sliced && typeof xAtIndex === "function") {
     const h1 = zones.trendHigh1;
     const h2 = zones.trendHigh2;
-    const span = h2.i - h1.i;
+    const span = (h2.i ?? h2.index) - (h1.i ?? h1.index);
     if (span > 0) {
       const slope = (h2.price - h1.price) / span;
-      const startVis = Math.max(0, h1.i - sliced.start);
+      const h1i = h1.i ?? h1.index;
+      const startVis = Math.max(0, h1i - sliced.start);
       const endVis = sliced.visible.length - 1;
       if (endVis >= startVis) {
-        const pStart = h1.price + slope * (sliced.start + startVis - h1.i);
-        const pEnd = h1.price + slope * (sliced.start + endVis - h1.i);
+        const pStart = h1.price + slope * (sliced.start + startVis - h1i);
+        const pEnd = h1.price + slope * (sliced.start + endVis - h1i);
         ctx.strokeStyle = zones.isBreakout ? COLORS.zoneLowLine : COLORS.zoneHighLine;
         ctx.lineWidth = 1.4;
         ctx.setLineDash([6, 4]);

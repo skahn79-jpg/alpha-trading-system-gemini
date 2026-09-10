@@ -22,7 +22,7 @@ final class ChartViewModel: ObservableObject {
                     query: [
                         URLQueryItem(name: "period", value: period),
                         // MA60·볼린저를 표시 구간(60봉) 전체에 그리려면 여유 데이터 필요 (주/월봉은 KIS가 ~30봉 제공)
-                        URLQueryItem(name: "count", value: period == "D" ? "300" : "80"),
+                        URLQueryItem(name: "count", value: period == "D" ? "300" : (period == "W" ? "120" : "80")),
                         URLQueryItem(name: "analyze", value: "0"),
                     ]
                 )
