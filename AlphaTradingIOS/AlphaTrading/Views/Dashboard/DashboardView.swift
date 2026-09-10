@@ -8,6 +8,7 @@ struct DashboardView: View {
     @State private var trumpNews: TrumpNewsResponse?
     @State private var fx: FxResponse?
     @State private var sectorTrends: SectorTrendsResponse?
+    @State private var macro: MacroReport?
     @ObservedObject private var inbox = SignalInboxStore.shared
     @ObservedObject private var gogoBreakouts = GogoBreakoutStore.shared
     // 환율 실시간 갱신 (30초)
@@ -44,6 +45,7 @@ struct DashboardView: View {
 
                     fxSection
                     tradeSummarySection
+                    macroSummarySection
                     featuredSection
                     sectorTrendsSection
                     axiosNewsSection
@@ -73,6 +75,7 @@ struct DashboardView: View {
         async let trumpTask = try? APIClient.shared.get("/api/news/trump") as TrumpNewsResponse
         async let fxTask = try? APIClient.shared.get("/api/fx") as FxResponse
         async let sectorTask = try? APIClient.shared.get("/api/sector/trends") as SectorTrendsResponse
+        async let macroTask = try? APIClient.shared.get("/api/macro/indicators") as MacroReport
         async let gogoTask: Void = gogoBreakouts.refresh()
         await AlertMonitor.checkWatchlistSignals()
         await gogoTask
@@ -83,6 +86,7 @@ struct DashboardView: View {
         trumpNews = await trumpTask
         fx = await fxTask
         sectorTrends = await sectorTask
+        macro = await macroTask
     }
 
     // MARK: - 고고저 돌파 (코스피 / 코스닥 / 해외)
@@ -359,6 +363,89 @@ struct DashboardView: View {
                 .background(AppTheme.card)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
             }
+        }
+    }
+
+    // MARK: - 거시지표 요약
+
+    @ViewBuilder
+    private var macroSummarySection: some View {
+        if let macro, macro.ok, !macro.dashboardHeadlines.isEmpty {
+            NavigationLink {
+                MacroView()
+            } label: {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Image(systemName: "globe.americas.fill")
+                            .foregroundStyle(AppTheme.accent)
+                        Text("거시지표 요약")
+                            .font(.paperlogy(16, weight: .semibold))
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Text(macro.moodLabel ?? "혼조")
+                            .font(.paperlogy(11, weight: .bold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(macroMoodColor(macro.mood).opacity(0.2))
+                            .foregroundStyle(macroMoodColor(macro.mood))
+                            .clipShape(Capsule())
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    HStack(spacing: 10) {
+                        Text("우호 \(macro.supportive ?? 0)")
+                            .font(.paperlogy(11, weight: .semibold))
+                            .foregroundStyle(AppTheme.up)
+                        Text("부담 \(macro.headwind ?? 0)")
+                            .font(.paperlogy(11, weight: .semibold))
+                            .foregroundStyle(AppTheme.down)
+                    }
+                    ForEach(macro.dashboardHeadlines) { item in
+                        HStack(spacing: 8) {
+                            Text(item.name)
+                                .font(.paperlogy(13, weight: .medium))
+                                .foregroundStyle(AppTheme.textPrimary)
+                                .lineLimit(1)
+                            Spacer()
+                            if let change = item.changeText {
+                                Text(change)
+                                    .font(.paperlogy(10, weight: .semibold))
+                                    .foregroundStyle((item.change ?? 0) >= 0 ? AppTheme.up : AppTheme.down)
+                            }
+                            Text(item.valueText)
+                                .font(.paperlogy(13, weight: .bold))
+                                .foregroundStyle(AppTheme.textPrimary)
+                            Text(item.stanceLabel)
+                                .font(.paperlogy(10, weight: .bold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(macroStanceColor(item.stance).opacity(0.2))
+                                .foregroundStyle(macroStanceColor(item.stance))
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+                .padding(16)
+                .background(AppTheme.card)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+        }
+    }
+
+    private func macroMoodColor(_ mood: String?) -> Color {
+        switch mood {
+        case "risk_on": return AppTheme.up
+        case "risk_off": return AppTheme.down
+        default: return AppTheme.accent
+        }
+    }
+
+    private func macroStanceColor(_ stance: String?) -> Color {
+        switch stance {
+        case "supportive": return AppTheme.up
+        case "headwind": return AppTheme.down
+        default: return AppTheme.accent
         }
     }
 

@@ -38,6 +38,48 @@ final class AlphaTradingTests: XCTestCase {
         XCTAssertFalse(ChartWindow.isHorizontalPan(dx: 4, dy: 20))
     }
 
+    func testMacroDashboardHeadlinesPreferKeySeries() {
+        func item(_ id: String, _ name: String) -> MacroIndicator {
+            MacroIndicator(
+                id: id,
+                name: name,
+                unit: "%",
+                value: 1.2,
+                change: -0.3,
+                date: nil,
+                note: nil,
+                stance: "headwind",
+                spark: nil
+            )
+        }
+        let report = MacroReport(
+            ok: true,
+            source: nil,
+            mood: "mixed",
+            moodLabel: "혼조",
+            supportive: 2,
+            headwind: 3,
+            indicators: [
+                item("CPIAUCSL", "미국 CPI"),
+                item("CPILFESL", "근원 CPI"),
+                item("DFF", "연준 기준금리"),
+                item("DGS10", "미 10년물 금리"),
+                item("WALCL", "연준 총자산"),
+                item("RRPONTSYD", "연준 역레포"),
+                item("VIXCLS", "VIX 변동성"),
+                item("DTWEXBGS", "달러 인덱스"),
+            ],
+            disclaimer: nil
+        )
+        XCTAssertEqual(
+            report.dashboardHeadlines.map(\.id),
+            ["VIXCLS", "DFF", "DGS10", "CPIAUCSL", "WALCL", "DTWEXBGS"]
+        )
+        XCTAssertEqual(report.dashboardHeadlines.count, 6)
+        XCTAssertEqual(report.dashboardHeadlines[0].stanceLabel, "부담")
+        XCTAssertEqual(report.dashboardHeadlines[0].changeText, "-0.3")
+    }
+
     func testCrashSignalHighOnSharpDrop() {
         let signal = MarketSignalEngine.crashSignal(
             code: "005930",
