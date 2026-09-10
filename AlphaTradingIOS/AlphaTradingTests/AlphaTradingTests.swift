@@ -144,19 +144,20 @@ final class AlphaTradingTests: XCTestCase {
     func testSignalInboxCooldownRejectsDuplicateKind() {
         SignalInbox.resetForTests()
         defer { SignalInbox.resetForTests() }
+        let t0 = Date().timeIntervalSince1970
         let first = PersonalSignal(
-            code: "005930",
+            code: "TEST-COOLDOWN",
             name: "테스트전자",
             kind: .crash,
             severity: .high,
             title: "급락",
             detail: "test",
-            createdAt: 1_000,
+            createdAt: t0,
             opportunity: false
         )
-        XCTAssertEqual(SignalInbox.ingest([first], now: 1_000).count, 1)
-        XCTAssertTrue(SignalInbox.ingest([first], now: 1_001).isEmpty)
-        XCTAssertEqual(SignalInbox.ingest([first], now: 1_000 + MarketSignalEngine.cooldownSeconds + 1).count, 1)
+        XCTAssertEqual(SignalInbox.ingest([first], now: t0).count, 1)
+        XCTAssertTrue(SignalInbox.ingest([first], now: t0 + 1).isEmpty)
+        XCTAssertEqual(SignalInbox.ingest([first], now: t0 + MarketSignalEngine.cooldownSeconds + 1).count, 1)
     }
 
     func testMultiTimeframeSummaryUsesMovingAverages() {

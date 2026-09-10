@@ -24,8 +24,10 @@ enum SignalInbox {
         var fired = (try? JSONDecoder().decode([String: TimeInterval].self, from: UserDefaults.standard.data(forKey: firedKey) ?? Data())) ?? [:]
         var accepted: [PersonalSignal] = []
         for signal in incoming {
-            let last = fired[signal.cooldownKey] ?? 0
-            if now - last < MarketSignalEngine.cooldownSeconds { continue }
+            if let last = fired[signal.cooldownKey],
+               now - last < MarketSignalEngine.cooldownSeconds {
+                continue
+            }
             fired[signal.cooldownKey] = now
             store.insert(signal, at: 0)
             accepted.append(signal)
