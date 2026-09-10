@@ -1168,7 +1168,7 @@ app.get("/api/macro/indicators", async (req, res) => {
   }
 });
 
-// 한국 수출입 리포트 (총괄: FRED 공개 데이터, 품목별: 관세청 API 키 설정 시)
+// 한국 수출입 리포트 (총괄: FRED + 관세청 잠정통계로 최신월 보완, 품목별: 관세청 API 키 설정 시)
 // GET /api/trade/report
 app.get("/api/trade/report", async (req, res) => {
   try {
