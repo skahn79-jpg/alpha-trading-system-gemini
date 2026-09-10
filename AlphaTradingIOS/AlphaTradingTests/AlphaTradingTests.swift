@@ -254,14 +254,19 @@ final class AlphaTradingTests: XCTestCase {
     }
 
     func testVolumeProfileHasPOCAndComment() {
-        let candles = (0..<30).map { i in
-            ChartCandle(
+        let candles = (0..<30).map { i -> ChartCandle in
+            let open = 100.0
+            let high = 100.0 + Double(i % 5)
+            let low = 95.0
+            let close = i > 20 ? 108.0 : 100.0
+            let volume = i == 10 ? 9000.0 : 100.0
+            return ChartCandle(
                 date: String(format: "202604%02d", (i % 28) + 1),
-                open: 100,
-                high: 100 + Double(i % 5),
-                low: 95,
-                close: i > 20 ? 108 : 100,
-                volume: i == 10 ? 9000 : 100
+                open: open,
+                high: high,
+                low: low,
+                close: close,
+                volume: volume
             )
         }
         let profile = MarketSignalEngine.volumeProfile(candles: candles)
@@ -294,7 +299,7 @@ final class AlphaTradingTests: XCTestCase {
         ChartDrawingStore.upsert(ChartDrawing(id: "h1", code: code, type: "hline", price: 12345, date: nil))
         let loaded = ChartDrawingStore.load(code: code)
         XCTAssertEqual(loaded.count, 1)
-        XCTAssertEqual(loaded.first?.price, 12345)
+        XCTAssertEqual(loaded.first?.price, 12345.0)
         ChartOverlayPrefs.save(code: code, showGogo: false, modes: ["지지·저항"])
         let prefs = ChartOverlayPrefs.load(code: code)
         XCTAssertFalse(prefs.showGogo)
@@ -487,14 +492,14 @@ final class AlphaTradingTests: XCTestCase {
     func testGogoPrefersGlobalHighestThenLaterLowerPair() {
         let candles = gogoPairFixture(lastClose: 150, lastLow: 145, lastVolume: 2500, prevClose: 90, lastOpen: 140)
         let pair = GogoZoneDetector.findGoGoJeoTrend(candles)
-        XCTAssertEqual(pair?.0.price, 160)
-        XCTAssertEqual(pair?.0.index, 8)
-        XCTAssertEqual(pair?.1.price, 140)
-        XCTAssertEqual(pair?.1.index, 22)
+        XCTAssertEqual(pair?.0.price, 160.0)
+        XCTAssertEqual(pair?.0.index, Optional(8))
+        XCTAssertEqual(pair?.1.price, 140.0)
+        XCTAssertEqual(pair?.1.index, Optional(22))
         let zones = GogoZoneDetector.detect(candles: candles)
-        XCTAssertEqual(zones?.trendHigh1?.price, 160)
-        XCTAssertEqual(zones?.trendHigh2?.price, 140)
-        XCTAssertNotEqual(zones?.trendHigh1?.price, 112)
+        XCTAssertEqual(zones?.trendHigh1?.price, 160.0)
+        XCTAssertEqual(zones?.trendHigh2?.price, 140.0)
+        XCTAssertNotEqual(zones?.trendHigh1?.price, 112.0)
         XCTAssertEqual(zones?.freshBreak, true)
         XCTAssertEqual(zones?.lowHold, true)
         XCTAssertEqual(zones?.confirmedBreakout, true)
@@ -599,19 +604,23 @@ final class AlphaTradingTests: XCTestCase {
         let raw = GogoZoneDetector.findGoGoJeoTrendRaw(candles)
         XCTAssertNotNil(raw)
         if let raw {
-            XCTAssertEqual(raw.0.price, 1_788_000, accuracy: 1)
+            XCTAssertEqual(raw.0.price, 1_788_000.0, accuracy: 1.0)
             XCTAssertTrue(GogoZoneDetector.isTrendTooSteep(p1: raw.0, p2: raw.1) || !GogoZoneDetector.isUsableTrendPair(p1: raw.0, p2: raw.1, candles: candles))
         }
         let usable = GogoZoneDetector.findGoGoJeoTrend(candles)
         if let usable {
             XCTAssertFalse(GogoZoneDetector.isTrendTooSteep(p1: usable.0, p2: usable.1))
             XCTAssertTrue(GogoZoneDetector.isUsableTrendPair(p1: usable.0, p2: usable.1, candles: candles))
-            XCTAssertNotEqual(usable.0.price, 1_788_000, accuracy: 1) // must not keep ATH crash pair
+            XCTAssertNotEqual(usable.0.price, 1_788_000.0, accuracy: 1.0) // must not keep ATH crash pair
         }
         let zones = GogoZoneDetector.detect(candles: candles, period: "D")
         if zones?.trendHigh1 != nil {
             XCTAssertEqual(zones?.isTrendTooSteep, false)
-            XCTAssertNotEqual(zones?.trendHigh1?.price, 1_788_000, accuracy: 1)
+            if let p = zones?.trendHigh1?.price {
+                XCTAssertNotEqual(p, 1_788_000.0, accuracy: 1.0)
+            } else {
+                XCTFail("expected trendHigh1 price")
+            }
         } else {
             XCTAssertEqual(zones?.isTrendTooSteep, true)
         }
