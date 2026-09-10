@@ -18,7 +18,7 @@ final class ChartViewModel: ObservableObject {
                     query: [
                         URLQueryItem(name: "period", value: period),
                         // MA60·볼린저를 표시 구간(60봉) 전체에 그리려면 여유 데이터 필요 (주/월봉은 KIS가 ~30봉 제공)
-                        URLQueryItem(name: "count", value: period == "D" ? "120" : "60"),
+                        URLQueryItem(name: "count", value: period == "D" ? "300" : "80"),
                         URLQueryItem(name: "analyze", value: "0"),
                     ]
                 )
@@ -35,8 +35,8 @@ final class ChartViewModel: ObservableObject {
                     query: [
                         URLQueryItem(name: "type", value: kind.rawValue),
                         URLQueryItem(name: "period", value: period),
-                        URLQueryItem(name: "range", value: period == "D" ? "1Y" : "5Y"),
-                        URLQueryItem(name: "count", value: "120"),
+                        URLQueryItem(name: "range", value: period == "D" ? "2Y" : "10Y"),
+                        URLQueryItem(name: "count", value: "300"),
                     ]
                 )
                 async let quoteTask: GlobalQuote = APIClient.shared.get(

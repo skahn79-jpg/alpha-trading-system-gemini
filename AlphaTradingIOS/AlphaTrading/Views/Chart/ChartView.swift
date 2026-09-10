@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import UIKit
 
 struct ChartView: View {
     let code: String
@@ -8,8 +9,11 @@ struct ChartView: View {
     // 주봉/월봉 = 시트의 사이클 판단 타임프레임 (커뮤니티 앱에서는 구독 기능)
     @State private var period = "D"
 
-    // 표시 구간: 최근 60봉 (MA/볼린저 계산은 전체 데이터 사용)
-    private let displayCount = 60
+    // 표시 구간: pinch로 봉 수 변경, 좌우 드래그로 과거 이동 (MA/볼린저는 전체 데이터 사용)
+    @State private var chartWindow = ChartWindow(visibleCount: ChartWindow.defaultCount, offset: 0)
+    @State private var pinchBaseCount = ChartWindow.defaultCount
+    @State private var panStartOffset = 0
+    @State private var chartWidth: CGFloat = 320
 
     // 학습 모드: 켜진 오버레이 집합 (비어 있으면 기존 차트와 동일)
     @State private var learnModes: Set<LearnMode> = []
@@ -45,9 +49,8 @@ struct ChartView: View {
                     .foregroundStyle(AppTheme.textSecondary)
                     .padding()
             } else {
-                priceChart
+                interactiveCharts
                 legend
-                volumeChart
                 if !learnModes.isEmpty {
                     learnCard
                 }
@@ -55,7 +58,80 @@ struct ChartView: View {
         }
         .background(AppTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .task(id: "\(code)-\(period)-\(kind.rawValue)") { await viewModel.load(code: code, period: period, kind: kind) }
+        .task(id: "\(code)-\(period)-\(kind.rawValue)") {
+            resetWindow()
+            await viewModel.load(code: code, period: period, kind: kind)
+        }
+        .onChange(of: viewModel.candles.count) { _ in
+            chartWindow = chartWindow.clamped(total: viewModel.candles.count)
+        }
+    }
+
+    private var interactiveCharts: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            priceChart
+            volumeChart
+            chartWindowBar
+        }
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(key: ChartWidthPreferenceKey.self, value: geo.size.width)
+            }
+        )
+        .onPreferenceChange(ChartWidthPreferenceKey.self) { chartWidth = max(120, $0) }
+        .overlay {
+            ChartGestureOverlay(
+                onPinchBegan: { pinchBaseCount = chartWindow.visibleCount },
+                onPinchChanged: { scale in
+                    chartWindow = chartWindow.pinched(
+                        scale: scale,
+                        baseCount: pinchBaseCount,
+                        total: viewModel.candles.count
+                    )
+                },
+                onPinchEnded: { pinchBaseCount = chartWindow.visibleCount },
+                onPanBegan: { panStartOffset = chartWindow.offset },
+                onPanChanged: { dx in
+                    chartWindow = chartWindow.panned(
+                        translationX: dx,
+                        chartWidth: chartWidth,
+                        startOffset: panStartOffset,
+                        total: viewModel.candles.count
+                    )
+                },
+                onPanEnded: { panStartOffset = chartWindow.offset }
+            )
+        }
+        .accessibilityHint("두 손가락으로 확대 축소하고, 좌우로 밀어 과거 차트를 봅니다.")
+    }
+
+    private var chartWindowBar: some View {
+        HStack(spacing: 8) {
+            Text("두 손가락 확대/축소 · 좌우로 밀어 과거 보기")
+                .font(.paperlogy(10))
+                .foregroundStyle(AppTheme.textSecondary)
+            Spacer()
+            Text("\(displayCandles.count)봉 / 전체 \(viewModel.candles.count)봉")
+                .font(.paperlogy(10, weight: .medium))
+                .foregroundStyle(AppTheme.textSecondary)
+            if chartWindow.offset > 0 {
+                Button("최근") {
+                    chartWindow = ChartWindow(visibleCount: chartWindow.visibleCount, offset: 0)
+                        .clamped(total: viewModel.candles.count)
+                }
+                .font(.paperlogy(10, weight: .semibold))
+                .foregroundStyle(AppTheme.accent)
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+    }
+
+    private func resetWindow() {
+        chartWindow = ChartWindow(visibleCount: ChartWindow.defaultCount, offset: 0)
+        pinchBaseCount = ChartWindow.defaultCount
+        panStartOffset = 0
     }
 
     // MARK: - 가격 차트 (캔들 + MA + 볼린저밴드)
@@ -86,7 +162,7 @@ struct ChartView: View {
                     x: .value("Date", candle.date),
                     yStart: .value("BodyLow", min(candle.open, candle.close)),
                     yEnd: .value("BodyHigh", max(candle.open, candle.close)),
-                    width: 5
+                    width: MarkDimension(floatLiteral: Double(candleBodyWidth))
                 )
                 .foregroundStyle(candle.isUp ? AppTheme.up : AppTheme.down)
             }
@@ -156,7 +232,7 @@ struct ChartView: View {
             BarMark(
                 x: .value("Date", candle.date),
                 y: .value("Volume", candle.volume),
-                width: 4
+                width: MarkDimension(floatLiteral: Double(max(1.5, candleBodyWidth - 1)))
             )
             .foregroundStyle((candle.isUp ? AppTheme.up : AppTheme.down).opacity(0.6))
         }
@@ -172,7 +248,15 @@ struct ChartView: View {
     // MARK: - 계산 (candles는 과거→현재 순)
 
     private var displayCandles: [ChartCandle] {
-        Array(viewModel.candles.suffix(displayCount))
+        Array(chartWindow.clamped(total: viewModel.candles.count).slice(viewModel.candles))
+    }
+
+    private var candleBodyWidth: CGFloat {
+        let n = max(1, displayCandles.count)
+        if n <= 40 { return 6 }
+        if n <= 80 { return 5 }
+        if n <= 140 { return 3 }
+        return 2
     }
 
     private var displayDateSet: Set<String> {
@@ -978,5 +1062,156 @@ struct ChartView: View {
         formatter.numberStyle = .decimal
         formatter.maximumFractionDigits = value < 100 ? 2 : 0
         return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)
+    }
+}
+
+private struct ChartWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 320
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+/// UIKit overlay so pinch + horizontal pan win over the parent SwiftUI ScrollView.
+/// Vertical pans do not begin, so the page can still scroll.
+private struct ChartGestureOverlay: UIViewRepresentable {
+    var onPinchBegan: () -> Void
+    var onPinchChanged: (CGFloat) -> Void
+    var onPinchEnded: () -> Void
+    var onPanBegan: () -> Void
+    var onPanChanged: (CGFloat) -> Void
+    var onPanEnded: () -> Void
+
+    func makeUIView(context: Context) -> ChartGestureUIView {
+        let view = ChartGestureUIView()
+        view.coordinator = context.coordinator
+        return view
+    }
+
+    func updateUIView(_ uiView: ChartGestureUIView, context: Context) {
+        context.coordinator.onPinchBegan = onPinchBegan
+        context.coordinator.onPinchChanged = onPinchChanged
+        context.coordinator.onPinchEnded = onPinchEnded
+        context.coordinator.onPanBegan = onPanBegan
+        context.coordinator.onPanChanged = onPanChanged
+        context.coordinator.onPanEnded = onPanEnded
+        uiView.coordinator = context.coordinator
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            onPinchBegan: onPinchBegan,
+            onPinchChanged: onPinchChanged,
+            onPinchEnded: onPinchEnded,
+            onPanBegan: onPanBegan,
+            onPanChanged: onPanChanged,
+            onPanEnded: onPanEnded
+        )
+    }
+
+    final class Coordinator {
+        var onPinchBegan: () -> Void
+        var onPinchChanged: (CGFloat) -> Void
+        var onPinchEnded: () -> Void
+        var onPanBegan: () -> Void
+        var onPanChanged: (CGFloat) -> Void
+        var onPanEnded: () -> Void
+
+        init(
+            onPinchBegan: @escaping () -> Void,
+            onPinchChanged: @escaping (CGFloat) -> Void,
+            onPinchEnded: @escaping () -> Void,
+            onPanBegan: @escaping () -> Void,
+            onPanChanged: @escaping (CGFloat) -> Void,
+            onPanEnded: @escaping () -> Void
+        ) {
+            self.onPinchBegan = onPinchBegan
+            self.onPinchChanged = onPinchChanged
+            self.onPinchEnded = onPinchEnded
+            self.onPanBegan = onPanBegan
+            self.onPanChanged = onPanChanged
+            self.onPanEnded = onPanEnded
+        }
+    }
+}
+
+final class ChartGestureUIView: UIView, UIGestureRecognizerDelegate {
+    var coordinator: ChartGestureOverlay.Coordinator?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isMultipleTouchEnabled = true
+        isExclusiveTouch = false
+
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch))
+        pinch.delegate = self
+        addGestureRecognizer(pinch)
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
+        pan.delegate = self
+        pan.maximumNumberOfTouches = 1
+        addGestureRecognizer(pan)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        var node: UIView? = superview
+        while let current = node {
+            if let scroll = current as? UIScrollView {
+                scroll.delaysContentTouches = false
+            }
+            node = current.superview
+        }
+    }
+
+    @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            coordinator?.onPinchBegan()
+            coordinator?.onPinchChanged(gesture.scale)
+        case .changed:
+            coordinator?.onPinchChanged(gesture.scale)
+        case .ended, .cancelled:
+            coordinator?.onPinchChanged(gesture.scale)
+            coordinator?.onPinchEnded()
+        default:
+            break
+        }
+    }
+
+    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        let dx = gesture.translation(in: self).x
+        switch gesture.state {
+        case .began:
+            coordinator?.onPanBegan()
+            coordinator?.onPanChanged(dx)
+        case .changed:
+            coordinator?.onPanChanged(dx)
+        case .ended, .cancelled:
+            coordinator?.onPanChanged(dx)
+            coordinator?.onPanEnded()
+        default:
+            break
+        }
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+        let t = pan.translation(in: self)
+        let v = pan.velocity(in: self)
+        let dx = abs(t.x) > 0.5 ? t.x : v.x
+        let dy = abs(t.y) > 0.5 ? t.y : v.y
+        return ChartWindow.isHorizontalPan(dx: dx, dy: dy)
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        false
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        otherGestureRecognizer.view is UIScrollView
     }
 }

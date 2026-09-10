@@ -1,4 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ChartGestures from "./chart-gestures.js";
 
 /**
  * ALPHA TRADING SYSTEM — 통합 확장 버전
@@ -961,7 +962,8 @@ const styles = `
 .forecast-stat-note{color:#8fa6bd;flex:1 1 100%}
 .forecast-stat-error{color:#ff4466;font-size:12px}
 .chart-svg-wrap{position:relative}
-.pro-chart-svg{cursor:grab;touch-action:pan-y;user-select:none}
+.chart-svg-wrap,.chart-box.pro-chart-box,.pro-chart-svg,.pro-chart-canvas{touch-action:none;-webkit-user-select:none;user-select:none}
+.pro-chart-svg{cursor:grab;touch-action:none;user-select:none}
 .pro-chart-svg.dragging{cursor:grabbing}
 @media(max-width:900px){
   .chart-pro-toolbar{grid-template-columns:1fr 1fr}
@@ -10867,6 +10869,9 @@ function ChartView({ selected, stocks, selectedCode, setSelectedCode }) {
   const [hoverIndex, setHoverIndex] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const dragStateRef = useRef(null);
+  const pinchRef = useRef(null);
+  const chartSurfaceRef = useRef(null);
+  const viewRef = useRef({ offset: 0, count: 80, maxOffset: 0, total: 0, step: 1, width: 900 });
   const [predictionInfo, setPredictionInfo] = useState(null);
   const [aiForecast, setAiForecast] = useState(null);
   const [aiForecastLoading, setAiForecastLoading] = useState(false);
@@ -11293,10 +11298,89 @@ const loadExtendedGogo = async (trigger = "manual") => {
     const zoomIn = e.deltaY < 0;
     setVisibleCount((n) => {
       const base = Math.max(20, Math.min(fullChartData.length, n));
-      const next = zoomIn ? Math.round(base * 0.85) : Math.round(base * 1.18);
-      return Math.max(20, Math.min(fullChartData.length, next));
+      const scale = zoomIn ? 1 / 0.85 : 1 / 1.18;
+      return ChartGestures.nextVisibleCount(base, scale, fullChartData.length);
     });
   };
+
+  viewRef.current = {
+    offset: safeOffset,
+    count: safeVisibleCount,
+    maxOffset,
+    total: fullChartData.length,
+    step,
+    width,
+  };
+
+  useEffect(() => {
+    const el = chartSurfaceRef.current;
+    if (!el) return;
+
+    const onTouchStart = (e) => {
+      if (e.touches.length >= 2) {
+        dragStateRef.current = null;
+        setIsDragging(false);
+        pinchRef.current = {
+          dist: ChartGestures.touchDistance(e.touches[0], e.touches[1]),
+          count: viewRef.current.count,
+        };
+        e.preventDefault();
+        return;
+      }
+      if (e.touches.length === 1) {
+        const t = e.touches[0];
+        dragStateRef.current = {
+          startClientX: t.clientX,
+          startClientY: t.clientY,
+          startOffset: viewRef.current.offset,
+          locked: null,
+        };
+      }
+    };
+
+    const onTouchMove = (e) => {
+      if (e.touches.length >= 2 && pinchRef.current) {
+        e.preventDefault();
+        const dist = ChartGestures.touchDistance(e.touches[0], e.touches[1]);
+        const scale = dist / Math.max(1, pinchRef.current.dist);
+        setVisibleCount(ChartGestures.nextVisibleCount(pinchRef.current.count, scale, viewRef.current.total));
+        return;
+      }
+      const drag = dragStateRef.current;
+      if (!drag || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      const dx = t.clientX - drag.startClientX;
+      const dy = t.clientY - drag.startClientY;
+      if (drag.locked == null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+        drag.locked = ChartGestures.isHorizontalPan(dx, dy) ? "x" : "y";
+      }
+      if (drag.locked === "x") {
+        e.preventDefault();
+        setIsDragging(true);
+        const rect = el.getBoundingClientRect();
+        const svgScale = viewRef.current.width / Math.max(1, rect.width);
+        const deltaBars = Math.round((dx * svgScale) / Math.max(1, viewRef.current.step));
+        setWindowOffset(Math.max(0, Math.min(viewRef.current.maxOffset, drag.startOffset + deltaBars)));
+      }
+    };
+
+    const onTouchEnd = () => {
+      pinchRef.current = null;
+      dragStateRef.current = null;
+      setIsDragging(false);
+    };
+
+    el.addEventListener("touchstart", onTouchStart, { passive: false });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd);
+    el.addEventListener("touchcancel", onTouchEnd);
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, []);
 
   const lastTradeLabel = last?.date || "마지막 거래 시점";
   const ma20Last = ma20[ma20.length - 1];
@@ -11453,7 +11537,7 @@ const loadExtendedGogo = async (trigger = "manual") => {
             />
             <span className="chart-window-label">{chartData.length}봉 표시 / 전체 {fullChartData.length}봉</span>
           </div>
-          <div className="chart-drag-hint">차트 위에서 마우스로 드래그하면 과거/최근 구간으로 이동하고, 마우스 휠로 확대·축소할 수 있습니다.</div>
+          <div className="chart-drag-hint">차트 위에서 좌우로 밀면 과거/최근 구간으로 이동하고, 두 손가락 핀치 또는 마우스 휠로 확대·축소할 수 있습니다. 위아래 스크롤은 페이지가 받습니다.</div>
 
           <div className={`chart-box pro-chart-box ${chartFullscreen ? "chart-box-fullscreen" : ""}`}>
             {chartFullscreen && <button className="chart-back-btn" onClick={() => setChartFullscreen(false)}>돌아가기</button>}
@@ -11465,7 +11549,7 @@ const loadExtendedGogo = async (trigger = "manual") => {
                 거래량: {fmtPrice(hoverCandle.volume)}
               </div>
             )}
-            <div className="chart-svg-wrap">
+            <div className="chart-svg-wrap" ref={chartSurfaceRef}>
             <svg
               className={`chart-svg pro-chart-svg${isDragging ? " dragging" : ""}`}
               viewBox={`0 0 ${width} ${height}`}
