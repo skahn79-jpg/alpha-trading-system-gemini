@@ -64,8 +64,14 @@ jobs:
           bundle=$(find "$HOME/Library/Developer/Xcode/DerivedData" -name "*.xcresult" -print0 | xargs -0 ls -td | head -1)
           if [ -n "$bundle" ]; then
             echo "Result bundle: $bundle"
-            xcrun xcresulttool get --legacy --format json --path "$bundle" > /tmp/xcresult.json || true
-            python3 "$GITHUB_WORKSPACE/scripts/dump-xcresult-issues.py" /tmp/xcresult.json
+            xcrun xcresulttool get --format json --path "$bundle" > /tmp/xcresult.json 2>/dev/null \
+              || xcrun xcresulttool get --legacy --format json --path "$bundle" > /tmp/xcresult.json 2>/dev/null \
+              || true
+            if [ -s /tmp/xcresult.json ]; then
+              python3 "$GITHUB_WORKSPACE/scripts/dump-xcresult-issues.py" /tmp/xcresult.json || true
+            else
+              echo "xcresulttool JSON dump unavailable"
+            fi
           else
             echo "No .xcresult bundle found"
           fi

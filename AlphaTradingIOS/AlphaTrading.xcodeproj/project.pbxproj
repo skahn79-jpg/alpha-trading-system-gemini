@@ -92,7 +92,6 @@
 		C10000000000000000000003 /* WatchSignalModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* WatchSignalModels.swift */; };
 		C10000000000000000000004 /* WatchSignalInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000004 /* WatchSignalInbox.swift */; };
 		C10000000000000000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000005 /* Assets.xcassets */; };
-		C10000000000000000000010 /* AlphaTradingWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = C30000000000000000000001 /* AlphaTradingWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -493,7 +492,7 @@
 				A70000000000000000000001 /* Sources */,
 				A40000000000000000000001 /* Frameworks */,
 				A70000000000000000000002 /* Resources */,
-				D10000000000000000000001 /* Embed Watch Content */,
+				E10000000000000000000001 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
@@ -595,19 +594,7 @@
 		};
 /* End PBXProject section */
 
-/* Begin PBXCopyFilesBuildPhase section */
-		D10000000000000000000001 /* Embed Watch Content */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
-			dstSubfolderSpec = 16;
-			files = (
-				C10000000000000000000010 /* AlphaTradingWatch.app in Embed Watch Content */,
-			);
-			name = "Embed Watch Content";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
+/* End unused copy-files section */
 
 /* Begin PBXResourcesBuildPhase section */
 		A70000000000000000000002 /* Resources */ = {
@@ -665,6 +652,21 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "set -e\nGEN=\"${SRCROOT}/Config/Generated.xcconfig\"\nEXAMPLE=\"${SRCROOT}/Config/Generated.xcconfig.example\"\nmkdir -p \"${SRCROOT}/Config\"\nif [ ! -f \"$GEN\" ] && [ -f \"$EXAMPLE\" ]; then cp \"$EXAMPLE\" \"$GEN\"; fi\nif [ ! -f \"$GEN\" ]; then\n  printf '%s\\n' 'API_BASE_URL = https://alpha-trading-server.onrender.com' 'APP_API_KEY =' > \"$GEN\"\nfi\nif command -v node >/dev/null 2>&1 && [ -f \"${SRCROOT}/../scripts/sync-ios-api-config.mjs\" ]; then\n  MODE=\"release\"\n  [ \"${CONFIGURATION}\" = \"Debug\" ] && MODE=\"debug\"\n  (cd \"${SRCROOT}/..\" && node scripts/sync-ios-api-config.mjs \"$MODE\") || true\nfi\n";
+		};
+		E10000000000000000000001 /* Embed Watch Content */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Embed Watch Content";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nif [ \"${PLATFORM_NAME}\" = \"iphonesimulator\" ]; then\n  echo \"note: skip Watch embed on iOS Simulator (Watch is built as iOS and Info.plist copy fails)\"\n  exit 0\nfi\nWATCH_APP=\"${BUILT_PRODUCTS_DIR}/AlphaTradingWatch.app\"\nDEST_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Watch\"\nif [ ! -d \"${WATCH_APP}\" ]; then\n  echo \"warning: AlphaTradingWatch.app missing; skip embed\"\n  exit 0\nfi\nif [ ! -f \"${WATCH_APP}/Info.plist\" ]; then\n  cat > \"${WATCH_APP}/Info.plist\" <<'PLIST'\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n<key>CFBundleDisplayName</key><string>ALPHA</string>\n<key>CFBundleExecutable</key><string>AlphaTradingWatch</string>\n<key>CFBundleIdentifier</key><string>com.alpha.trading.ios.watchkitapp</string>\n<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>\n<key>CFBundleName</key><string>AlphaTradingWatch</string>\n<key>CFBundlePackageType</key><string>APPL</string>\n<key>CFBundleShortVersionString</key><string>1.0.0</string>\n<key>CFBundleVersion</key><string>75</string>\n<key>WKApplication</key><true/>\n<key>WKCompanionAppBundleIdentifier</key><string>com.alpha.trading.ios</string>\n</dict></plist>\nPLIST\nfi\nmkdir -p \"${DEST_DIR}\"\nrsync -a --delete \"${WATCH_APP}/\" \"${DEST_DIR}/AlphaTradingWatch.app/\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -928,8 +930,10 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 75;
 				DEVELOPMENT_TEAM = VWAZ3CVW5Z;
-				GENERATE_INFOPLIST_FILE = NO;
+				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = AlphaTradingWatch/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ALPHA;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.alpha.trading.ios;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -957,8 +961,10 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 75;
 				DEVELOPMENT_TEAM = VWAZ3CVW5Z;
-				GENERATE_INFOPLIST_FILE = NO;
+				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = AlphaTradingWatch/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ALPHA;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.alpha.trading.ios;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
