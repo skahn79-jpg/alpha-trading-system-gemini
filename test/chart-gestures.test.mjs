@@ -54,6 +54,24 @@ test("nindicators compute/buildSignals/currentZone/accuracy stay compatible", ()
   assert.ok(computed.td);
 });
 
+test("detectGogoZones builds high/low bands from swing pivots", () => {
+  const closes = [100, 102, 108, 104, 101, 99, 96, 92, 95, 98, 103, 110, 106, 104, 107, 100, 94, 90, 93, 97];
+  const candles = closes.map((close, i) => ({
+    date: `202602${String(i + 1).padStart(2, "0")}`,
+    open: close - 1,
+    high: close + 3,
+    low: close - 3,
+    close,
+    volume: 1000,
+  }));
+  const zones = NIndicators.detectGogoZones(candles);
+  assert.ok(zones);
+  assert.ok(zones.highHigh > zones.lowLow);
+  assert.ok(zones.zoneHigh.high >= zones.zoneHigh.low);
+  assert.ok(zones.zoneLow.high >= zones.zoneLow.low);
+  assert.ok(String(zones.comment).includes("고점대"));
+});
+
 test("personalAlerts covers 급락 돌파 공포탐욕 뉴스", () => {
   const crash = NIndicators.personalAlerts({ name: "테스트", code: "005930", changeRate: -6.1 });
   assert.equal(crash[0].kind, "crash");

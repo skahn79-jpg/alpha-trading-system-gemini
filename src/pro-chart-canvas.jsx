@@ -15,6 +15,7 @@ export default function ProChartCanvas({
   drawings,
   showRainbow = false,
   showHalving = false,
+  showGogoZones = true,
   onHover,
   onViewChange,
   height = 420,
@@ -33,6 +34,7 @@ export default function ProChartCanvas({
       drawings,
       showRainbow,
       showHalving,
+      showGogoZones,
       onHover,
       onViewChange,
     });
@@ -54,9 +56,10 @@ export default function ProChartCanvas({
     chart.options.overlays = overlays;
     chart.options.showRainbow = showRainbow;
     chart.options.showHalving = showHalving;
+    chart.options.showGogoZones = showGogoZones;
     chart.setData(candles, view);
     chart.draw();
-  }, [candles, view, overlays, showRainbow, showHalving]);
+  }, [candles, view, overlays, showRainbow, showHalving, showGogoZones]);
 
   return (
     <canvas

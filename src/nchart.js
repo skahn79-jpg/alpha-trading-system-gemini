@@ -10,6 +10,7 @@
  *   - current-price yellow badge + dotted line (distinct from SMA50 green)
  *   - orange crosshair readout (price / date / oscillator)
  *   - MA100↔MA200 translucent cloud
+ *   - 고고저 high/low zone bands (zoneHigh / zoneLow)
  *   - larger date-axis (~20px) and price/osc fonts
  *   - future gutter capped at 30 bars
  */
@@ -37,6 +38,10 @@ const COLORS = {
   volumeDown: "rgba(255,68,102,0.45)",
   cloudUp: "rgba(34,197,94,0.16)",
   cloudDown: "rgba(249,115,22,0.16)",
+  zoneHigh: "rgba(255,68,102,0.16)",
+  zoneHighLine: "rgba(255,68,102,0.7)",
+  zoneLow: "rgba(0,255,136,0.16)",
+  zoneLowLine: "rgba(0,255,136,0.7)",
 };
 
 function num(v, fallback = NaN) {
@@ -188,6 +193,7 @@ function ChartEngine(canvas, options = {}) {
     showCrosshair: true,
     showRainbow: false,
     showHalving: false,
+    showGogoZones: true,
     symbol: options.symbol || "",
     timeframe: options.timeframe || "D",
     ...options,
@@ -404,6 +410,8 @@ ChartEngine.prototype.draw = function draw() {
     extras.push(this.computed.ma200?.[sliced.start + visible.length - 1]);
   }
   if (Array.isArray(this.options.overlayPrices)) extras.push(...this.options.overlayPrices);
+  const gogoZones = this.options.showGogoZones === false ? null : NIndicators.detectGogoZones(this.full);
+  if (gogoZones) extras.push(gogoZones.highHigh, gogoZones.highLow, gogoZones.lowHigh, gogoZones.lowLow);
   const range = priceRange(visible, extras);
   const xAtIndex = (i) => layout.main.x + i * layout.step + layout.step * 0.5;
   const yAtPrice = (p) => layout.main.y + ((range.max - num(p, range.min)) / Math.max(1e-9, range.max - range.min)) * layout.main.h;
@@ -414,6 +422,7 @@ ChartEngine.prototype.draw = function draw() {
   ctx.fillRect(0, 0, cssW, cssH);
 
   this._drawGrid(ctx, layout, range);
+  if (gogoZones) this._drawGogoZones(ctx, layout, yAtPrice, gogoZones);
   if (this.options.showMaCloud) this._drawMaCloud(ctx, sliced, xAtIndex, yAtPrice);
   if (this.options.showRainbow) this._drawRainbow(ctx, sliced, xAtIndex, yAtPrice);
   if (this.options.showSma50) this._drawLine(ctx, sliced, this.computed?.ma50, xAtIndex, yAtPrice, COLORS.sma50, 1.6);
@@ -437,6 +446,7 @@ ChartEngine.prototype.draw = function draw() {
     gutter: layout.gutter,
     visible: visible.length,
     last: visible[visible.length - 1] || null,
+    gogoZones,
   };
 };
 
@@ -472,6 +482,37 @@ ChartEngine.prototype._drawLine = function drawLine(ctx, sliced, series, xAtInde
     } else ctx.lineTo(x, y);
   }
   ctx.stroke();
+  ctx.restore();
+};
+
+ChartEngine.prototype._drawGogoZones = function drawGogoZones(ctx, layout, yAtPrice, zones) {
+  if (!zones) return;
+  const left = layout.main.x;
+  const right = layout.main.x + layout.main.w;
+  const band = (lo, hi, fill, stroke, label, alignTop) => {
+    const y1 = yAtPrice(hi);
+    const y2 = yAtPrice(lo);
+    const top = Math.min(y1, y2);
+    const h = Math.max(3, Math.abs(y2 - y1));
+    ctx.fillStyle = fill;
+    ctx.fillRect(left, top, right - left, h);
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.moveTo(left, top + h / 2);
+    ctx.lineTo(right, top + h / 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = stroke;
+    ctx.font = "10px sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = alignTop ? "bottom" : "top";
+    ctx.fillText(label, left + 4, alignTop ? top - 2 : top + h + 2);
+  };
+  ctx.save();
+  band(zones.highLow, zones.highHigh, COLORS.zoneHigh, COLORS.zoneHighLine, `고점대 ${formatPrice(zones.highLow)}~${formatPrice(zones.highHigh)}`, true);
+  band(zones.lowLow, zones.lowHigh, COLORS.zoneLow, COLORS.zoneLowLine, `저점대 ${formatPrice(zones.lowLow)}~${formatPrice(zones.lowHigh)}`, false);
   ctx.restore();
 };
 
@@ -723,6 +764,7 @@ const NChart = {
   formatPrice,
   formatDate,
   priceRange,
+  detectGogoZones: NIndicators.detectGogoZones,
 };
 
 export default NChart;

@@ -518,6 +518,62 @@ function accuracy(records = []) {
 }
 
 /**
+ * detectGogoZones — 고점대/저점대 (고고저). Matches iOS GogoZoneDetector.
+ * Swing highs/lows need 2-bar confirmation; last 3 of each form a band.
+ */
+function detectGogoZones(candles = []) {
+  const rows = Array.isArray(candles) ? candles : [];
+  if (rows.length < 12) return null;
+  const highs = [];
+  const lows = [];
+  for (let i = 2; i < rows.length - 2; i += 1) {
+    const c = rows[i];
+    const hi = num(c.high);
+    const lo = num(c.low);
+    if (
+      Number.isFinite(hi) &&
+      hi >= num(rows[i - 1].high) && hi >= num(rows[i - 2].high) &&
+      hi >= num(rows[i + 1].high) && hi >= num(rows[i + 2].high)
+    ) {
+      highs.push({ i, price: hi, date: c.date });
+    }
+    if (
+      Number.isFinite(lo) &&
+      lo <= num(rows[i - 1].low) && lo <= num(rows[i - 2].low) &&
+      lo <= num(rows[i + 1].low) && lo <= num(rows[i + 2].low)
+    ) {
+      lows.push({ i, price: lo, date: c.date });
+    }
+  }
+  const recentHighs = highs.slice(-3);
+  const recentLows = lows.slice(-3);
+  if (!recentHighs.length || !recentLows.length) return null;
+  const hiPrices = recentHighs.map((x) => x.price);
+  const loPrices = recentLows.map((x) => x.price);
+  const highLow = Math.min(...hiPrices);
+  const highHigh = Math.max(...hiPrices);
+  const lowLow = Math.min(...loPrices);
+  const lowHigh = Math.max(...loPrices);
+  const declining = recentHighs.length >= 2 && recentHighs[recentHighs.length - 1].price < recentHighs[0].price;
+  const risingLows = recentLows.length >= 2 && recentLows[recentLows.length - 1].price > recentLows[0].price;
+  let comment = `고점대 ${highLow}~${highHigh}, 저점대 ${lowLow}~${lowHigh}.`;
+  if (declining && risingLows) comment += " 고점은 낮아지고 저점은 높아지는 고고저 수렴.";
+  else if (declining) comment += " 하락 고점 구조 — 추세선 아래 압력.";
+  else if (risingLows) comment += " 상승 저점 구조 — 지지가 우상향.";
+  return {
+    highLow,
+    highHigh,
+    lowLow,
+    lowHigh,
+    highDates: recentHighs.map((x) => x.date),
+    lowDates: recentLows.map((x) => x.date),
+    comment,
+    zoneHigh: { low: highLow, high: highHigh },
+    zoneLow: { low: lowLow, high: lowHigh },
+  };
+}
+
+/**
  * personalAlerts — 급락 / 돌파 / 공포탐욕 / 뉴스 (분석 전용, 주문 없음)
  * Mirrors the iOS MarketSignalEngine thresholds for the web chart banner.
  */
@@ -584,6 +640,7 @@ const NIndicators = {
   currentZone,
   accuracy,
   personalAlerts,
+  detectGogoZones,
 };
 
 export default NIndicators;
@@ -602,4 +659,5 @@ export {
   currentZone,
   accuracy,
   personalAlerts,
+  detectGogoZones,
 };
