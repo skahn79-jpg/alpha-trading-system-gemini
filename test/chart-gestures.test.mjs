@@ -247,3 +247,44 @@ test("NDraw persists drawings across create()", () => {
   assert.equal(second.list()[0].type, "hline");
   assert.equal(second.list()[0].points[0].price, 71000);
 });
+
+test("viewCoveringFromIndex includes pivot with padding through latest", () => {
+  const v = ChartGestures.viewCoveringFromIndex(100, 300, 8);
+  assert.equal(v.offset, 0);
+  assert.equal(v.count, 208);
+});
+
+test("detectGogoZones remaps pivot indices onto full candle series", () => {
+  const candles = [];
+  for (let i = 0; i < 220; i += 1) {
+    let high = 100 + i * 0.1;
+    let low = high - 5;
+    let close = high - 2;
+    let open = close - 1;
+    let volume = 1000;
+    if (i === 80) {
+      high = 200; low = 180; close = 190; open = 185; volume = 2000;
+    } else if ([78, 79, 81, 82].includes(i)) {
+      high = 150; low = 140; close = 145; open = 142;
+    } else if (i === 140) {
+      high = 170; low = 150; close = 160; open = 155; volume = 2000;
+    } else if ([138, 139, 141, 142].includes(i)) {
+      high = 155; low = 145; close = 150; open = 148;
+    } else if (i >= 210) {
+      high = 175; low = 165; close = 172; open = 168; volume = 2500;
+    }
+    candles.push({ date: `d${i}`, open, high, low, close, volume });
+  }
+  const zones = NIndicators.detectGogoZones(candles, "D");
+  assert.ok(zones?.trendHigh1);
+  assert.equal(candles[zones.trendHigh1.index].date, zones.trendHigh1.date);
+  assert.equal(zones.trendHigh1.i, zones.trendHigh1.index);
+  const manual = NIndicators.evaluateGogoPair(
+    candles,
+    zones.trendHigh1,
+    zones.trendHigh2,
+    "D",
+    true
+  );
+  assert.ok(manual?.comment.includes("수동 조정"));
+});

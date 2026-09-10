@@ -647,6 +647,12 @@ enum GogoZoneDetector {
     /// Include breakouts whose first qualifying fresh cross is within this many trading days.
     static let recentBreakoutLookbackTradingDays = 5
     static let minPivotGap = 3
+    /// Extra bars shown before pivot ① when auto-fitting the chart window.
+    static let fitPaddingBefore = 8
+
+    static func shiftedPivot(_ pivot: GogoPivot, by offset: Int) -> GogoPivot {
+        GogoPivot(index: pivot.index + offset, price: pivot.price, date: pivot.date)
+    }
 
     /// Period-aware windows: D ~120–180, W ~52–104, M ~24–60.
     static func lookbackBars(for period: String?) -> Int {
@@ -678,8 +684,10 @@ enum GogoZoneDetector {
     }
 
     static func detect(candles: [ChartCandle], period: String? = "D") -> GogoZoneResult? {
-        let rows = Array(candles.suffix(lookbackBars(for: period)))
+        let lookback = lookbackBars(for: period)
+        let rows = Array(candles.suffix(lookback))
         guard rows.count >= 10 else { return nil }
+        let indexOffset = max(0, candles.count - rows.count)
         let highs = swingPivots(rows, kind: .high)
         let lows = swingPivots(rows, kind: .low)
         let recentHighs = Array(highs.suffix(3))
@@ -748,10 +756,10 @@ enum GogoZoneDetector {
             highDates: recentHighs.map(\.date),
             lowDates: recentLows.map(\.date),
             comment: comment,
-            swingHighs: recentHighs,
-            swingLows: recentLows,
-            trendHigh1: p1,
-            trendHigh2: p2,
+            swingHighs: recentHighs.map { shiftedPivot($0, by: indexOffset) },
+            swingLows: recentLows.map { shiftedPivot($0, by: indexOffset) },
+            trendHigh1: p1.map { shiftedPivot($0, by: indexOffset) },
+            trendHigh2: p2.map { shiftedPivot($0, by: indexOffset) },
             trendLinePrice: trendPrice,
             isBreakout: isBreakout,
             freshBreak: signals?.freshBreak ?? false,
@@ -826,6 +834,108 @@ enum GogoZoneDetector {
         if isTrendTooSteep(p1: p1, p2: p2) { return false }
         let trendNow = projectTrend(p1: p1, p2: p2, targetIndex: candles.count - 1)
         return isLineSane(trendNow: trendNow, candles: candles, p1: p1, p2: p2)
+    }
+
+    /// Project 고고저 trendline price at an absolute candle index.
+    static func projectTrendValue(p1: GogoPivot, p2: GogoPivot, targetIndex: Int) -> Double {
+        projectTrend(p1: p1, p2: p2, targetIndex: targetIndex)
+    }
+
+    /// Rebuild zones from an explicit ①/② pair (absolute indices into `candles`).
+    /// Used for session manual drag override; steep lines stay drawable with a warning.
+    static func evaluatePair(
+        candles: [ChartCandle],
+        p1: GogoPivot,
+        p2: GogoPivot,
+        period: String? = "D",
+        userAdjusted: Bool = false
+    ) -> GogoZoneResult? {
+        guard candles.count >= 10,
+              p1.index >= 0, p2.index > p1.index, p2.index < candles.count,
+              p1.price > 0 else { return nil }
+        let lookback = lookbackBars(for: period)
+        let rows = Array(candles.suffix(lookback))
+        let indexOffset = max(0, candles.count - rows.count)
+        let highs = swingPivots(rows, kind: .high).map { shiftedPivot($0, by: indexOffset) }
+        let lows = swingPivots(rows, kind: .low).map { shiftedPivot($0, by: indexOffset) }
+        let recentHighs = Array(highs.suffix(3))
+        let recentLows = Array(lows.suffix(3))
+        let hiPrices = recentHighs.isEmpty ? highs.map(\.price) : recentHighs.map(\.price)
+        let loSource: [GogoPivot]
+        if recentLows.isEmpty {
+            let start = max(0, candles.count - 10)
+            loSource = (start..<candles.count).map {
+                GogoPivot(index: $0, price: candles[$0].low, date: candles[$0].date)
+            }
+        } else {
+            loSource = recentLows
+        }
+        guard let highLo = hiPrices.min(), let highHi = hiPrices.max(),
+              let lowLo = loSource.map(\.price).min(), let lowHi = loSource.map(\.price).max()
+        else { return nil }
+
+        let allLows = swingPivots(candles, kind: .low)
+        let signals = chartMethodSignals(
+            candles: candles,
+            p1: p1,
+            p2: p2,
+            swingLows: allLows,
+            steepOverridesPhase: !userAdjusted
+        )
+        let trendPrice = signals?.trendLineNow
+        let declining = recentHighs.count >= 2 && recentHighs[recentHighs.count - 1].price < recentHighs[0].price
+        let risingLows = recentLows.count >= 2 && recentLows[recentLows.count - 1].price > recentLows[0].price
+
+        var comment = "고점대 \(MarketSignalEngine.formatPrice(highLo))~\(MarketSignalEngine.formatPrice(highHi)), 저점대 \(MarketSignalEngine.formatPrice(lowLo))~\(MarketSignalEngine.formatPrice(lowHi))."
+        if userAdjusted { comment = "수동 조정 · " + comment }
+        comment += " 고점① \(p1.date) → 고점② \(p2.date) (높은 고점 이후 낮은 고점)."
+        if declining && risingLows { comment += " 고점은 낮아지고 저점은 높아지는 고고저 수렴." }
+        else if declining { comment += " 하락 고점 구조 — 추세선 아래 압력." }
+        else if risingLows { comment += " 상승 저점 구조 — 지지가 우상향." }
+        if let signals, let trendPrice {
+            var extras: [String] = []
+            if signals.freshBreak { extras.append("신규(전일 종가 아래→오늘 위)") }
+            if signals.lowHold { extras.append("저가 추세선 위 유지") }
+            if signals.isVolumeConfirm { extras.append(String(format: "거래량 %.1f배", signals.volumeRatio)) }
+            let lastClose = candles.last?.close ?? 0
+            comment += " \(signals.phase). 종가 \(MarketSignalEngine.formatPrice(lastClose)) / 추세선 \(MarketSignalEngine.formatPrice(trendPrice))."
+            if !extras.isEmpty { comment += " \(extras.joined(separator: " · "))." }
+            if !signals.lowComment.isEmpty { comment += " \(signals.lowComment)" }
+            if signals.isTrendTooSteep { comment += " 급경사 추세선 경고." }
+        }
+
+        return GogoZoneResult(
+            highLow: highLo,
+            highHigh: highHi,
+            lowLow: lowLo,
+            lowHigh: lowHi,
+            highDates: recentHighs.map(\.date),
+            lowDates: recentLows.map(\.date),
+            comment: comment,
+            swingHighs: recentHighs,
+            swingLows: recentLows,
+            trendHigh1: p1,
+            trendHigh2: p2,
+            trendLinePrice: trendPrice,
+            isBreakout: signals?.closeBreak ?? false,
+            freshBreak: signals?.freshBreak ?? false,
+            lowHold: signals?.lowHold ?? false,
+            isBreakoutFailure: signals?.isBreakoutFailure ?? false,
+            volumeRatio: signals?.volumeRatio ?? 0,
+            phase: signals?.phase ?? "",
+            confirmedBreakout: signals?.confirmedBreakout ?? false,
+            lowStructure: signals?.lowStructure ?? "",
+            lowComment: signals?.lowComment ?? "",
+            trendSlopePer20Bars: signals?.trendSlopePer20Bars ?? trendSlopePer20Bars(p1: p1, p2: p2),
+            isTrendTooSteep: signals?.isTrendTooSteep ?? isTrendTooSteep(p1: p1, p2: p2),
+            breakoutRate: signals?.breakoutRate ?? 0,
+            isVolumeConfirm: signals?.isVolumeConfirm ?? false,
+            isBullishCandle: signals?.isBullishCandle ?? false,
+            isLineSane: signals?.isLineSane ?? false,
+            isRealBreakout: signals?.isRealBreakout ?? false,
+            breakoutBarsAgo: signals?.breakoutBarsAgo ?? -1,
+            breakoutDate: signals?.breakoutDate ?? ""
+        )
     }
 
     /// Classic trading-platform pair (no steep/sane filter) — label 급경사 when no usable pair exists.
@@ -918,7 +1028,8 @@ enum GogoZoneDetector {
         candles: [ChartCandle],
         p1: GogoPivot,
         p2: GogoPivot,
-        swingLows: [GogoPivot]
+        swingLows: [GogoPivot],
+        steepOverridesPhase: Bool = true
     ) -> GogoChartSignals? {
         guard let last = candles.last else { return nil }
         let prev = candles.count >= 2 ? candles[candles.count - 2] : last
@@ -981,7 +1092,7 @@ enum GogoZoneDetector {
         let slope = trendSlopePer20Bars(p1: p1, p2: p2)
         let steep = slope >= steepSlopeThreshold
         if isBreakoutFailure { phase = "돌파 실패" }
-        else if steep { phase = "급경사 추세선 제외" }
+        else if steep && steepOverridesPhase { phase = "급경사 추세선 제외" }
 
         let breakoutRate = trendNow > 0 ? ((last.close - trendNow) / trendNow) * 100 : 0
         let isVolumeConfirm = volumeRatio >= volumeConfirmRatio

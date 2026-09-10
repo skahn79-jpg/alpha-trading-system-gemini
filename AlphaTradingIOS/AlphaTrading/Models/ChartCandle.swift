@@ -64,6 +64,23 @@ struct ChartWindow: Equatable {
         abs(dx) > abs(dy)
     }
 
+    /// Visible window covering fromIndex (with padding before) through the latest candle.
+    /// Used when 고고저 is on so pivot ①/② stay in view, not only recent bars near price.
+    static func covering(
+        fromIndex: Int,
+        total: Int,
+        paddingBefore: Int = 8,
+        minimumCount: Int = ChartWindow.minCount
+    ) -> ChartWindow {
+        let safeTotal = max(0, total)
+        guard safeTotal > 0 else {
+            return ChartWindow(visibleCount: defaultCount, offset: 0)
+        }
+        let start = max(0, min(fromIndex, safeTotal - 1) - max(0, paddingBefore))
+        let needed = max(minimumCount, safeTotal - start)
+        return ChartWindow(visibleCount: needed, offset: 0).clamped(total: safeTotal)
+    }
+
     /// Y-axis for the visible window only: high/low of those candles + tight padding (≈2–5%).
     /// Does not use the full series min/max, so recent amplitude stays readable while zooming/panning.
     static func yDomain(

@@ -911,11 +911,69 @@ function swingPivots(rows, kind) {
  * detectGogoZones — 고점대/저점대 overlay + 고고저 추세선.
  * Pair = findGoGoJeoTrend (highest then later lower). Breakout = calcChartMethodSignals.
  */
+/**
+ * Rebuild 고고저 zones from an explicit ①/② pair (absolute indices into candles).
+ * Manual drag override for session; steep lines stay drawable with a warning.
+ */
+function evaluateGogoPair(candles = [], p1, p2, period = "D", userAdjusted = false) {
+  const all = Array.isArray(candles) ? candles : [];
+  if (!p1 || !p2 || all.length < 10) return null;
+  if (!(p2.index > p1.index) || p1.index < 0 || p2.index >= all.length || !(p1.price > 0)) return null;
+  const base = detectGogoZones(all, period);
+  if (!base) return null;
+  const lows = swingPivots(all, "low");
+  const signals = calcGogoChartMethodSignals(all, p1, p2, lows);
+  const trendLinePrice = signals && Number.isFinite(signals.trendLineNow) ? signals.trendLineNow : null;
+  let comment = base.comment.split(" 고점①")[0] || base.comment;
+  if (userAdjusted) comment = `수동 조정 · ${comment}`;
+  comment += ` 고점① ${p1.date || ""} → 고점② ${p2.date || ""} (높은 고점 이후 낮은 고점).`;
+  if (signals && Number.isFinite(trendLinePrice)) {
+    const extras = [];
+    if (signals.freshBreak) extras.push("신규(전일 종가 아래→오늘 위)");
+    if (signals.lowHold) extras.push("저가 추세선 위 유지");
+    if (signals.isVolumeConfirm) extras.push(`거래량 ${signals.volumeRatio.toFixed(1)}배`);
+    comment += ` ${signals.phase}. 종가 ${formatZonePrice(all[all.length - 1].close)} / 추세선 ${formatZonePrice(trendLinePrice)}.`;
+    if (extras.length) comment += ` ${extras.join(" · ")}.`;
+    if (signals.lowInfo && signals.lowInfo.lowComment) comment += ` ${signals.lowInfo.lowComment}`;
+    if (signals.isTrendTooSteep) comment += " 급경사 추세선 경고.";
+  }
+  return {
+    ...base,
+    comment,
+    trendHigh1: gogoPivot(p1.index, p1.price, p1.date),
+    trendHigh2: gogoPivot(p2.index, p2.price, p2.date),
+    trendLinePrice,
+    isBreakout: Boolean(signals && signals.closeBreak),
+    freshBreak: Boolean(signals && signals.freshBreak),
+    lowHold: Boolean(signals && signals.lowHold),
+    isBreakoutFailure: Boolean(signals && signals.lowInfo && signals.lowInfo.isBreakoutFailure),
+    volumeRatio: signals ? signals.volumeRatio : 0,
+    phase: signals ? signals.phase : "",
+    confirmedBreakout: Boolean(signals && signals.confirmedBreakout),
+    lowStructure: signals && signals.lowInfo ? signals.lowInfo.lowStructure : "",
+    lowComment: signals && signals.lowInfo ? signals.lowInfo.lowComment : "",
+    trendSlopePer20Bars: signals
+      ? signals.trendSlopePer20Bars
+      : Number(gogoTrendSlopePer20Bars(p1, p2).toFixed(2)),
+    isTrendTooSteep: Boolean(signals && signals.isTrendTooSteep),
+    breakoutRate: signals ? signals.breakoutRate : 0,
+    isVolumeConfirm: Boolean(signals && signals.isVolumeConfirm),
+    isBullishCandle: Boolean(signals && signals.isBullishCandle),
+    isLineSane: Boolean(signals && signals.isLineSane),
+    isRealBreakout: Boolean(signals && signals.isRealBreakout),
+    breakoutBarsAgo: signals && Number.isFinite(signals.breakoutBarsAgo) ? signals.breakoutBarsAgo : -1,
+    breakoutDate: (signals && signals.breakoutDate) || "",
+    userAdjusted: Boolean(userAdjusted),
+  };
+}
+
 function detectGogoZones(candles = [], period = "D") {
   const all = Array.isArray(candles) ? candles : [];
   const lookback = gogoLookbackForPeriod(period);
   const rows = all.length > lookback ? all.slice(-lookback) : all;
   if (rows.length < 10) return null;
+  const indexOffset = Math.max(0, all.length - rows.length);
+  const shiftPivot = (p) => (p ? gogoPivot(p.index + indexOffset, p.price, p.date) : null);
   const highs = swingPivots(rows, "high");
   const lows = swingPivots(rows, "low");
   const recentHighs = highs.slice(-3);
@@ -978,10 +1036,10 @@ function detectGogoZones(candles = [], period = "D") {
     comment,
     zoneHigh: { low: highLow, high: highHigh },
     zoneLow: { low: lowLow, high: lowHigh },
-    swingHighs: recentHighs,
-    swingLows: recentLows,
-    trendHigh1: p1,
-    trendHigh2: p2,
+    swingHighs: recentHighs.map(shiftPivot),
+    swingLows: recentLows.map(shiftPivot),
+    trendHigh1: shiftPivot(p1),
+    trendHigh2: shiftPivot(p2),
     trendLinePrice,
     isBreakout,
     freshBreak: Boolean(signals && signals.freshBreak),
@@ -1117,6 +1175,7 @@ const NIndicators = {
   accuracy,
   personalAlerts,
   detectGogoZones,
+  evaluateGogoPair,
   findGoGoJeoTrend,
   findGoGoJeoTrendRaw,
   gogoLookbackForPeriod,
@@ -1146,6 +1205,7 @@ export {
   accuracy,
   personalAlerts,
   detectGogoZones,
+  evaluateGogoPair,
   findGoGoJeoTrend,
   volumeProfile,
   gogoTrendSlopePer20Bars,

@@ -246,13 +246,18 @@ ChartEngine.prototype._bind = function bind() {
     if (this._drag && this._drag.pointerId === ev.pointerId) {
       const dx = ev.clientX - this._drag.startX;
       const dy = ev.clientY - this._drag.startY;
-      if (this._drag.locked == null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
-        this._drag.locked = ChartGestures.isHorizontalPan(dx, dy) ? "x" : "y";
-      }
-      if (this._drag.locked === "x") {
+      if (this._drag.locked === "gogo") {
         ev.preventDefault?.();
-        const { cssW } = getCanvasSize(this.canvas, this.options.width || 900, this.options.height || 560);
-        this._applyPan(dx, this._drag.startOffset, cssW);
+        this._dragGogoPivotTo(this._drag.gogoWhich, pt.x);
+      } else {
+        if (this._drag.locked == null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+          this._drag.locked = ChartGestures.isHorizontalPan(dx, dy) ? "x" : "y";
+        }
+        if (this._drag.locked === "x") {
+          ev.preventDefault?.();
+          const { cssW } = getCanvasSize(this.canvas, this.options.width || 900, this.options.height || 560);
+          this._applyPan(dx, this._drag.startOffset, cssW);
+        }
       }
     }
     this.hover = this.hitTest(pt.x, pt.y);
@@ -260,7 +265,20 @@ ChartEngine.prototype._bind = function bind() {
     if (typeof this.options.onHover === "function") this.options.onHover(this.hover);
   };
   const down = (ev) => {
-    this._drag = { pointerId: ev.pointerId, startX: ev.clientX, startY: ev.clientY, startOffset: this.view.offset || 0, locked: null };
+    const pt = this._eventPoint(ev);
+    const which = this._hitGogoPivot(pt.x, pt.y);
+    this._drag = {
+      pointerId: ev.pointerId,
+      startX: ev.clientX,
+      startY: ev.clientY,
+      startOffset: this.view.offset || 0,
+      locked: which ? "gogo" : null,
+      gogoWhich: which || null,
+    };
+    if (which) {
+      this._ensureGogoManual();
+      ev.preventDefault?.();
+    }
     try { this.canvas.setPointerCapture?.(ev.pointerId); } catch { /* ignore */ }
   };
   const up = (ev) => {
@@ -336,13 +354,129 @@ ChartEngine.prototype._eventPoint = function eventPoint(ev) {
   return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
 };
 
+ChartEngine.prototype._currentGogoZones = function currentGogoZones() {
+  if (this.options.showGogoZones === false) return null;
+  if (this._gogoUserAdjusted && this._gogoManual && this._gogoManual.p1 && this._gogoManual.p2) {
+    return NIndicators.evaluateGogoPair(
+      this.full,
+      this._gogoManual.p1,
+      this._gogoManual.p2,
+      this.options.period || this.options.chartPeriod || "D",
+      true
+    );
+  }
+  return NIndicators.detectGogoZones(this.full, this.options.period || this.options.chartPeriod || "D");
+};
+
+ChartEngine.prototype._hitGogoPivot = function hitGogoPivot(x, y) {
+  const zones = this._currentGogoZones();
+  if (!zones || !this.layout) return null;
+  const sliced = sliceView(this.full, this.view);
+  const layout = this.layout;
+  const step = layout.step || 1;
+  const yAtPrice = (price) => {
+    const range = priceRange(sliced.visible, []);
+    const t = (range.max - price) / Math.max(1e-9, range.max - range.min);
+    return layout.main.y + t * layout.main.h;
+  };
+  const xAtIndex = (i) => layout.main.x + (i + 0.5) * step;
+  const check = (pivot, which) => {
+    if (!pivot) return null;
+    const vis = (pivot.i ?? pivot.index) - sliced.start;
+    if (vis < 0 || vis >= sliced.visible.length) return null;
+    const px = xAtIndex(vis);
+    const py = yAtPrice(pivot.price);
+    if (Math.hypot(px - x, py - y) <= 18) return which;
+    return null;
+  };
+  return check(zones.trendHigh1, 1) || check(zones.trendHigh2, 2);
+};
+
+ChartEngine.prototype._ensureGogoManual = function ensureGogoManual() {
+  if (this._gogoManual && this._gogoManual.p1 && this._gogoManual.p2) return;
+  const zones = NIndicators.detectGogoZones(this.full, this.options.period || this.options.chartPeriod || "D");
+  if (zones && zones.trendHigh1 && zones.trendHigh2) {
+    this._gogoManual = { p1: { ...zones.trendHigh1 }, p2: { ...zones.trendHigh2 } };
+  }
+};
+
+ChartEngine.prototype._dragGogoPivotTo = function dragGogoPivotTo(which, x) {
+  this._ensureGogoManual();
+  if (!this._gogoManual || !this.layout) return;
+  const sliced = sliceView(this.full, this.view);
+  const layout = this.layout;
+  const step = layout.step || 1;
+  const vis = Math.max(0, Math.min(sliced.visible.length - 1, Math.round((x - layout.main.x) / step - 0.5)));
+  const candle = sliced.visible[vis];
+  if (!candle) return;
+  const absIdx = sliced.start + vis;
+  const snapped = { i: absIdx, index: absIdx, price: num(candle.high), value: num(candle.high), date: candle.date };
+  const gap = 3;
+  if (which === 1) {
+    const p2 = this._gogoManual.p2;
+    if (p2 && snapped.index >= p2.index - gap) {
+      const capped = Math.max(0, p2.index - gap - 1);
+      const c = this.full[capped];
+      this._gogoManual.p1 = { i: capped, index: capped, price: num(c.high), value: num(c.high), date: c.date };
+    } else {
+      this._gogoManual.p1 = snapped;
+    }
+  } else {
+    const p1 = this._gogoManual.p1;
+    if (p1 && snapped.index <= p1.index + gap) {
+      const capped = Math.min(this.full.length - 1, p1.index + gap + 1);
+      const c = this.full[capped];
+      this._gogoManual.p2 = { i: capped, index: capped, price: num(c.high), value: num(c.high), date: c.date };
+    } else {
+      this._gogoManual.p2 = snapped;
+    }
+  }
+  this._gogoUserAdjusted = true;
+  if (typeof this.options.onGogoChange === "function") {
+    this.options.onGogoChange(this._currentGogoZones());
+  }
+};
+
+ChartEngine.prototype.fitViewToGogo = function fitViewToGogo(force) {
+  if (this.options.showGogoZones === false) return false;
+  if (this._gogoFitted && !force) return false;
+  const zones = NIndicators.detectGogoZones(this.full, this.options.period || this.options.chartPeriod || this.options.timeframe || "D");
+  const p1 = zones && (zones.trendHigh1 || (this._gogoManual && this._gogoManual.p1));
+  if (!p1 || !Number.isFinite(p1.index)) return false;
+  const next = ChartGestures.viewCoveringFromIndex(p1.index, this.full.length, 8);
+  this.view.count = next.count;
+  this.view.offset = next.offset;
+  this._gogoFitted = true;
+  this._emitView();
+  return true;
+};
+
+ChartEngine.prototype.resetGogoManual = function resetGogoManual() {
+  this._gogoManual = null;
+  this._gogoUserAdjusted = false;
+  this._gogoFitted = false;
+  this.fitViewToGogo(true);
+  this.draw();
+  if (typeof this.options.onGogoChange === "function") {
+    this.options.onGogoChange(this._currentGogoZones());
+  }
+};
+
 ChartEngine.prototype.setData = function setData(candles, view) {
+  const prevLen = this.full.length;
   this.full = Array.isArray(candles) ? candles : [];
   if (view) this.view = { ...this.view, ...view };
   if (!this.view.count) this.view.count = Math.min(80, this.full.length || 1);
   this.computed = NIndicators.compute(this.full, {
     includeHalving: this.options.showHalving || this.options.assetType === "crypto",
   });
+  if (this.full.length !== prevLen) {
+    this._gogoFitted = false;
+    if (!this._gogoUserAdjusted) this._gogoManual = null;
+  }
+  if (this.options.showGogoZones !== false && !view) {
+    this.fitViewToGogo(false);
+  }
   return this;
 };
 
@@ -416,9 +550,20 @@ ChartEngine.prototype.draw = function draw() {
     extras.push(this.computed.ma200?.[sliced.start + visible.length - 1]);
   }
   if (Array.isArray(this.options.overlayPrices)) extras.push(...this.options.overlayPrices);
-  const gogoZones = this.options.showGogoZones === false
-    ? null
-    : NIndicators.detectGogoZones(this.full, this.options.period || this.options.chartPeriod || "D");
+  let gogoZones = null;
+  if (this.options.showGogoZones !== false) {
+    if (this._gogoUserAdjusted && this._gogoManual && this._gogoManual.p1 && this._gogoManual.p2) {
+      gogoZones = NIndicators.evaluateGogoPair(
+        this.full,
+        this._gogoManual.p1,
+        this._gogoManual.p2,
+        this.options.period || this.options.chartPeriod || "D",
+        true
+      );
+    } else {
+      gogoZones = NIndicators.detectGogoZones(this.full, this.options.period || this.options.chartPeriod || "D");
+    }
+  }
   const volumeProfile = NIndicators.volumeProfile(visible);
   if (gogoZones) extras.push(gogoZones.highHigh, gogoZones.highLow, gogoZones.lowHigh, gogoZones.lowLow, gogoZones.trendLinePrice);
   if (volumeProfile) extras.push(volumeProfile.poc, ...(volumeProfile.hvn || []));
@@ -539,8 +684,27 @@ ChartEngine.prototype._drawGogoZones = function drawGogoZones(ctx, layout, yAtPr
   };
   (zones.swingHighs || []).forEach((p) => plotPivot(p, COLORS.zoneHighLine));
   (zones.swingLows || []).forEach((p) => plotPivot(p, COLORS.zoneLowLine));
+  const labelPivot = (pivot, label) => {
+    if (!pivot || !sliced || typeof xAtIndex !== "function") return;
+    const vis = (pivot.i ?? pivot.index) - sliced.start;
+    if (vis < 0 || vis >= sliced.visible.length) return;
+    const x = xAtIndex(vis);
+    const y = yAtPrice(pivot.price);
+    ctx.beginPath();
+    ctx.fillStyle = COLORS.zoneHighLine;
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = COLORS.zoneHighLine;
+    ctx.font = "bold 11px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(label, x, y - 6);
+  };
+  labelPivot(zones.trendHigh1, "①");
+  labelPivot(zones.trendHigh2, "②");
 
-  if (zones.trendHigh1 && zones.trendHigh2 && !zones.isTrendTooSteep && sliced && typeof xAtIndex === "function") {
+  const allowSteep = Boolean(zones.userAdjusted || this._gogoUserAdjusted);
+  if (zones.trendHigh1 && zones.trendHigh2 && (!zones.isTrendTooSteep || allowSteep) && sliced && typeof xAtIndex === "function") {
     const h1 = zones.trendHigh1;
     const h2 = zones.trendHigh2;
     const span = (h2.i ?? h2.index) - (h1.i ?? h1.index);

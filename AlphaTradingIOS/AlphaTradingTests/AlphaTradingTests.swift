@@ -622,6 +622,82 @@ final class AlphaTradingTests: XCTestCase {
         }
     }
 
+    func testChartWindowCoveringIncludesPivotWithPadding() {
+        let total = 300
+        let p1Index = 100
+        let window = ChartWindow.covering(fromIndex: p1Index, total: total, paddingBefore: 8)
+        XCTAssertEqual(window.offset, 0)
+        let start = total - window.visibleCount - window.offset
+        XCTAssertLessThanOrEqual(start, p1Index - 8)
+        XCTAssertEqual(start + window.visibleCount, total)
+        XCTAssertGreaterThanOrEqual(window.visibleCount, total - (p1Index - 8))
+    }
+
+    func testGogoDetectRemapsPivotIndicesToFullSeries() {
+        var candles: [ChartCandle] = []
+        for i in 0..<220 {
+            var high = 100.0 + Double(i) * 0.1
+            var low = high - 5
+            var close = high - 2
+            var open = close - 1
+            var volume = 1000.0
+            if i == 80 { // ATH outside default visible 60 but inside lookback 160 of 220 → offset 60
+                high = 200; low = 180; close = 190; open = 185; volume = 2000
+            } else if i == 78 || i == 79 || i == 81 || i == 82 {
+                high = 150; low = 140; close = 145; open = 142
+            } else if i == 140 {
+                high = 170; low = 150; close = 160; open = 155; volume = 2000
+            } else if i == 138 || i == 139 || i == 141 || i == 142 {
+                high = 155; low = 145; close = 150; open = 148
+            } else if i >= 210 {
+                high = 175; low = 165; close = 172; open = 168; volume = 2500
+            }
+            candles.append(ChartCandle(
+                date: String(format: "2026%02d%02d", (i / 28) + 1, (i % 28) + 1),
+                open: open, high: high, low: low, close: close, volume: volume
+            ))
+        }
+        let zones = GogoZoneDetector.detect(candles: candles, period: "D")
+        XCTAssertNotNil(zones?.trendHigh1)
+        if let h1 = zones?.trendHigh1 {
+            XCTAssertEqual(candles[h1.index].date, h1.date)
+            XCTAssertEqual(candles[h1.index].high, h1.price, accuracy: 0.01)
+            // Must be absolute index into full series (lookback offset applied)
+            XCTAssertGreaterThanOrEqual(h1.index, candles.count - GogoZoneDetector.lookbackBars(for: "D"))
+        }
+        if let h1 = zones?.trendHigh1 {
+            let window = ChartWindow.covering(fromIndex: h1.index, total: candles.count, paddingBefore: 8)
+            let start = candles.count - window.visibleCount
+            XCTAssertLessThanOrEqual(start, max(0, h1.index - 8))
+        }
+    }
+
+    func testGogoEvaluatePairManualOverrideKeepsSteepDrawableWarning() {
+        let candles = gogoPairFixture(lastClose: 150, lastLow: 145, lastVolume: 2500, prevClose: 90, lastOpen: 140)
+        guard let auto = GogoZoneDetector.detect(candles: candles),
+              var p1 = auto.trendHigh1,
+              var p2 = auto.trendHigh2 else {
+            XCTFail("auto pair required")
+            return
+        }
+        // Force a steep pair via prices while keeping indices
+        p1.price = 200
+        p2.price = 50
+        let manual = GogoZoneDetector.evaluatePair(
+            candles: candles,
+            p1: p1,
+            p2: p2,
+            period: "D",
+            userAdjusted: true
+        )
+        XCTAssertNotNil(manual)
+        XCTAssertTrue(manual?.comment.contains("수동 조정") ?? false)
+        XCTAssertEqual(manual?.trendHigh1?.index, p1.index)
+        XCTAssertEqual(manual?.trendHigh2?.index, p2.index)
+        XCTAssertTrue(manual?.isTrendTooSteep ?? false)
+        XCTAssertTrue(manual?.comment.contains("급경사") ?? false)
+    }
+
     func testGogoLookbackByPeriod() {
         XCTAssertEqual(GogoZoneDetector.lookbackBars(for: "D"), 160)
         XCTAssertEqual(GogoZoneDetector.lookbackBars(for: "W"), 78)

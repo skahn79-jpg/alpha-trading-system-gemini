@@ -18,6 +18,13 @@ struct ChartView: View {
     // 학습 모드: 켜진 오버레이 집합 (비어 있으면 기존 차트와 동일)
     @State private var learnModes: Set<LearnMode> = []
     @State private var showGogoZones = true
+    /// Session override: user dragged 고고저 ①/②; auto-detect pauses until reset.
+    @State private var gogoUserAdjusted = false
+    @State private var gogoManualP1: GogoPivot?
+    @State private var gogoManualP2: GogoPivot?
+    @State private var gogoDragWhich: Int? // 1 or 2 while dragging
+    @State private var didAutoFitGogo = false
+    @State private var priceChartHeight: CGFloat = 260
 
     // AI 예측 (kr 전용) — 예측 칩을 켤 때 1회 로드
     @State private var prediction: PredictResponse?
@@ -66,13 +73,25 @@ struct ChartView: View {
             let prefs = ChartOverlayPrefs.load(code: code)
             showGogoZones = prefs.showGogo
             learnModes = Set(prefs.modes.compactMap(LearnMode.init(rawValue:)))
+            gogoUserAdjusted = false
+            gogoManualP1 = nil
+            gogoManualP2 = nil
+            gogoDragWhich = nil
+            didAutoFitGogo = false
             resetWindow()
             await viewModel.load(code: code, period: period, kind: kind)
+            if showGogoZones { fitWindowToGogo(force: true) }
         }
         .onChange(of: viewModel.candles.count) { _ in
             chartWindow = chartWindow.clamped(total: viewModel.candles.count)
+            if showGogoZones && !gogoUserAdjusted && !didAutoFitGogo {
+                fitWindowToGogo(force: true)
+            }
         }
-        .onChange(of: showGogoZones) { _ in persistOverlayPrefs() }
+        .onChange(of: showGogoZones) { on in
+            persistOverlayPrefs()
+            if on { fitWindowToGogo(force: true) }
+        }
         .onChange(of: learnModes) { _ in persistOverlayPrefs() }
     }
 
@@ -99,8 +118,24 @@ struct ChartView: View {
                     )
                 },
                 onPinchEnded: { pinchBaseCount = chartWindow.visibleCount },
-                onPanBegan: { panStartOffset = chartWindow.offset },
-                onPanChanged: { dx in
+                hitTestPivot: { point, size in
+                    showGogoZones ? hitTestGogoPivot(at: point, in: size) : nil
+                },
+                onPanBegan: { point, size in
+                    if showGogoZones, let which = hitTestGogoPivot(at: point, in: size) {
+                        gogoDragWhich = which
+                        ensureManualPivotsFromAuto()
+                        return true
+                    }
+                    gogoDragWhich = nil
+                    panStartOffset = chartWindow.offset
+                    return false
+                },
+                onPanChanged: { dx, point, size in
+                    if let which = gogoDragWhich {
+                        dragGogoPivot(which: which, to: point, in: size)
+                        return
+                    }
                     chartWindow = chartWindow.panned(
                         translationX: dx,
                         chartWidth: chartWidth,
@@ -108,7 +143,14 @@ struct ChartView: View {
                         total: viewModel.candles.count
                     )
                 },
-                onPanEnded: { panStartOffset = chartWindow.offset }
+                onPanEnded: {
+                    if gogoDragWhich != nil {
+                        gogoDragWhich = nil
+                        gogoUserAdjusted = true
+                        return
+                    }
+                    panStartOffset = chartWindow.offset
+                }
             )
         }
         .accessibilityHint("두 손가락으로 확대 축소하고, 좌우로 밀어 과거 차트를 봅니다.")
@@ -140,6 +182,13 @@ struct ChartView: View {
             Text(zones.comment)
                 .font(.paperlogy(10))
                 .foregroundStyle(AppTheme.textSecondary)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 2)
+            Text(gogoUserAdjusted
+                 ? "①·②를 드래그해 구조를 맞춘 상태 · 초기화/자동으로 복원"
+                 : "①·② 마커를 드래그하면 추세선·국면을 수동 조정")
+                .font(.paperlogy(9))
+                .foregroundStyle(AppTheme.textSecondary.opacity(0.85))
                 .padding(.horizontal, 12)
                 .padding(.bottom, 4)
         }
@@ -185,6 +234,93 @@ struct ChartView: View {
         chartWindow = ChartWindow(visibleCount: ChartWindow.defaultCount, offset: 0)
         pinchBaseCount = ChartWindow.defaultCount
         panStartOffset = 0
+    }
+
+    /// Zoom/pan window so pivot ① (with padding) through the latest bar are visible.
+    private func fitWindowToGogo(force: Bool = false) {
+        guard showGogoZones else { return }
+        guard force || !didAutoFitGogo else { return }
+        guard let p1 = gogoZones?.trendHigh1 ?? gogoManualP1 else { return }
+        chartWindow = ChartWindow.covering(
+            fromIndex: p1.index,
+            total: viewModel.candles.count,
+            paddingBefore: GogoZoneDetector.fitPaddingBefore
+        )
+        pinchBaseCount = chartWindow.visibleCount
+        panStartOffset = chartWindow.offset
+        didAutoFitGogo = true
+    }
+
+    private func resetGogoToAuto() {
+        gogoUserAdjusted = false
+        gogoManualP1 = nil
+        gogoManualP2 = nil
+        gogoDragWhich = nil
+        didAutoFitGogo = false
+        fitWindowToGogo(force: true)
+    }
+
+    private func ensureManualPivotsFromAuto() {
+        if gogoManualP1 == nil || gogoManualP2 == nil {
+            let auto = GogoZoneDetector.detect(candles: viewModel.candles, period: period)
+            gogoManualP1 = gogoManualP1 ?? auto?.trendHigh1
+            gogoManualP2 = gogoManualP2 ?? auto?.trendHigh2
+        }
+    }
+
+    /// Hit-test near ①/② markers in the price chart plot area (pure; no state mutation).
+    private func hitTestGogoPivot(at point: CGPoint, in size: CGSize) -> Int? {
+        guard showGogoZones else { return nil }
+        let p1 = gogoManualP1 ?? gogoZones?.trendHigh1
+        let p2 = gogoManualP2 ?? gogoZones?.trendHigh2
+        guard let p1, let p2 else { return nil }
+        let plotH = priceChartHeight
+        guard point.y >= 0, point.y <= plotH + 16 else { return nil }
+        let plotW = max(1, size.width)
+        func screenPoint(for pivot: GogoPivot) -> CGPoint? {
+            guard let vis = displayCandles.firstIndex(where: { $0.date == pivot.date }) else { return nil }
+            let n = max(1, displayCandles.count)
+            let x = (CGFloat(vis) + 0.5) / CGFloat(n) * plotW
+            let domain = yDomain
+            let span = max(1e-9, domain.upperBound - domain.lowerBound)
+            let yFrac = CGFloat((domain.upperBound - pivot.price) / span)
+            let y = 8 + yFrac * (plotH - 8)
+            return CGPoint(x: x, y: y)
+        }
+        let threshold: CGFloat = 28
+        if let sp = screenPoint(for: p1), hypot(sp.x - point.x, sp.y - point.y) <= threshold { return 1 }
+        if let sp = screenPoint(for: p2), hypot(sp.x - point.x, sp.y - point.y) <= threshold { return 2 }
+        return nil
+    }
+
+    private func dragGogoPivot(which: Int, to point: CGPoint, in size: CGSize) {
+        let candles = viewModel.candles
+        guard !candles.isEmpty, !displayCandles.isEmpty else { return }
+        let plotW = max(1, size.width)
+        let n = displayCandles.count
+        let vis = min(max(0, Int((point.x / plotW) * CGFloat(n))), n - 1)
+        let candle = displayCandles[vis]
+        guard let absIdx = candles.firstIndex(where: { $0.date == candle.date }) else { return }
+        // Snap to candle high (고고저 pivots are swing highs).
+        let snapped = GogoPivot(index: absIdx, price: candle.high, date: candle.date)
+        if which == 1 {
+            if let p2 = gogoManualP2, snapped.index >= p2.index - GogoZoneDetector.minPivotGap {
+                let capped = max(0, p2.index - GogoZoneDetector.minPivotGap - 1)
+                let c = candles[capped]
+                gogoManualP1 = GogoPivot(index: capped, price: c.high, date: c.date)
+            } else {
+                gogoManualP1 = snapped
+            }
+        } else {
+            if let p1 = gogoManualP1, snapped.index <= p1.index + GogoZoneDetector.minPivotGap {
+                let capped = min(candles.count - 1, p1.index + GogoZoneDetector.minPivotGap + 1)
+                let c = candles[capped]
+                gogoManualP2 = GogoPivot(index: capped, price: c.high, date: c.date)
+            } else {
+                gogoManualP2 = snapped
+            }
+        }
+        gogoUserAdjusted = true
     }
 
     // MARK: - 가격 차트 (캔들 + MA + 볼린저밴드)
@@ -279,6 +415,12 @@ struct ChartView: View {
         .frame(height: 260)
         .padding(.horizontal, 8)
         .padding(.top, 8)
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(key: PriceChartHeightPreferenceKey.self, value: geo.size.height)
+            }
+        )
+        .onPreferenceChange(PriceChartHeightPreferenceKey.self) { priceChartHeight = max(120, $0) }
     }
 
     private var legend: some View {
@@ -338,7 +480,16 @@ struct ChartView: View {
     }
 
     private var gogoZones: GogoZoneResult? {
-        GogoZoneDetector.detect(candles: viewModel.candles, period: period)
+        if gogoUserAdjusted, let p1 = gogoManualP1, let p2 = gogoManualP2 {
+            return GogoZoneDetector.evaluatePair(
+                candles: viewModel.candles,
+                p1: p1,
+                p2: p2,
+                period: period,
+                userAdjusted: true
+            )
+        }
+        return GogoZoneDetector.detect(candles: viewModel.candles, period: period)
     }
 
     private var volumeProfile: MarketSignalEngine.VolumeProfileResult? {
@@ -434,6 +585,26 @@ struct ChartView: View {
                     .foregroundStyle(AppTheme.up)
                     .symbolSize(28)
             }
+            if let h1 = zones.trendHigh1, displayDateSet.contains(h1.date) {
+                PointMark(x: .value("Date", h1.date), y: .value("고점①", h1.price))
+                    .foregroundStyle(AppTheme.down)
+                    .symbolSize(gogoDragWhich == 1 ? 72 : 54)
+                    .annotation(position: .top, spacing: 2) {
+                        Text("①")
+                            .font(.paperlogy(10, weight: .bold))
+                            .foregroundStyle(AppTheme.down)
+                    }
+            }
+            if let h2 = zones.trendHigh2, displayDateSet.contains(h2.date) {
+                PointMark(x: .value("Date", h2.date), y: .value("고점②", h2.price))
+                    .foregroundStyle(AppTheme.down)
+                    .symbolSize(gogoDragWhich == 2 ? 72 : 54)
+                    .annotation(position: .top, spacing: 2) {
+                        Text("②")
+                            .font(.paperlogy(10, weight: .bold))
+                            .foregroundStyle(AppTheme.down)
+                    }
+            }
             ForEach(gogoTrendPoints, id: \.date) { point in
                 LineMark(
                     x: .value("Date", point.date),
@@ -449,10 +620,11 @@ struct ChartView: View {
     /// 고점①→고점② 하락 추세선을 표시 구간까지 연장 (급경사/비정상 투영은 숨김)
     private var gogoTrendPoints: [MAPoint] {
         guard let zones = gogoZones,
-              !zones.isTrendTooSteep,
               let h1 = zones.trendHigh1,
               let h2 = zones.trendHigh2,
               h2.index > h1.index else { return [] }
+        // Auto mode hides 급경사; manual drag keeps the line and shows warning in comment.
+        if zones.isTrendTooSteep && !gogoUserAdjusted { return [] }
         let slope = (h2.price - h1.price) / Double(h2.index - h1.index)
         let candles = viewModel.candles
         let visible = displayDateSet
@@ -607,6 +779,20 @@ struct ChartView: View {
                     .overlay(Capsule().stroke(showGogoZones ? Color.clear : AppTheme.line, lineWidth: 1))
             }
             .buttonStyle(.plain)
+            if showGogoZones && gogoUserAdjusted {
+                Button {
+                    resetGogoToAuto()
+                } label: {
+                    Text("초기화/자동")
+                        .font(.paperlogy(11, weight: .medium))
+                        .foregroundStyle(AppTheme.background)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(AppTheme.down.opacity(0.85)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("고고저 자동 탐지로 초기화")
+            }
             ForEach(availableLearnModes, id: \.self) { mode in
                 let isOn = learnModes.contains(mode)
                 Button {
@@ -1276,14 +1462,25 @@ private struct ChartWidthPreferenceKey: PreferenceKey {
     }
 }
 
+private struct PriceChartHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 260
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 /// UIKit overlay so pinch + horizontal pan win over the parent SwiftUI ScrollView.
 /// Vertical pans do not begin, so the page can still scroll.
+/// When a 고고저 ①/② hit succeeds, pan is consumed as pivot drag instead of window pan.
 private struct ChartGestureOverlay: UIViewRepresentable {
     var onPinchBegan: () -> Void
     var onPinchChanged: (CGFloat) -> Void
     var onPinchEnded: () -> Void
-    var onPanBegan: () -> Void
-    var onPanChanged: (CGFloat) -> Void
+    /// Pure hit-test used from gestureRecognizerShouldBegin (no SwiftUI state writes).
+    var hitTestPivot: (CGPoint, CGSize) -> Int?
+    /// Return true to claim the pan as a pivot drag (skip chart window pan).
+    var onPanBegan: (CGPoint, CGSize) -> Bool
+    var onPanChanged: (_ dx: CGFloat, _ point: CGPoint, _ size: CGSize) -> Void
     var onPanEnded: () -> Void
 
     func makeUIView(context: Context) -> ChartGestureUIView {
@@ -1296,6 +1493,7 @@ private struct ChartGestureOverlay: UIViewRepresentable {
         context.coordinator.onPinchBegan = onPinchBegan
         context.coordinator.onPinchChanged = onPinchChanged
         context.coordinator.onPinchEnded = onPinchEnded
+        context.coordinator.hitTestPivot = hitTestPivot
         context.coordinator.onPanBegan = onPanBegan
         context.coordinator.onPanChanged = onPanChanged
         context.coordinator.onPanEnded = onPanEnded
@@ -1307,6 +1505,7 @@ private struct ChartGestureOverlay: UIViewRepresentable {
             onPinchBegan: onPinchBegan,
             onPinchChanged: onPinchChanged,
             onPinchEnded: onPinchEnded,
+            hitTestPivot: hitTestPivot,
             onPanBegan: onPanBegan,
             onPanChanged: onPanChanged,
             onPanEnded: onPanEnded
@@ -1317,21 +1516,25 @@ private struct ChartGestureOverlay: UIViewRepresentable {
         var onPinchBegan: () -> Void
         var onPinchChanged: (CGFloat) -> Void
         var onPinchEnded: () -> Void
-        var onPanBegan: () -> Void
-        var onPanChanged: (CGFloat) -> Void
+        var hitTestPivot: (CGPoint, CGSize) -> Int?
+        var onPanBegan: (CGPoint, CGSize) -> Bool
+        var onPanChanged: (CGFloat, CGPoint, CGSize) -> Void
         var onPanEnded: () -> Void
+        var draggingPivot = false
 
         init(
             onPinchBegan: @escaping () -> Void,
             onPinchChanged: @escaping (CGFloat) -> Void,
             onPinchEnded: @escaping () -> Void,
-            onPanBegan: @escaping () -> Void,
-            onPanChanged: @escaping (CGFloat) -> Void,
+            hitTestPivot: @escaping (CGPoint, CGSize) -> Int?,
+            onPanBegan: @escaping (CGPoint, CGSize) -> Bool,
+            onPanChanged: @escaping (CGFloat, CGPoint, CGSize) -> Void,
             onPanEnded: @escaping () -> Void
         ) {
             self.onPinchBegan = onPinchBegan
             self.onPinchChanged = onPinchChanged
             self.onPinchEnded = onPinchEnded
+            self.hitTestPivot = hitTestPivot
             self.onPanBegan = onPanBegan
             self.onPanChanged = onPanChanged
             self.onPanEnded = onPanEnded
@@ -1388,15 +1591,19 @@ fileprivate final class ChartGestureUIView: UIView, UIGestureRecognizerDelegate 
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         let dx = gesture.translation(in: self).x
+        let point = gesture.location(in: self)
+        let size = bounds.size
         switch gesture.state {
         case .began:
-            coordinator?.onPanBegan()
-            coordinator?.onPanChanged(dx)
+            let claimed = coordinator?.onPanBegan(point, size) ?? false
+            coordinator?.draggingPivot = claimed
+            coordinator?.onPanChanged(dx, point, size)
         case .changed:
-            coordinator?.onPanChanged(dx)
+            coordinator?.onPanChanged(dx, point, size)
         case .ended, .cancelled:
-            coordinator?.onPanChanged(dx)
+            coordinator?.onPanChanged(dx, point, size)
             coordinator?.onPanEnded()
+            coordinator?.draggingPivot = false
         default:
             break
         }
@@ -1404,6 +1611,10 @@ fileprivate final class ChartGestureUIView: UIView, UIGestureRecognizerDelegate 
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+        let point = pan.location(in: self)
+        if coordinator?.hitTestPivot(point, bounds.size) != nil {
+            return true
+        }
         let t = pan.translation(in: self)
         let v = pan.velocity(in: self)
         let dx = abs(t.x) > 0.5 ? t.x : v.x

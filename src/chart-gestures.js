@@ -32,13 +32,23 @@ function nextOffset(startOffset, translationX, chartWidth, visibleCount, total) 
   return clamp((startOffset || 0) + deltaBars, 0, maxOffset);
 }
 
+/** Window covering fromIndex (with padding) through the latest bar — 고고저 auto-fit. */
+function viewCoveringFromIndex(fromIndex, total, paddingBefore = 8, minCount = MIN_COUNT) {
+  const safeTotal = Math.max(0, total || 0);
+  if (!safeTotal) return { offset: 0, count: minCount };
+  const start = Math.max(0, Math.min(fromIndex, safeTotal - 1) - Math.max(0, paddingBefore));
+  const count = Math.max(minCount, safeTotal - start);
+  return { offset: 0, count: clamp(count, minCount, Math.max(minCount, safeTotal)) };
+}
+
 const ChartGestures = {
   MIN_COUNT,
   touchDistance,
   isHorizontalPan,
   nextVisibleCount,
   nextOffset,
+  viewCoveringFromIndex,
 };
 
 export default ChartGestures;
-export { MIN_COUNT, touchDistance, isHorizontalPan, nextVisibleCount, nextOffset };
+export { MIN_COUNT, touchDistance, isHorizontalPan, nextVisibleCount, nextOffset, viewCoveringFromIndex };
