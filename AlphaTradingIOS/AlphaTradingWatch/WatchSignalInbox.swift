@@ -25,6 +25,14 @@ final class WatchSignalInbox: NSObject, ObservableObject, WCSessionDelegate {
         apply(session.receivedApplicationContext)
     }
 
+    // Required when this target is compiled against the iOS SDK (Xcode
+    // simulator CI builds the Watch companion as an iPhone-simulator dependency).
+    func sessionDidBecomeInactive(_ session: WCSession) {}
+
+    func sessionDidDeactivate(_ session: WCSession) {
+        session.activate()
+    }
+
     func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
         apply(applicationContext)
     }

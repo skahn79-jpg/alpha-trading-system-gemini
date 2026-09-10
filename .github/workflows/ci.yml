@@ -55,6 +55,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            SWIFT_VERSION=5.0 \
             test
 
       - name: Dump build diagnostics on failure
