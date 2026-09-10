@@ -12,6 +12,7 @@ struct StockDetailView: View {
     @StateObject private var chartVM = ChartViewModel()
     @StateObject private var analysisVM = AnalysisViewModel()
     @ObservedObject private var favorites = FavoritesStore.shared
+    @ObservedObject private var inbox = SignalInboxStore.shared
     @State private var tab: StockDetailTab = .chart
 
     var body: some View {
@@ -120,6 +121,7 @@ struct StockDetailView: View {
             Text("차트")
                 .font(.paperlogy(16, weight: .semibold))
                 .foregroundStyle(AppTheme.textPrimary)
+            SignalBannerView(signals: inbox.signals.filter { $0.code == stock.code })
             ChartView(code: stock.code, kind: stock.kind)
 
             if stock.kind == .kr {

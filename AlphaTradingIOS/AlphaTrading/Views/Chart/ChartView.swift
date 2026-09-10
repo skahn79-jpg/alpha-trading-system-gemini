@@ -17,6 +17,7 @@ struct ChartView: View {
 
     // 학습 모드: 켜진 오버레이 집합 (비어 있으면 기존 차트와 동일)
     @State private var learnModes: Set<LearnMode> = []
+    @State private var showGogoZones = true
 
     // AI 예측 (kr 전용) — 예측 칩을 켤 때 1회 로드
     @State private var prediction: PredictResponse?
@@ -34,6 +35,7 @@ struct ChartView: View {
             .padding(.top, 10)
 
             learnChipRow
+            SignalBannerView(signals: chartSignals)
 
             if viewModel.isLoading && viewModel.candles.isEmpty {
                 LoadingView(message: "차트 로딩...")
@@ -105,13 +107,14 @@ struct ChartView: View {
         .accessibilityHint("두 손가락으로 확대 축소하고, 좌우로 밀어 과거 차트를 봅니다.")
     }
 
+    @ViewBuilder
     private var chartWindowBar: some View {
         HStack(spacing: 8) {
             Text("두 손가락 확대/축소 · 좌우로 밀어 과거 보기")
                 .font(.paperlogy(10))
                 .foregroundStyle(AppTheme.textSecondary)
             Spacer()
-            Text("\(displayCandles.count)봉 / 전체 \(viewModel.candles.count)봉")
+            Text("\(displayCandles.count)봉 / 전체 \(viewModel.candles.count)봉 · ATR \(String(format: "%.1f", atrPct * 100))%")
                 .font(.paperlogy(10, weight: .medium))
                 .foregroundStyle(AppTheme.textSecondary)
             if chartWindow.offset > 0 {
@@ -125,7 +128,30 @@ struct ChartView: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.bottom, 8)
+        .padding(.bottom, 4)
+        if let zones = gogoZones, showGogoZones {
+            Text(zones.comment)
+                .font(.paperlogy(10))
+                .foregroundStyle(AppTheme.textSecondary)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 4)
+        }
+        if let gap = openingGap {
+            Text(String(format: "시초 갭 %+.1f%% (전일 %@ → 시가 %@)", gap.pct, Self.priceLabel(gap.prevClose), Self.priceLabel(gap.open)))
+                .font(.paperlogy(10))
+                .foregroundStyle(gap.pct >= 0 ? AppTheme.up : AppTheme.down)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 4)
+        }
+        if let tf = MarketSignalEngine.multiTimeframeSummary(candles: viewModel.candles) {
+            Text(tf)
+                .font(.paperlogy(10))
+                .foregroundStyle(AppTheme.textSecondary)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+        } else {
+            Spacer().frame(height: 4)
+        }
     }
 
     private func resetWindow() {
@@ -184,6 +210,17 @@ struct ChartView: View {
                     .lineStyle(StrokeStyle(lineWidth: 1.2))
             }
 
+            if showGogoZones { gogoZoneOverlay }
+            if let poc = volumePOC {
+                RuleMark(y: .value("POC", poc))
+                    .foregroundStyle(Color.orange.opacity(0.7))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 3]))
+                    .annotation(position: .trailing, alignment: .trailing) {
+                        Text("POC \(Self.priceLabel(poc))")
+                            .font(.paperlogy(8))
+                            .foregroundStyle(Color.orange)
+                    }
+            }
             // 학습 오버레이 (켜진 모드만 그림)
             learnOverlays
         }
@@ -259,6 +296,74 @@ struct ChartView: View {
         return 2
     }
 
+    private var gogoZones: GogoZoneResult? {
+        GogoZoneDetector.detect(candles: viewModel.candles)
+    }
+
+    private var volumePOC: Double? {
+        MarketSignalEngine.volumePOC(candles: displayCandles)
+    }
+
+    private var openingGap: (prevClose: Double, open: Double, pct: Double)? {
+        MarketSignalEngine.openingGap(candles: viewModel.candles)
+    }
+
+    private var chartSignals: [PersonalSignal] {
+        let rate: Double? = {
+            guard viewModel.candles.count >= 2 else { return viewModel.quote?.changeRate }
+            let prev = viewModel.candles[viewModel.candles.count - 2].close
+            let last = viewModel.candles[viewModel.candles.count - 1].close
+            guard prev > 0 else { return viewModel.quote?.changeRate }
+            return ((last - prev) / prev) * 100
+        }()
+        return MarketSignalEngine.evaluate(
+            code: code,
+            name: viewModel.quote?.name ?? code,
+            changeRate: rate,
+            analysis: nil,
+            candles: viewModel.candles,
+            lastPrice: viewModel.candles.last?.close ?? viewModel.quote?.price
+        )
+    }
+
+    @ChartContentBuilder
+    private var gogoZoneOverlay: some ChartContent {
+        if let zones = gogoZones {
+            ForEach(displayCandles) { candle in
+                AreaMark(
+                    x: .value("Date", candle.date),
+                    yStart: .value("HighZoneLow", zones.highLow),
+                    yEnd: .value("HighZoneHigh", zones.highHigh)
+                )
+                .foregroundStyle(AppTheme.down.opacity(0.12))
+            }
+            ForEach(displayCandles) { candle in
+                AreaMark(
+                    x: .value("Date", candle.date),
+                    yStart: .value("LowZoneLow", zones.lowLow),
+                    yEnd: .value("LowZoneHigh", zones.lowHigh)
+                )
+                .foregroundStyle(AppTheme.up.opacity(0.12))
+            }
+            RuleMark(y: .value("고점대", (zones.highLow + zones.highHigh) / 2))
+                .foregroundStyle(AppTheme.down.opacity(0.55))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                .annotation(position: .top, alignment: .leading) {
+                    Text("고점대 \(Self.priceLabel(zones.highLow))~\(Self.priceLabel(zones.highHigh))")
+                        .font(.paperlogy(8))
+                        .foregroundStyle(AppTheme.down)
+                }
+            RuleMark(y: .value("저점대", (zones.lowLow + zones.lowHigh) / 2))
+                .foregroundStyle(AppTheme.up.opacity(0.55))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                .annotation(position: .bottom, alignment: .leading) {
+                    Text("저점대 \(Self.priceLabel(zones.lowLow))~\(Self.priceLabel(zones.lowHigh))")
+                        .font(.paperlogy(8))
+                        .foregroundStyle(AppTheme.up)
+                }
+        }
+    }
+
     private var displayDateSet: Set<String> {
         Set(displayCandles.map(\.date))
     }
@@ -319,6 +424,14 @@ struct ChartView: View {
     private var yDomain: ClosedRange<Double> {
         var lows = displayCandles.map { Double($0.low) } + bollingerSeries.map(\.lower)
         var highs = displayCandles.map { Double($0.high) } + bollingerSeries.map(\.upper)
+        if showGogoZones, let zones = gogoZones {
+            lows.append(zones.lowLow)
+            highs.append(zones.highHigh)
+        }
+        if let poc = volumePOC {
+            lows.append(poc)
+            highs.append(poc)
+        }
         if learnModes.contains(.ichimoku) {
             let cloud = ichimokuSeries
             lows += cloud.map { min($0.spanA, $0.spanB) }
@@ -403,6 +516,18 @@ struct ChartView: View {
     private var learnChipRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+            Button {
+                showGogoZones.toggle()
+            } label: {
+                Text("고고저")
+                    .font(.paperlogy(11, weight: .medium))
+                    .foregroundStyle(showGogoZones ? AppTheme.background : AppTheme.textSecondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(showGogoZones ? AppTheme.accent : Color.white.opacity(0.06)))
+                    .overlay(Capsule().stroke(showGogoZones ? Color.clear : AppTheme.line, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
             ForEach(availableLearnModes, id: \.self) { mode in
                 let isOn = learnModes.contains(mode)
                 Button {

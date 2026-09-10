@@ -32,6 +32,7 @@ enum AlertMonitor {
     // MARK: - 조건 검사
 
     static func checkNow() async {
+        await checkWatchlistSignals()
         guard let data = UserDefaults.standard.data(forKey: alertsKey),
               let alerts = try? JSONDecoder().decode([TradingAlert].self, from: data) else { return }
         let active = alerts.filter(\.active)
@@ -72,6 +73,63 @@ enum AlertMonitor {
                 markFired(alert.id)
             }
         }
+    }
+
+    /// 관심종목만 급락/돌파/공포탐욕/뉴스 스캔. 주문 없음.
+    static func checkWatchlistSignals() async {
+        let watchlist = SignalInbox.watchlistCodes()
+        guard !watchlist.isEmpty else { return }
+        let codes = Array(Set(watchlist.map(\.code))).prefix(10)
+        let batch: [BatchQuoteItem] = (try? await APIClient.shared.get(
+            "/api/quotes",
+            query: [
+                URLQueryItem(name: "codes", value: codes.joined(separator: ",")),
+                URLQueryItem(name: "analyze", value: "1"),
+            ]
+        )) ?? []
+        let axios = try? await APIClient.shared.get("/api/news/axios") as AxiosNewsResponse
+        let trump = try? await APIClient.shared.get("/api/news/trump") as TrumpNewsResponse
+        var titles = axios?.items?.map(\.title) ?? []
+        titles += trump?.topics?.flatMap { $0.items.map(\.title) } ?? []
+        var fearGreed: Int?
+        if watchlist.contains(where: { $0.kind == .crypto }) {
+            if let report = try? await APIClient.shared.get("/api/crypto/report") as CryptoReportResponse {
+                fearGreed = report.sentiment?.value
+            }
+        }
+        let byCode = Dictionary(uniqueKeysWithValues: batch.map { ($0.code, $0) })
+        var found: [PersonalSignal] = []
+        for stock in watchlist {
+            let quote = byCode[stock.code]
+            found += MarketSignalEngine.evaluate(
+                code: stock.code,
+                name: stock.name,
+                changeRate: quote?.changeRate,
+                analysis: quote?.analysis,
+                lastPrice: quote?.price,
+                newsTitles: titles,
+                fearGreedValue: stock.kind == .crypto ? fearGreed : nil
+            )
+        }
+        let accepted = SignalInboxStore.shared.ingest(found)
+        WatchBridge.shared.pushHighSignals(SignalInboxStore.shared.signals)
+        for signal in accepted {
+            firePersonalSignal(signal)
+        }
+    }
+
+    private static func firePersonalSignal(_ signal: PersonalSignal) {
+        let content = UNMutableNotificationContent()
+        content.title = "\(signal.kind.label) · \(signal.name)"
+        content.body = signal.detail
+        content.sound = .default
+        content.userInfo = ["code": signal.code, "kind": signal.kind.rawValue]
+        let request = UNNotificationRequest(
+            identifier: "signal-\(signal.id)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
     }
 
     // MARK: - 로컬 푸시 (하루 1회 중복 방지)

@@ -8,6 +8,8 @@ struct DashboardView: View {
     @State private var trumpNews: TrumpNewsResponse?
     @State private var fx: FxResponse?
     @State private var sectorTrends: SectorTrendsResponse?
+    @State private var selectedSignalStock: Stock?
+    @ObservedObject private var inbox = SignalInboxStore.shared
     // 환율 실시간 갱신 (30초)
     private let fxTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
@@ -18,6 +20,10 @@ struct DashboardView: View {
                     Text("시장 요약")
                         .font(.paperlogy(22, weight: .bold))
                         .foregroundStyle(AppTheme.textPrimary)
+
+                    SignalBannerView(signals: inbox.signals) { signal in
+                        selectedSignalStock = Stock(code: signal.code, name: signal.name)
+                    }
 
                     if viewModel.isLoading && viewModel.indices.isEmpty {
                         LoadingView()
@@ -48,6 +54,20 @@ struct DashboardView: View {
             .navigationDestination(for: Stock.self) { stock in
                 StockDetailView(stock: stock)
             }
+            .background {
+                NavigationLink(
+                    destination: Group {
+                        if let dest = selectedSignalStock {
+                            StockDetailView(stock: dest)
+                        }
+                    },
+                    isActive: Binding(
+                        get: { selectedSignalStock != nil },
+                        set: { if !$0 { selectedSignalStock = nil } }
+                    )
+                ) { EmptyView() }
+                .hidden()
+            }
             .refreshable { await loadAll() }
             .task { await loadAll() }
             .onReceive(fxTimer) { _ in
@@ -65,6 +85,7 @@ struct DashboardView: View {
         async let trumpTask = try? APIClient.shared.get("/api/news/trump") as TrumpNewsResponse
         async let fxTask = try? APIClient.shared.get("/api/fx") as FxResponse
         async let sectorTask = try? APIClient.shared.get("/api/sector/trends") as SectorTrendsResponse
+        await AlertMonitor.checkWatchlistSignals()
         _ = await indexTask
         tradeReport = await tradeTask
         featured = await featuredTask

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AlertCenterView: View {
     @StateObject private var viewModel = AlertViewModel()
+    @ObservedObject private var inbox = SignalInboxStore.shared
     @State private var showAdd = false
     @State private var newCode = "005930"
     @State private var newName = "삼성전자"
@@ -25,6 +26,34 @@ struct AlertCenterView: View {
 
             if let error = viewModel.errorMessage {
                 Text(error).foregroundStyle(AppTheme.down).font(.paperlogy(13))
+            }
+
+            Section("위험 · 기회 (관심종목)") {
+                let signals = inbox.signals
+                if signals.isEmpty {
+                    Text("관심종목에서 급락·돌파·공포탐욕·뉴스 신호가 생기면 여기에 모입니다. Watch에는 높음만 전달됩니다.")
+                        .font(.paperlogy(12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                } else {
+                    ForEach(signals.prefix(20)) { signal in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(signal.kind.label)
+                                    .font(.paperlogy(11, weight: .bold))
+                                    .foregroundStyle(signal.opportunity ? AppTheme.up : AppTheme.down)
+                                Text(signal.name)
+                                    .font(.paperlogy(14, weight: .semibold))
+                                Spacer()
+                                Text(signal.severity.label)
+                                    .font(.paperlogy(11))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                            }
+                            Text(signal.detail)
+                                .font(.paperlogy(12))
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                    }
+                }
             }
 
             Section("등록된 알림") {
@@ -140,9 +169,11 @@ struct AlertCenterView: View {
                 if !Task.isCancelled { searchResults = response?.results ?? [] }
             }
         }
+        .onAppear { inbox.reload() }
         .task {
             await viewModel.requestNotificationPermission()
             await viewModel.syncFromServer()
+            await AlertMonitor.checkWatchlistSignals()
         }
     }
 }

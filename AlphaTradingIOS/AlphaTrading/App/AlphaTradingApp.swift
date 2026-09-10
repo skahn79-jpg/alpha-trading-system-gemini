@@ -56,6 +56,7 @@ struct AlphaTradingApp: App {
     init() {
         APIConfig.bootstrapSecrets()
         AlertMonitor.registerBackgroundTask()
+        WatchBridge.shared.activate()
     }
 
     var body: some Scene {
