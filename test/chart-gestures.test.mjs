@@ -101,7 +101,66 @@ test("detectGogoZones finds declining high-to-high trendline", () => {
   assert.ok(zones.trendHigh1 && zones.trendHigh2);
   assert.ok(zones.trendHigh1.price > zones.trendHigh2.price);
   assert.ok(Number.isFinite(zones.trendLinePrice));
-  assert.ok(String(zones.comment).includes("추세선"));
+  assert.ok(String(zones.comment).includes("추세선") || String(zones.comment).includes("고점①"));
+});
+
+function gogoPairFixture({ lastClose = 150, lastLow = null, lastVolume = 1000, prevClose = null } = {}) {
+  const candles = [];
+  for (let i = 0; i < 40; i += 1) {
+    let high = 90 + i * 0.001;
+    let low = 80 - i * 0.001;
+    let close = 85;
+    let volume = 1000;
+    if (i === 8) { high = 160; low = 140; close = 150; } // 고점① global highest
+    else if (i === 22) { high = 140; low = 120; close = 128; } // 고점② later lower
+    else if (i === 28) { high = 112; low = 100; close = 105; } // later smaller pair (must not win)
+    else if (i === 34) { high = 104; low = 96; close = 100; }
+    else if (i === 14) { high = 88; low = 70; close = 80; } // swing low for band / structure
+    if (i === 38 && prevClose != null) close = prevClose;
+    if (i === 39) {
+      close = lastClose;
+      high = Math.max(high, lastClose + 2);
+      low = lastLow == null ? Math.min(low, lastClose - 2) : lastLow;
+      volume = lastVolume;
+    }
+    candles.push({ date: `d${String(i).padStart(2, "0")}`, open: close, high, low, close, volume });
+  }
+  return candles;
+}
+
+test("findGoGoJeoTrend prefers global highest then later lower, not a later smaller pair", () => {
+  const candles = gogoPairFixture({ lastClose: 150, lastLow: 145, lastVolume: 2500, prevClose: 90 });
+  const trend = NIndicators.findGoGoJeoTrend(candles);
+  assert.ok(trend);
+  assert.equal(trend.p1.price, 160);
+  assert.equal(trend.p1.index, 8);
+  assert.equal(trend.p2.price, 140);
+  assert.equal(trend.p2.index, 22);
+  assert.notEqual(trend.p1.price, 112);
+  const zones = NIndicators.detectGogoZones(candles);
+  assert.equal(zones.trendHigh1.price, 160);
+  assert.equal(zones.trendHigh2.price, 140);
+  assert.ok(zones.trendHigh1.price > zones.trendHigh2.price);
+});
+
+test("detectGogoZones marks freshBreak and lowHold on confirmed close above the line", () => {
+  const candles = gogoPairFixture({ lastClose: 150, lastLow: 145, lastVolume: 2500, prevClose: 90 });
+  const zones = NIndicators.detectGogoZones(candles);
+  assert.equal(zones.isBreakout, true);
+  assert.equal(zones.freshBreak, true);
+  assert.equal(zones.lowHold, true);
+  assert.equal(zones.confirmedBreakout, true);
+  assert.equal(zones.isBreakoutFailure, false);
+  assert.match(zones.phase, /돌파/);
+});
+
+test("detectGogoZones does not confirm breakout when low structure fails after close above line", () => {
+  const candles = gogoPairFixture({ lastClose: 150, lastLow: 60, lastVolume: 2500, prevClose: 90 });
+  const zones = NIndicators.detectGogoZones(candles);
+  assert.equal(zones.isBreakout, true);
+  assert.equal(zones.isBreakoutFailure, true);
+  assert.equal(zones.confirmedBreakout, false);
+  assert.equal(zones.phase, "돌파 실패");
 });
 
 test("personalAlerts covers 급락 돌파 공포탐욕 뉴스", () => {

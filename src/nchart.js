@@ -10,7 +10,7 @@
  *   - current-price yellow badge + dotted line (distinct from SMA50 green)
  *   - orange crosshair readout (price / date / oscillator)
  *   - MA100↔MA200 translucent cloud
- *   - 고고저 high/low zone bands (zoneHigh / zoneLow)
+ *   - 고고저 고점대/저점대 + 고점①(최고)→고점②(이후 낮은 고점) 추세선
  *   - larger date-axis (~20px) and price/osc fonts
  *   - future gutter capped at 30 bars
  */

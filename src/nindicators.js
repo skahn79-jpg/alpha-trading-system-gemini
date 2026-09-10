@@ -524,81 +524,288 @@ function formatZonePrice(value) {
   return (Math.round(n * 100) / 100).toFixed(2);
 }
 
-function decliningHighPair(highs, minGaps = [10, 5, 3]) {
-  if (!Array.isArray(highs) || highs.length < 2) return null;
-  for (const gap of minGaps) {
-    for (let i = highs.length - 2; i >= 0; i -= 1) {
-      for (let j = highs.length - 1; j > i; j -= 1) {
-        const h1 = highs[i];
-        const h2 = highs[j];
-        if (h1.price > h2.price && h2.i - h1.i >= gap) return { high1: h1, high2: h2 };
-      }
-    }
-  }
-  return null;
+/** Pivot as used by nchart (`i`) and trading-platform (`index` / `value`). */
+function gogoPivot(index, price, date) {
+  return { i: index, index, price, value: price, date };
 }
 
 /**
- * detectGogoZones — 고점대/저점대 (고고저). Matches iOS GogoZoneDetector.
- * Swing highs/lows need 2-bar confirmation; last 3 of each form a band.
- * Also finds 고점①→고점② declining trendline (reference chart.js parity).
+ * findGoGoJeoTrend — APK / trading-platform.jsx reference.
+ * ±2 pivot highs → 고점① = global highest → 고점② = later lower (tail high fallback).
+ */
+function findGoGoJeoTrend(data) {
+  if (!data || data.length < 10) return null;
+  const pivots = [];
+  for (let i = 2; i < data.length - 2; i += 1) {
+    const hi = num(data[i].high);
+    if (
+      Number.isFinite(hi) &&
+      hi >= num(data[i - 1].high) &&
+      hi >= num(data[i - 2].high) &&
+      hi >= num(data[i + 1].high) &&
+      hi >= num(data[i + 2].high)
+    ) {
+      pivots.push(gogoPivot(i, hi, data[i].date));
+    }
+  }
+  if (!pivots.length) {
+    let maxIndex = 0;
+    for (let i = 1; i < data.length; i += 1) {
+      if (num(data[i].high) > num(data[maxIndex].high)) maxIndex = i;
+    }
+    pivots.push(gogoPivot(maxIndex, num(data[maxIndex].high), data[maxIndex].date));
+  }
+  const highest = pivots.reduce((best, p) => (p.price > best.price ? p : best), pivots[0]);
+  const after = pivots.filter((p) => p.index > highest.index + 3);
+  let second = after.find((p) => p.price < highest.price);
+  if (!second && after.length) second = after[0];
+  if (!second) {
+    const tailStart = Math.min(
+      data.length - 1,
+      highest.index + Math.max(5, Math.floor((data.length - highest.index) / 2))
+    );
+    let bestIdx = tailStart;
+    for (let i = tailStart; i < data.length; i += 1) {
+      if (num(data[i].high) > num(data[bestIdx].high)) bestIdx = i;
+    }
+    second = gogoPivot(bestIdx, num(data[bestIdx].high), data[bestIdx].date);
+  }
+  if (!second || second.index <= highest.index) return null;
+  return { p1: highest, p2: second };
+}
+
+function projectGogoTrendValue(p1, p2, targetIndex) {
+  if (!p1 || !p2) return null;
+  const span = Math.max(1, p2.index - p1.index);
+  const slope = (p2.price - p1.price) / span;
+  return p1.price + slope * (targetIndex - p1.index);
+}
+
+function smaLast(data, period) {
+  if (!data || data.length < period) return 0;
+  const slice = data.slice(-period);
+  return slice.reduce((sum, d) => sum + num(d.close), 0) / period;
+}
+
+function avgVolumeLast(data, period = 20) {
+  if (!data || !data.length) return 0;
+  const slice = data.slice(-period);
+  return slice.reduce((sum, d) => sum + num(d.volume, 0), 0) / Math.max(1, slice.length);
+}
+
+/** Last-N simple RSI — matches trading-platform calcRSI (not Wilder). */
+function calcGogoRSI(data, period = 14) {
+  if (!data || data.length <= period) return null;
+  let gains = 0;
+  let losses = 0;
+  for (let i = data.length - period; i < data.length; i += 1) {
+    const diff = num(data[i].close) - num(data[i - 1].close);
+    if (diff >= 0) gains += diff;
+    else losses += Math.abs(diff);
+  }
+  const avgGain = gains / period;
+  const avgLoss = losses / period;
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return Math.round((100 - 100 / (1 + rs)) * 10) / 10;
+}
+
+function analyzeGogojeoLowStructure({ swingLows = [], lastIndex, low, close, ma20, isBreakout, trendLinePrice }) {
+  const previousSwingLow = swingLows.filter((l) => l.index < lastIndex).slice(-2, -1)[0];
+  const recentSwingLow = swingLows.filter((l) => l.index < lastIndex).slice(-1)[0];
+  const lowChangeRate = previousSwingLow && recentSwingLow
+    ? ((recentSwingLow.price - previousSwingLow.price) / previousSwingLow.price) * 100
+    : 0;
+  const isLowRising = Boolean(previousSwingLow && recentSwingLow && recentSwingLow.price > previousSwingLow.price);
+  const isLowFlat = Boolean(previousSwingLow && recentSwingLow && Math.abs(lowChangeRate) <= 1.2);
+  const isLowFalling = Boolean(previousSwingLow && recentSwingLow && recentSwingLow.price < previousSwingLow.price);
+  const isLowProtected = recentSwingLow ? low > recentSwingLow.price : false;
+  const isLowBreakdown = recentSwingLow ? low < recentSwingLow.price : false;
+  const isCloseBelowRecentLow = recentSwingLow ? close < recentSwingLow.price : false;
+  const isBelowMA20 = ma20 ? close < ma20 : false;
+  const isBreakoutFailure = Boolean(isBreakout && isLowBreakdown);
+  const isStrongRisk = Boolean(isLowBreakdown && isBelowMA20);
+
+  let lowStructure = "저점 확인 필요";
+  let lowSignal = "중립";
+  let lowComment = "최근 저점 구조가 충분하지 않아 보조 확인이 필요합니다.";
+  if (isBreakoutFailure) {
+    lowStructure = "돌파 실패";
+    lowSignal = "위험";
+    lowComment = "고고저 돌파 이후 저점이 이탈되어 돌파 실패 가능성이 큽니다.";
+  } else if (isStrongRisk || isCloseBelowRecentLow) {
+    lowStructure = "저점 이탈";
+    lowSignal = "강한 위험";
+    lowComment = "최근 저점과 20일선 방어가 동시에 약해져 추가 하락 위험이 큽니다.";
+  } else if (isLowBreakdown || isLowFalling) {
+    lowStructure = "저점 하락";
+    lowSignal = "위험";
+    lowComment = "저점이 낮아지는 구조입니다. 매수세 방어 실패 가능성이 있어 관망이 우선입니다.";
+  } else if (isLowRising && isLowProtected) {
+    lowStructure = "저점 상승";
+    lowSignal = "상승 전환";
+    lowComment = "저점이 이전보다 높아져 매수세가 상단에서 유입되는 상승 전환 구조입니다.";
+  } else if (isLowProtected) {
+    lowStructure = "저점 보호";
+    lowSignal = "관심";
+    lowComment = "최근 저점은 방어 중입니다. 고고저 돌파와 거래량 동반 여부를 추가 확인합니다.";
+  } else if (isLowFlat) {
+    lowStructure = "저점 횡보";
+    lowSignal = "관찰";
+    lowComment = "저점이 크게 무너지지는 않았지만 상승 저점 구조는 아직 약합니다.";
+  }
+  return {
+    previousSwingLow,
+    recentSwingLow,
+    lowChangeRate: Number(lowChangeRate.toFixed(2)),
+    lowStructure,
+    lowSignal,
+    lowComment,
+    isLowRising,
+    isLowFlat,
+    isLowFalling,
+    isLowProtected,
+    isLowBreakdown,
+    isCloseBelowRecentLow,
+    isBreakoutFailure,
+    isStrongRisk,
+    trendLinePrice,
+  };
+}
+
+/** calcChartMethodSignals — closeBreak / freshBreak / lowHold / volume / RSI / MA. */
+function calcGogoChartMethodSignals(data, p1, p2, swingLows) {
+  const last = data[data.length - 1] || {};
+  const prev = data[data.length - 2] || last;
+  const currentClose = num(last.close, 0);
+  const currentLow = num(last.low, 0);
+  const prevClose = num(prev.close, 0);
+  const ma20Last = smaLast(data, 20);
+  const ma60Last = smaLast(data, 60);
+  const volAvg20 = avgVolumeLast(data, 20);
+  const volumeRatio = volAvg20 > 0 ? num(last.volume, 0) / volAvg20 : 0;
+  const rsi14 = calcGogoRSI(data, 14);
+  const trendLineNow = projectGogoTrendValue(p1, p2, data.length - 1);
+  const trendLinePrev = projectGogoTrendValue(p1, p2, data.length - 2);
+  const closeBreak = trendLineNow != null ? currentClose >= trendLineNow : false;
+  const lowHold = trendLineNow != null ? currentLow >= trendLineNow : false;
+  const prevBelow = trendLinePrev != null ? prevClose < trendLinePrev : false;
+  const freshBreak = closeBreak && prevBelow;
+  const distanceToGJ = trendLineNow ? ((currentClose - trendLineNow) / trendLineNow) * 100 : 0;
+  const above20 = ma20Last ? currentClose >= ma20Last : false;
+  const above60 = ma60Last ? currentClose >= ma60Last : false;
+  const lowInfo = analyzeGogojeoLowStructure({
+    swingLows,
+    lastIndex: data.length - 1,
+    low: currentLow,
+    close: currentClose,
+    ma20: ma20Last,
+    isBreakout: closeBreak,
+    trendLinePrice: trendLineNow,
+  });
+
+  let phase = "관찰";
+  if (freshBreak && lowHold && volumeRatio >= 1.2) phase = "고고저 신규 돌파";
+  else if (closeBreak && lowHold) phase = "돌파 후 유지";
+  else if (distanceToGJ >= -2 && distanceToGJ < 0) phase = "돌파 임박";
+  else if (above20 && !closeBreak) phase = "20선 지지 확인";
+  else if (!above20) phase = "눌림 또는 약세";
+  if (lowInfo.isBreakoutFailure) phase = "돌파 실패";
+
+  return {
+    closeBreak,
+    lowHold,
+    freshBreak,
+    volumeRatio,
+    rsi14,
+    above20,
+    above60,
+    trendLineNow,
+    distanceToGJ,
+    phase,
+    lowInfo,
+    confirmedBreakout: Boolean(closeBreak && !lowInfo.isBreakoutFailure),
+  };
+}
+
+function swingPivots(rows, kind) {
+  const out = [];
+  if (rows.length < 5) return out;
+  for (let i = 2; i < rows.length - 2; i += 1) {
+    const c = rows[i];
+    if (kind === "high") {
+      const hi = num(c.high);
+      if (
+        Number.isFinite(hi) &&
+        hi >= num(rows[i - 1].high) && hi >= num(rows[i - 2].high) &&
+        hi >= num(rows[i + 1].high) && hi >= num(rows[i + 2].high)
+      ) {
+        out.push(gogoPivot(i, hi, c.date));
+      }
+    } else {
+      const lo = num(c.low);
+      if (
+        Number.isFinite(lo) &&
+        lo <= num(rows[i - 1].low) && lo <= num(rows[i - 2].low) &&
+        lo <= num(rows[i + 1].low) && lo <= num(rows[i + 2].low)
+      ) {
+        out.push(gogoPivot(i, lo, c.date));
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * detectGogoZones — 고점대/저점대 overlay + 고고저 추세선.
+ * Pair = findGoGoJeoTrend (highest then later lower). Breakout = calcChartMethodSignals.
  */
 function detectGogoZones(candles = []) {
   const rows = Array.isArray(candles) ? candles : [];
-  if (rows.length < 12) return null;
-  const highs = [];
-  const lows = [];
-  for (let i = 2; i < rows.length - 2; i += 1) {
-    const c = rows[i];
-    const hi = num(c.high);
-    const lo = num(c.low);
-    if (
-      Number.isFinite(hi) &&
-      hi >= num(rows[i - 1].high) && hi >= num(rows[i - 2].high) &&
-      hi >= num(rows[i + 1].high) && hi >= num(rows[i + 2].high)
-    ) {
-      highs.push({ i, price: hi, date: c.date });
-    }
-    if (
-      Number.isFinite(lo) &&
-      lo <= num(rows[i - 1].low) && lo <= num(rows[i - 2].low) &&
-      lo <= num(rows[i + 1].low) && lo <= num(rows[i + 2].low)
-    ) {
-      lows.push({ i, price: lo, date: c.date });
-    }
-  }
+  if (rows.length < 10) return null;
+  const highs = swingPivots(rows, "high");
+  const lows = swingPivots(rows, "low");
   const recentHighs = highs.slice(-3);
   const recentLows = lows.slice(-3);
-  if (!recentHighs.length || !recentLows.length) return null;
-  const hiPrices = recentHighs.map((x) => x.price);
-  const loPrices = recentLows.map((x) => x.price);
+  const trend = findGoGoJeoTrend(rows);
+  if (!recentHighs.length && !trend) return null;
+
+  const hiPrices = recentHighs.length ? recentHighs.map((x) => x.price) : highs.map((x) => x.price);
+  const loSource = recentLows.length ? recentLows : rows.slice(-10).map((c, idx) => (
+    gogoPivot(Math.max(0, rows.length - 10) + idx, num(c.low), c.date)
+  ));
+  const loPrices = loSource.map((x) => x.price);
+  if (!hiPrices.length || !loPrices.length) return null;
   const highLow = Math.min(...hiPrices);
   const highHigh = Math.max(...hiPrices);
   const lowLow = Math.min(...loPrices);
   const lowHigh = Math.max(...loPrices);
   const declining = recentHighs.length >= 2 && recentHighs[recentHighs.length - 1].price < recentHighs[0].price;
   const risingLows = recentLows.length >= 2 && recentLows[recentLows.length - 1].price > recentLows[0].price;
-  const pair = decliningHighPair(highs);
-  let trendLinePrice = null;
-  let isBreakout = false;
-  if (pair) {
-    const span = pair.high2.i - pair.high1.i;
-    if (span > 0) {
-      const slope = (pair.high2.price - pair.high1.price) / span;
-      trendLinePrice = pair.high1.price + slope * (rows.length - 1 - pair.high1.i);
-      const lastClose = num(rows[rows.length - 1].close);
-      isBreakout = Number.isFinite(lastClose) && lastClose > trendLinePrice;
-    }
-  }
+
+  const p1 = trend ? trend.p1 : null;
+  const p2 = trend ? trend.p2 : null;
+  const signals = p1 && p2 ? calcGogoChartMethodSignals(rows, p1, p2, lows) : null;
+  const trendLinePrice = signals && Number.isFinite(signals.trendLineNow) ? signals.trendLineNow : null;
+  const isBreakout = Boolean(signals && signals.closeBreak);
+
   let comment = `고점대 ${formatZonePrice(highLow)}~${formatZonePrice(highHigh)}, 저점대 ${formatZonePrice(lowLow)}~${formatZonePrice(lowHigh)}.`;
+  if (p1 && p2) {
+    comment += ` 고점① ${p1.date || ""} → 고점② ${p2.date || ""} (높은 고점 이후 낮은 고점).`;
+  }
   if (declining && risingLows) comment += " 고점은 낮아지고 저점은 높아지는 고고저 수렴.";
   else if (declining) comment += " 하락 고점 구조 — 추세선 아래 압력.";
   else if (risingLows) comment += " 상승 저점 구조 — 지지가 우상향.";
-  if (Number.isFinite(trendLinePrice)) {
-    comment += isBreakout
-      ? ` 종가가 고고저 추세선(${formatZonePrice(trendLinePrice)}) 위 — 돌파.`
-      : ` 종가가 고고저 추세선(${formatZonePrice(trendLinePrice)}) 아래 — 감시.`;
+  if (signals && Number.isFinite(trendLinePrice)) {
+    const extras = [];
+    if (signals.freshBreak) extras.push("신규(전일 종가 아래→오늘 위)");
+    if (signals.lowHold) extras.push("저가 추세선 위 유지");
+    if (signals.volumeRatio >= 1.2) extras.push(`거래량 ${signals.volumeRatio.toFixed(1)}배`);
+    comment += ` ${signals.phase}. 종가 ${formatZonePrice(rows[rows.length - 1].close)} / 추세선 ${formatZonePrice(trendLinePrice)}.`;
+    if (extras.length) comment += ` ${extras.join(" · ")}.`;
+    if (signals.lowInfo && signals.lowInfo.lowComment) comment += ` ${signals.lowInfo.lowComment}`;
   }
+
   return {
     highLow,
     highHigh,
@@ -611,10 +818,18 @@ function detectGogoZones(candles = []) {
     zoneLow: { low: lowLow, high: lowHigh },
     swingHighs: recentHighs,
     swingLows: recentLows,
-    trendHigh1: pair ? pair.high1 : null,
-    trendHigh2: pair ? pair.high2 : null,
+    trendHigh1: p1,
+    trendHigh2: p2,
     trendLinePrice,
     isBreakout,
+    freshBreak: Boolean(signals && signals.freshBreak),
+    lowHold: Boolean(signals && signals.lowHold),
+    isBreakoutFailure: Boolean(signals && signals.lowInfo && signals.lowInfo.isBreakoutFailure),
+    volumeRatio: signals ? signals.volumeRatio : 0,
+    phase: signals ? signals.phase : "",
+    confirmedBreakout: Boolean(signals && signals.confirmedBreakout),
+    lowStructure: signals && signals.lowInfo ? signals.lowInfo.lowStructure : "",
+    lowComment: signals && signals.lowInfo ? signals.lowInfo.lowComment : "",
   };
 }
 
@@ -729,6 +944,7 @@ const NIndicators = {
   accuracy,
   personalAlerts,
   detectGogoZones,
+  findGoGoJeoTrend,
   volumeProfile,
 };
 
@@ -749,5 +965,6 @@ export {
   accuracy,
   personalAlerts,
   detectGogoZones,
+  findGoGoJeoTrend,
   volumeProfile,
 };

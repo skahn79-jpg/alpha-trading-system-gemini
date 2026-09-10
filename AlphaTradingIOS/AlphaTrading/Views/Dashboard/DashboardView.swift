@@ -110,7 +110,7 @@ struct DashboardView: View {
                 ForEach(gogoBreakouts.items) { item in
                     NavigationLink(value: item.asStock) {
                         HStack(alignment: .top, spacing: 8) {
-                            Text("돌파")
+                            Text(item.badgeLabel)
                                 .font(.paperlogy(10, weight: .bold))
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 3)
@@ -143,12 +143,12 @@ struct DashboardView: View {
 
     private var gogoEmptyText: String {
         if SignalInbox.watchlistCodes().isEmpty {
-            return "관심종목을 추가하면 고고저 추세선·고점대 돌파 종목이 여기에 표시됩니다."
+            return "관심종목을 추가하면 고고저 추세선 종가 돌파 종목이 여기에 표시됩니다."
         }
         if gogoBreakouts.isLoading && !gogoBreakouts.didLoad {
             return "관심종목 차트를 확인하는 중…"
         }
-        return "관심종목 중 고고저 추세선 또는 고점대를 상향 돌파한 종목이 없습니다."
+        return "관심종목 중 고고저 추세선을 종가 상향 돌파한 종목이 없습니다."
     }
 
     // MARK: - 실시간 환율

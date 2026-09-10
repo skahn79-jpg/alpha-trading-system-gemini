@@ -362,7 +362,7 @@ final class AlphaTradingTests: XCTestCase {
         )
         XCTAssertNotNil(item)
         XCTAssertTrue(item?.brokeTrend ?? false)
-        XCTAssertTrue(item?.detail.contains("돌파") ?? false)
+        XCTAssertFalse(item?.detail.isEmpty ?? true)
         XCTAssertEqual(item?.asStock.code, "005930")
     }
 
@@ -377,6 +377,68 @@ final class AlphaTradingTests: XCTestCase {
             candles: candles
         )
         XCTAssertNil(item)
+    }
+
+    func testGogoPrefersGlobalHighestThenLaterLowerPair() {
+        let candles = gogoPairFixture(lastClose: 150, lastLow: 145, lastVolume: 2500, prevClose: 90)
+        let pair = GogoZoneDetector.findGoGoJeoTrend(candles)
+        XCTAssertEqual(pair?.0.price, 160)
+        XCTAssertEqual(pair?.0.index, 8)
+        XCTAssertEqual(pair?.1.price, 140)
+        XCTAssertEqual(pair?.1.index, 22)
+        let zones = GogoZoneDetector.detect(candles: candles)
+        XCTAssertEqual(zones?.trendHigh1?.price, 160)
+        XCTAssertEqual(zones?.trendHigh2?.price, 140)
+        XCTAssertNotEqual(zones?.trendHigh1?.price, 112)
+        XCTAssertEqual(zones?.freshBreak, true)
+        XCTAssertEqual(zones?.lowHold, true)
+        XCTAssertEqual(zones?.confirmedBreakout, true)
+        XCTAssertEqual(zones?.isBreakoutFailure, false)
+    }
+
+    func testGogoDoesNotConfirmWhenLowStructureFails() {
+        let candles = gogoPairFixture(lastClose: 150, lastLow: 60, lastVolume: 2500, prevClose: 90)
+        let zones = GogoZoneDetector.detect(candles: candles)
+        XCTAssertEqual(zones?.isBreakout, true)
+        XCTAssertEqual(zones?.isBreakoutFailure, true)
+        XCTAssertEqual(zones?.confirmedBreakout, false)
+        XCTAssertNil(MarketSignalEngine.gogoBreakout(code: "005930", name: "테스트전자", candles: candles))
+    }
+
+    private func gogoPairFixture(
+        lastClose: Double,
+        lastLow: Double,
+        lastVolume: Double,
+        prevClose: Double
+    ) -> [ChartCandle] {
+        var candles: [ChartCandle] = []
+        for i in 0..<40 {
+            var high = 90 + Double(i) * 0.001
+            var low = 80 - Double(i) * 0.001
+            var close = 85.0
+            var volume = 1000.0
+            if i == 8 { high = 160; low = 140; close = 150 }
+            else if i == 22 { high = 140; low = 120; close = 128 }
+            else if i == 28 { high = 112; low = 100; close = 105 }
+            else if i == 34 { high = 104; low = 96; close = 100 }
+            else if i == 14 { high = 88; low = 70; close = 80 }
+            if i == 38 { close = prevClose }
+            if i == 39 {
+                close = lastClose
+                high = max(high, lastClose + 2)
+                low = lastLow
+                volume = lastVolume
+            }
+            candles.append(ChartCandle(
+                date: String(format: "d%02d", i),
+                open: close,
+                high: high,
+                low: low,
+                close: close,
+                volume: volume
+            ))
+        }
+        return candles
     }
 
     private func gogoTrendCandles(lastClose: Double) -> [ChartCandle] {

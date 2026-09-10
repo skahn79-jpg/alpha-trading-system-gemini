@@ -7602,32 +7602,6 @@ function calculateGogojeoSignal(candles, options = {}) {
     return avg(slice.map(d => Number(d[field])));
   }
 
-  function findSwingHighs() {
-    const highs = [];
-
-    for (let i = swingWindow; i < data.length - swingWindow; i++) {
-      const currentHigh = Number(data[i].high);
-      let isSwingHigh = true;
-
-      for (let j = i - swingWindow; j <= i + swingWindow; j++) {
-        if (j !== i && Number(data[j].high) >= currentHigh) {
-          isSwingHigh = false;
-          break;
-        }
-      }
-
-      if (isSwingHigh) {
-        highs.push({
-          index: i,
-          date: data[i].date,
-          price: currentHigh
-        });
-      }
-    }
-
-    return highs;
-  }
-
   function findSwingLows() {
     const lows = [];
 
@@ -7654,43 +7628,18 @@ function calculateGogojeoSignal(candles, options = {}) {
     return lows;
   }
 
-  const swingHighs = findSwingHighs();
   const swingLows = findSwingLows();
+  const trendPair = findGoGoJeoTrend(data);
 
-  if (swingHighs.length < 2) {
-    return {
-      status: "NO_SIGNAL",
-      message: "유효한 스윙 고점이 부족합니다."
-    };
-  }
-
-  let selectedHigh1 = null;
-  let selectedHigh2 = null;
-
-  for (let i = swingHighs.length - 2; i >= 0; i--) {
-    for (let j = swingHighs.length - 1; j > i; j--) {
-      const h1 = swingHighs[i];
-      const h2 = swingHighs[j];
-
-      if (
-        h1.price > h2.price &&
-        h2.index - h1.index >= minGap
-      ) {
-        selectedHigh1 = h1;
-        selectedHigh2 = h2;
-        break;
-      }
-    }
-
-    if (selectedHigh1 && selectedHigh2) break;
-  }
-
-  if (!selectedHigh1 || !selectedHigh2) {
+  if (!trendPair) {
     return {
       status: "NO_SIGNAL",
       message: "하락 추세선을 만들 수 있는 고점 구조가 없습니다."
     };
   }
+
+  const selectedHigh1 = { index: trendPair.p1.index, date: trendPair.p1.date, price: trendPair.p1.value };
+  const selectedHigh2 = { index: trendPair.p2.index, date: trendPair.p2.date, price: trendPair.p2.value };
 
   const lastIndex = data.length - 1;
   const lastCandle = data[lastIndex];
