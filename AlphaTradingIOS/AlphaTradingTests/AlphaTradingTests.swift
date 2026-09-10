@@ -243,4 +243,179 @@ final class AlphaTradingTests: XCTestCase {
         let signal = MarketSignalEngine.localDivergenceSignal(code: "005930", name: "테스트", candles: candles)
         _ = signal
     }
+
+    func testNotificationPayloadRebuildsTitleBodyFromUserInfo() {
+        let payload = NotificationOpenPayload.resolve(
+            requestId: "signal-abc",
+            title: "",
+            body: "",
+            userInfo: [
+                "id": "abc",
+                "code": "005930",
+                "name": "테스트전자",
+                "kind": "crash",
+                "title": "테스트전자 급락",
+                "detail": "등락률 -6.2% · ATR 3.1%",
+                "body": "등락률 -6.2% · ATR 3.1%",
+            ]
+        )
+        XCTAssertEqual(payload.id, "abc")
+        XCTAssertEqual(payload.code, "005930")
+        XCTAssertEqual(payload.name, "테스트전자")
+        XCTAssertEqual(payload.kind, "crash")
+        XCTAssertEqual(payload.title, "테스트전자 급락")
+        XCTAssertEqual(payload.body, "등락률 -6.2% · ATR 3.1%")
+        XCTAssertEqual(payload.detail, "등락률 -6.2% · ATR 3.1%")
+        XCTAssertEqual(payload.kindLabel, "급락")
+        XCTAssertEqual(payload.tickerLabel, "테스트전자 (005930)")
+        XCTAssertEqual(payload.stock?.code, "005930")
+    }
+
+    func testNotificationPayloadUsesBannerTextWhenUserInfoIsThin() {
+        let payload = NotificationOpenPayload.resolve(
+            requestId: "signal-old",
+            title: "급락 · 테스트전자",
+            body: "등락률 -6.2%",
+            userInfo: ["code": "005930", "kind": "crash"]
+        )
+        XCTAssertEqual(payload.title, "급락 · 테스트전자")
+        XCTAssertEqual(payload.body, "등락률 -6.2%")
+        XCTAssertEqual(payload.code, "005930")
+        XCTAssertEqual(payload.kind, "crash")
+    }
+
+    func testNotificationPayloadReadsRemoteApsAlert() {
+        let payload = NotificationOpenPayload.resolve(
+            requestId: "remote",
+            title: "",
+            body: "",
+            userInfo: [
+                "aps": [
+                    "alert": ["title": "서버 알림", "body": "목표가 도달"],
+                    "sound": "default",
+                ],
+                "code": "000660",
+                "name": "테스트반도체",
+                "kind": "priceAbove",
+                "id": "alert-1",
+            ]
+        )
+        XCTAssertEqual(payload.title, "서버 알림")
+        XCTAssertEqual(payload.body, "목표가 도달")
+        XCTAssertEqual(payload.code, "000660")
+        XCTAssertEqual(payload.kindLabel, "목표가 이상")
+    }
+
+    func testNotificationPayloadLooksUpSignalInboxAfterRelaunch() {
+        SignalInbox.resetForTests()
+        defer { SignalInbox.resetForTests() }
+        let stored = PersonalSignal(
+            id: "inbox-1",
+            code: "035420",
+            name: "테스트포털",
+            kind: .breakout,
+            severity: .high,
+            title: "테스트포털 돌파",
+            detail: "종가가 최근 고점을 상향 돌파",
+            opportunity: true
+        )
+        XCTAssertEqual(SignalInbox.ingest([stored]).count, 1)
+        let payload = NotificationOpenPayload.resolve(
+            requestId: "signal-inbox-1",
+            title: "",
+            body: "",
+            userInfo: ["id": "inbox-1", "code": "035420", "kind": "breakout"]
+        )
+        XCTAssertEqual(payload.title, "테스트포털 돌파")
+        XCTAssertEqual(payload.body, "종가가 최근 고점을 상향 돌파")
+        XCTAssertEqual(payload.name, "테스트포털")
+    }
+
+    func testPersonalSignalUserInfoContainsReconstructableFields() {
+        let signal = PersonalSignal(
+            code: "005930",
+            name: "테스트전자",
+            kind: .news,
+            severity: .medium,
+            title: "테스트전자 뉴스",
+            detail: "수주 계약",
+            opportunity: true
+        )
+        let info = signal.notificationUserInfo
+        XCTAssertEqual(info["id"] as? String, signal.id)
+        XCTAssertEqual(info["code"] as? String, "005930")
+        XCTAssertEqual(info["title"] as? String, "테스트전자 뉴스")
+        XCTAssertEqual(info["detail"] as? String, "수주 계약")
+        XCTAssertEqual(info["body"] as? String, "수주 계약")
+        XCTAssertEqual(info["kind"] as? String, "news")
+    }
+
+    func testGogoBreakoutWhenCloseAboveTrendline() {
+        let candles = gogoTrendCandles(lastClose: 125)
+        let zones = GogoZoneDetector.detect(candles: candles)
+        XCTAssertNotNil(zones)
+        XCTAssertEqual(zones?.isBreakout, true)
+        let item = MarketSignalEngine.gogoBreakout(
+            code: "005930",
+            name: "테스트전자",
+            candles: candles
+        )
+        XCTAssertNotNil(item)
+        XCTAssertTrue(item?.brokeTrend ?? false)
+        XCTAssertTrue(item?.detail.contains("돌파") ?? false)
+        XCTAssertEqual(item?.asStock.code, "005930")
+    }
+
+    func testGogoBreakoutNilWhenCloseBelowTrendline() {
+        let candles = gogoTrendCandles(lastClose: 85)
+        let zones = GogoZoneDetector.detect(candles: candles)
+        XCTAssertNotNil(zones)
+        XCTAssertEqual(zones?.isBreakout, false)
+        let item = MarketSignalEngine.gogoBreakout(
+            code: "005930",
+            name: "테스트전자",
+            candles: candles
+        )
+        XCTAssertNil(item)
+    }
+
+    private func gogoTrendCandles(lastClose: Double) -> [ChartCandle] {
+        var candles: [ChartCandle] = []
+        for i in 0..<36 {
+            var high = 105 + Double(i) * 0.01
+            var low = 90 + Double(i) * 0.01
+            var close = 100.0
+            if i == 5 {
+                high = 140; low = 120; close = 128
+            } else if i == 3 || i == 4 || i == 6 || i == 7 {
+                high = 110; low = 100; close = 105
+            } else if i == 20 {
+                high = 120; low = 105; close = 112
+            } else if i == 18 || i == 19 || i == 21 || i == 22 {
+                high = 108; low = 100; close = 104
+            } else if i == 12 {
+                high = 95; low = 80; close = 85
+            } else if i == 10 || i == 11 || i == 13 || i == 14 {
+                high = 100; low = 90; close = 94
+            } else if i == 28 {
+                high = 100; low = 88; close = 92
+            } else if i == 26 || i == 27 || i == 29 || i == 30 {
+                high = 102; low = 92; close = 96
+            }
+            if i == 35 {
+                close = lastClose
+                high = max(high, lastClose + 1)
+                low = min(low, lastClose - 1)
+            }
+            candles.append(ChartCandle(
+                date: String(format: "d%02d", i),
+                open: close,
+                high: high,
+                low: low,
+                close: close,
+                volume: 1000
+            ))
+        }
+        return candles
+    }
 }

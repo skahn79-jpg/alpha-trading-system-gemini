@@ -11,6 +11,7 @@ struct AlertCenterView: View {
     @State private var newMessage = ""
     @State private var searchQuery = ""
     @State private var searchResults: [MasterStock] = []
+    @State private var selectedSignal: PersonalSignal?
 
     var body: some View {
         List {
@@ -36,22 +37,29 @@ struct AlertCenterView: View {
                         .foregroundStyle(AppTheme.textSecondary)
                 } else {
                     ForEach(signals.prefix(20)) { signal in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(signal.kind.label)
-                                    .font(.paperlogy(11, weight: .bold))
-                                    .foregroundStyle(signal.opportunity ? AppTheme.up : AppTheme.down)
-                                Text(signal.name)
-                                    .font(.paperlogy(14, weight: .semibold))
-                                Spacer()
-                                Text(signal.severity.label)
-                                    .font(.paperlogy(11))
+                        Button {
+                            selectedSignal = signal
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(signal.kind.label)
+                                        .font(.paperlogy(11, weight: .bold))
+                                        .foregroundStyle(signal.opportunity ? AppTheme.up : AppTheme.down)
+                                    Text(signal.name)
+                                        .font(.paperlogy(14, weight: .semibold))
+                                        .foregroundStyle(AppTheme.textPrimary)
+                                    Spacer()
+                                    Text(signal.severity.label)
+                                        .font(.paperlogy(11))
+                                        .foregroundStyle(AppTheme.textSecondary)
+                                }
+                                Text(signal.detail)
+                                    .font(.paperlogy(12))
                                     .foregroundStyle(AppTheme.textSecondary)
+                                    .multilineTextAlignment(.leading)
                             }
-                            Text(signal.detail)
-                                .font(.paperlogy(12))
-                                .foregroundStyle(AppTheme.textSecondary)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -168,6 +176,9 @@ struct AlertCenterView: View {
                 )
                 if !Task.isCancelled { searchResults = response?.results ?? [] }
             }
+        }
+        .sheet(item: $selectedSignal) { signal in
+            NotificationDetailView(payload: .fromSignal(signal))
         }
         .onAppear { inbox.reload() }
         .task {

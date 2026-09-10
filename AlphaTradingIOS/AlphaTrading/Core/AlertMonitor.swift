@@ -123,7 +123,10 @@ enum AlertMonitor {
         content.title = "\(signal.kind.label) · \(signal.name)"
         content.body = signal.detail
         content.sound = .default
-        content.userInfo = ["code": signal.code, "kind": signal.kind.rawValue]
+        var info = signal.notificationUserInfo
+        info["title"] = content.title
+        info["body"] = content.body
+        content.userInfo = info
         let request = UNNotificationRequest(
             identifier: "signal-\(signal.id)",
             content: content,
@@ -153,6 +156,15 @@ enum AlertMonitor {
         content.title = "📈 \(alert.name) — \(alert.type.label)"
         content.body = alert.message.isEmpty ? detail : "\(alert.message)\n\(detail)"
         content.sound = .default
+        content.userInfo = [
+            "id": alert.id,
+            "code": alert.code,
+            "name": alert.name,
+            "kind": alert.type.rawValue,
+            "title": content.title,
+            "detail": detail,
+            "body": content.body,
+        ]
         let request = UNNotificationRequest(
             identifier: "trigger-\(alert.id)-\(Int(Date().timeIntervalSince1970))",
             content: content,

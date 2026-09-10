@@ -81,6 +81,20 @@ struct PersonalSignal: Identifiable, Codable, Equatable {
     }
 
     var cooldownKey: String { "\(code)|\(kind.rawValue)" }
+
+    var notificationUserInfo: [String: Any] {
+        [
+            "id": id,
+            "code": code,
+            "name": name,
+            "kind": kind.rawValue,
+            "title": title,
+            "detail": detail,
+            "body": detail,
+            "severity": severity.rawValue,
+            "opportunity": opportunity ? "1" : "0",
+        ]
+    }
 }
 
 enum MarketSignalEngine {
@@ -454,6 +468,58 @@ enum MarketSignalEngine {
     static func formatPrice(_ value: Double) -> String {
         if value >= 100 { return String(Int(value.rounded())) }
         return String(format: "%.2f", value)
+    }
+
+    /// Current 고고저 breakout: close above declining-high trendline and/or 고점대 상단.
+    static func gogoBreakout(
+        code: String,
+        name: String,
+        candles: [ChartCandle],
+        assetType: String? = nil
+    ) -> GogoBreakoutItem? {
+        guard let zones = GogoZoneDetector.detect(candles: candles),
+              let close = candles.last?.close, close > 0 else { return nil }
+        let brokeTrend = zones.isBreakout
+        let brokeHighZone = close >= zones.highHigh * (1 + breakoutBuffer)
+        guard brokeTrend || brokeHighZone else { return nil }
+        var parts: [String] = []
+        if brokeTrend, let trend = zones.trendLinePrice {
+            parts.append("종가 \(formatPrice(close))가 고고저 추세선 \(formatPrice(trend)) 상향 돌파")
+        }
+        if brokeHighZone {
+            parts.append("고점대 상단 \(formatPrice(zones.highHigh)) 돌파")
+        }
+        if parts.isEmpty {
+            parts.append(zones.comment)
+        }
+        return GogoBreakoutItem(
+            code: code,
+            name: name,
+            assetType: assetType,
+            close: close,
+            highHigh: zones.highHigh,
+            trendLinePrice: zones.trendLinePrice,
+            detail: parts.joined(separator: " · "),
+            brokeTrend: brokeTrend,
+            brokeHighZone: brokeHighZone
+        )
+    }
+}
+
+struct GogoBreakoutItem: Identifiable, Equatable, Hashable {
+    var id: String { code }
+    var code: String
+    var name: String
+    var assetType: String?
+    var close: Double
+    var highHigh: Double
+    var trendLinePrice: Double?
+    var detail: String
+    var brokeTrend: Bool
+    var brokeHighZone: Bool
+
+    var asStock: Stock {
+        Stock(code: code, name: name, assetType: assetType)
     }
 }
 

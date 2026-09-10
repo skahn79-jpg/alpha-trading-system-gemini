@@ -29,6 +29,23 @@ final class PushRegistrar: NSObject, UIApplicationDelegate, UNUserNotificationCe
         completionHandler([.banner, .sound, .badge])
     }
 
+    // 알림 탭/오픈 — 제목·본문을 앱 화면에 표시 (로컬 UN + 원격 APNs)
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else {
+            completionHandler()
+            return
+        }
+        let notification = response.notification
+        Task { @MainActor in
+            NotificationRouter.shared.open(notification)
+        }
+        completionHandler()
+    }
+
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
         Task {
@@ -61,14 +78,10 @@ struct AlphaTradingApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if hasAcceptedDisclaimer {
-                    AdminAuthGateView(auth: adminAuth)
-                } else {
-                    OnboardingView(hasAcceptedDisclaimer: $hasAcceptedDisclaimer)
-                }
-            }
-            .preferredColorScheme(.dark)
+            AppRootView(
+                hasAcceptedDisclaimer: $hasAcceptedDisclaimer,
+                adminAuth: adminAuth
+            )
         }
         .onChange(of: scenePhase) { phase in
             switch phase {
@@ -82,6 +95,26 @@ struct AlphaTradingApp: App {
             default:
                 break
             }
+        }
+    }
+}
+
+private struct AppRootView: View {
+    @Binding var hasAcceptedDisclaimer: Bool
+    @ObservedObject var adminAuth: AdminAuthViewModel
+    @ObservedObject private var notifications = NotificationRouter.shared
+
+    var body: some View {
+        Group {
+            if hasAcceptedDisclaimer {
+                AdminAuthGateView(auth: adminAuth)
+            } else {
+                OnboardingView(hasAcceptedDisclaimer: $hasAcceptedDisclaimer)
+            }
+        }
+        .preferredColorScheme(.dark)
+        .sheet(item: $notifications.pending) { payload in
+            NotificationDetailView(payload: payload)
         }
     }
 }

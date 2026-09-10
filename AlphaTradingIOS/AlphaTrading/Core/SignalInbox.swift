@@ -50,6 +50,20 @@ enum SignalInbox {
         UserDefaults.standard.removeObject(forKey: firedKey)
         SignalInboxStore.shared.reload()
     }
+
+    static func find(id: String?, code: String?, kind: String?) -> PersonalSignal? {
+        let rows = load()
+        if let id, let hit = rows.first(where: { $0.id == id }) {
+            return hit
+        }
+        if let code {
+            if let kind, let hit = rows.first(where: { $0.code == code && $0.kind.rawValue == kind }) {
+                return hit
+            }
+            return rows.first(where: { $0.code == code })
+        }
+        return nil
+    }
 }
 
 /// UI-facing inbox so dashboard / alert list refresh after a scan.

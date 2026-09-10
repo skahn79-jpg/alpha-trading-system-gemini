@@ -35,7 +35,9 @@ struct ChartView: View {
             .padding(.top, 10)
 
             learnChipRow
-            SignalBannerView(signals: chartSignals)
+            SignalBannerView(signals: chartSignals) { signal in
+                NotificationRouter.shared.openSignal(signal)
+            }
 
             if viewModel.isLoading && viewModel.candles.isEmpty {
                 LoadingView(message: "차트 로딩...")

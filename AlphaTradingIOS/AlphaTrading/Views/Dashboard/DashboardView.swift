@@ -8,8 +8,8 @@ struct DashboardView: View {
     @State private var trumpNews: TrumpNewsResponse?
     @State private var fx: FxResponse?
     @State private var sectorTrends: SectorTrendsResponse?
-    @State private var selectedSignalStock: Stock?
     @ObservedObject private var inbox = SignalInboxStore.shared
+    @ObservedObject private var gogoBreakouts = GogoBreakoutStore.shared
     // 환율 실시간 갱신 (30초)
     private let fxTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
@@ -22,8 +22,10 @@ struct DashboardView: View {
                         .foregroundStyle(AppTheme.textPrimary)
 
                     SignalBannerView(signals: inbox.signals) { signal in
-                        selectedSignalStock = Stock(code: signal.code, name: signal.name)
+                        NotificationRouter.shared.openSignal(signal)
                     }
+
+                    gogoBreakoutSection
 
                     if viewModel.isLoading && viewModel.indices.isEmpty {
                         LoadingView()
@@ -54,20 +56,6 @@ struct DashboardView: View {
             .navigationDestination(for: Stock.self) { stock in
                 StockDetailView(stock: stock)
             }
-            .background {
-                NavigationLink(
-                    destination: Group {
-                        if let dest = selectedSignalStock {
-                            StockDetailView(stock: dest)
-                        }
-                    },
-                    isActive: Binding(
-                        get: { selectedSignalStock != nil },
-                        set: { if !$0 { selectedSignalStock = nil } }
-                    )
-                ) { EmptyView() }
-                .hidden()
-            }
             .refreshable { await loadAll() }
             .task { await loadAll() }
             .onReceive(fxTimer) { _ in
@@ -85,7 +73,9 @@ struct DashboardView: View {
         async let trumpTask = try? APIClient.shared.get("/api/news/trump") as TrumpNewsResponse
         async let fxTask = try? APIClient.shared.get("/api/fx") as FxResponse
         async let sectorTask = try? APIClient.shared.get("/api/sector/trends") as SectorTrendsResponse
+        async let gogoTask: Void = gogoBreakouts.refresh()
         await AlertMonitor.checkWatchlistSignals()
+        await gogoTask
         _ = await indexTask
         tradeReport = await tradeTask
         featured = await featuredTask
@@ -93,6 +83,72 @@ struct DashboardView: View {
         trumpNews = await trumpTask
         fx = await fxTask
         sectorTrends = await sectorTask
+    }
+
+    // MARK: - 고고저 돌파 (관심종목 차트)
+
+    @ViewBuilder
+    private var gogoBreakoutSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "triangle.fill")
+                    .foregroundStyle(AppTheme.up)
+                Text("고고저 돌파")
+                    .font(.paperlogy(16, weight: .semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                if gogoBreakouts.isLoading {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                }
+            }
+            if gogoBreakouts.items.isEmpty {
+                Text(gogoEmptyText)
+                    .font(.paperlogy(12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            } else {
+                ForEach(gogoBreakouts.items) { item in
+                    NavigationLink(value: item.asStock) {
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("돌파")
+                                .font(.paperlogy(10, weight: .bold))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(AppTheme.up.opacity(0.2))
+                                .foregroundStyle(AppTheme.up)
+                                .clipShape(Capsule())
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.name)
+                                    .font(.paperlogy(14, weight: .semibold))
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                Text("\(item.code) · \(item.detail)")
+                                    .font(.paperlogy(10))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                    .lineLimit(2)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(AppTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var gogoEmptyText: String {
+        if SignalInbox.watchlistCodes().isEmpty {
+            return "관심종목을 추가하면 고고저 추세선·고점대 돌파 종목이 여기에 표시됩니다."
+        }
+        if gogoBreakouts.isLoading && !gogoBreakouts.didLoad {
+            return "관심종목 차트를 확인하는 중…"
+        }
+        return "관심종목 중 고고저 추세선 또는 고점대를 상향 돌파한 종목이 없습니다."
     }
 
     // MARK: - 실시간 환율
