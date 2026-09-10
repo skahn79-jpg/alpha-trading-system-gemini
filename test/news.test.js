@@ -50,6 +50,19 @@ test("stale July/August trump RSS would be dropped at 14 days", () => {
   assert.ok(days.every((d) => d <= 14));
 });
 
+test("prepareHeadlineForTranslate protects Exclusive and dollar amounts", () => {
+  const prepared = news.prepareHeadlineForTranslate(
+    "Exclusive: Trump plans to send $500 Obamacare rebates before election"
+  );
+  assert.equal(prepared.prefixKo, "특종");
+  assert.equal(prepared.body.includes("$"), false);
+  assert.ok(prepared.body.includes("500달러"));
+  assert.equal(
+    news.assembleKoHeadline(prepared.prefixKo, "트럼프는 선거 전에 500달러 오바마케어 리베이트를 보낼 계획이다."),
+    "특종: 트럼프는 선거 전에 500달러 오바마케어 리베이트를 보낼 계획이다."
+  );
+});
+
 test("isGarbledKoTranslation keeps EN for broken Axios headlines", () => {
   const exclusiveEn = "Exclusive: Trump plans to send $500 Obamacare rebates before the election";
   const exclusiveKo = "독점 : 트럼프는 선거 전에 $ 500 Obamacare 리베이트를 보낼 계획입니다";
@@ -60,6 +73,11 @@ test("isGarbledKoTranslation keeps EN for broken Axios headlines", () => {
   const anthropicKo = "특종: 인류 내부 고발자는 회사를 떠나기 위해 자신의 자산을 포기했습니다.";
   assert.equal(news.isGarbledKoTranslation(anthropicKo, anthropicEn), true);
   assert.equal(news.preferNewsTitle(anthropicEn, anthropicKo), anthropicEn);
+
+  const mixed = "Fetterman, 폭탄 GOP 컨벤션 비디오에서 트럼프를 칭찬하다";
+  const mixedEn = "Fetterman praises Trump in bombshell GOP convention video";
+  assert.equal(news.isGarbledKoTranslation(mixed, mixedEn), true);
+  assert.equal(news.preferNewsTitle(mixedEn, mixed), mixedEn);
 });
 
 test("isGarbledKoTranslation allows a decent Korean headline", () => {
@@ -67,6 +85,11 @@ test("isGarbledKoTranslation allows a decent Korean headline", () => {
   const ko = "에너지부, 이란 전쟁 속에 2027년 디젤 가격 전망 33센트 인상";
   assert.equal(news.isGarbledKoTranslation(ko, en), false);
   assert.equal(news.preferNewsTitle(en, ko), ko);
+
+  const exclusiveEn = "Exclusive: Trump plans to send $500 Obamacare rebates before election";
+  const exclusiveKo = "특종: 트럼프는 선거 전에 500달러 오바마케어 리베이트를 보낼 계획이다.";
+  assert.equal(news.isGarbledKoTranslation(exclusiveKo, exclusiveEn), false);
+  assert.equal(news.preferNewsTitle(exclusiveEn, exclusiveKo), exclusiveKo);
 });
 
 test("parseRssItems reads pubDate and newest-first finalize keeps week-old only", () => {

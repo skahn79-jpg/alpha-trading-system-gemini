@@ -107,14 +107,45 @@ function finalizeNewsItems(items, { limit = 6, maxAgeDays = DEFAULT_MAX_AGE_DAYS
   return dedupeNewsItems(sortNewsByPublishedAtDesc(fresh)).slice(0, limit);
 }
 
-const TITLE_PROPER_STOP = /^(The|This|That|With|From|After|Before|Exclusive|Axios|Scoop|Report|House|White|Senate|President|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Monday|Over|Into|About|Could|Would|Should|Just|Will|Have|Been|They|Their|What|When|Your|New|News|Department|National|Federal|General|International|American|United|States|Price|Forecast|Market|Stock|Shares|Company|Video|Convention|Debate|Crisis|Court|Congress|Government|Energy|Diesel|World|Global|South|North|West|East|Korea|China|Japan|Russia|Ukraine|Israel|Iran|Europe)$/i;
+/** 사전 오역이 잦은 고유명사 — 한글 음역/원문이 없으면 번역 실패로 본다 */
+const BRAND_KEEP = [
+  { en: /Anthropic/i, ok: /앤트로픽|Anthropic/i },
+  { en: /OpenAI/i, ok: /오픈\s*AI|오픈에이아이|OpenAI/i },
+  { en: /Obamacare/i, ok: /오바마케어|Obamacare/i },
+];
+
+const HEADLINE_PREFIXES = [
+  { re: /^exclusive:\s*/i, ko: "특종" },
+  { re: /^scoop:\s*/i, ko: "특종" },
+  { re: /^breaking:\s*/i, ko: "속보" },
+];
+
+function prepareHeadlineForTranslate(en) {
+  let body = String(en || "").trim();
+  let prefixKo = "";
+  for (const p of HEADLINE_PREFIXES) {
+    if (p.re.test(body)) {
+      prefixKo = p.ko;
+      body = body.replace(p.re, "").trim();
+      break;
+    }
+  }
+  // `$ 500` 같은 번역 붕괴를 막기 위해 금액을 한국어 표기로 바꿔 보낸다
+  body = body.replace(/\$\s*(\d+(?:,\d{3})*(?:\.\d+)?)/g, (_, n) => `${n.replace(/,/g, "")}달러`);
+  return { prefixKo, body };
+}
+
+function assembleKoHeadline(prefixKo, translatedBody) {
+  const body = String(translatedBody || "").trim();
+  if (!body) return null;
+  return prefixKo ? `${prefixKo}: ${body}` : body;
+}
 
 /**
- * 구글 번역 헤드라인 실패 징후:
- *  - `$ 500` 같이 깨진 기호
- *  - `독점 :` 처럼 콜론 앞 공백
- *  - 문장 중간 고유명사(Anthropic 등)가 번역에서 사라짐
- *  - 한글 대비 영어 비율이 높은 어색한 혼용
+ * 헤드라인 번역 실패 징후:
+ *  - `$ 500` 깨진 기호, `독점 :` 콜론 공백, Exclusive→독점 혜택
+ *  - 한글 대비 영어 비율이 높은 혼용
+ *  - Anthropic→인류 처럼 브랜드가 사전 뜻으로 바뀐 경우
  */
 function isGarbledKoTranslation(ko, en) {
   const k = String(ko || "").trim();
@@ -123,15 +154,13 @@ function isGarbledKoTranslation(ko, en) {
   const hangul = (k.match(/[\uAC00-\uD7A3]/g) || []).length;
   const latin = (k.match(/[A-Za-z]/g) || []).length;
   if (hangul < 2) return true;
-  if (latin + hangul > 0 && latin / (latin + hangul) > 0.5) return true;
+  if (latin + hangul > 0 && latin / (latin + hangul) > 0.35) return true;
   if (/\$\s+\d/.test(k)) return true;
   if (/[가-힣]\s+:/.test(k)) return true;
-  const tokens = e.split(/\s+/);
-  for (let i = 1; i < tokens.length; i += 1) {
-    const w = tokens[i].replace(/[^A-Za-z]/g, "");
-    if (w.length < 6 || !/^[A-Z]/.test(w) || TITLE_PROPER_STOP.test(w)) continue;
-    if (k.includes(w) || k.toLowerCase().includes(w.toLowerCase())) continue;
-    return true;
+  if (/독점\s*혜택/.test(k)) return true;
+  if (/스쿠프/.test(k) && /^scoop:/i.test(e)) return true;
+  for (const b of BRAND_KEEP) {
+    if (b.en.test(e) && !b.ok.test(k)) return true;
   }
   return false;
 }
@@ -248,8 +277,8 @@ async function fetchRegulationNews() {
   return out;
 }
 
-// ── 영→한 제목 번역 (구글 번역 공개 엔드포인트, 키 불필요) ──
-async function translateToKorean(text) {
+// ── 영→한 제목 번역 (키 불필요). gtx가 429면 MyMemory 폴백 ──
+async function translateGtx(text) {
   const url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ko&dt=t&q="
     + encodeURIComponent(text);
   const { data } = await axios.get(url, { timeout: 8000, headers: UA });
@@ -257,6 +286,39 @@ async function translateToKorean(text) {
   const out = segments.map((s) => s?.[0] || "").join("").trim();
   if (!out) throw new Error("empty translation");
   return out;
+}
+
+async function translateMyMemory(text) {
+  const url = "https://api.mymemory.translated.net/get?langpair=en|ko&q="
+    + encodeURIComponent(text);
+  const { data } = await axios.get(url, { timeout: 12000, headers: UA });
+  const out = String(data?.responseData?.translatedText || "").trim();
+  if (!out || /MYMEMORY WARNING/i.test(out)) throw new Error("empty translation");
+  return out.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+}
+
+async function translateToKorean(text) {
+  try {
+    return await translateGtx(text);
+  } catch {
+    return await translateMyMemory(text);
+  }
+}
+
+/** Axios 헤드라인: 특종 접두어/$금액을 보호해 번역하고, 품질이 낮으면 null (영어 유지) */
+async function translateAxiosHeadline(en) {
+  const { prefixKo, body } = prepareHeadlineForTranslate(en);
+  const engines = [translateGtx, translateMyMemory];
+  for (const engine of engines) {
+    try {
+      const translated = await engine(body);
+      const assembled = assembleKoHeadline(prefixKo, translated);
+      if (assembled && !isGarbledKoTranslation(assembled, en)) return assembled;
+    } catch {
+      // 다음 엔진
+    }
+  }
+  return null;
 }
 
 // ── 악시오스 뉴스 ──
@@ -268,16 +330,16 @@ async function fetchAxiosNews(limit = 8) {
     limit,
     maxAgeDays: 7,
   });
-  // 제목 한국어 번역 — 깨진 번역은 영어 원문을 유지
-  await Promise.all(items.map(async (it) => {
+  // 기본은 영어 원문(가독). 품질 통과한 한글만 title로 교체. 병렬 gtx는 429·오역을 키우므로 순차.
+  for (const it of items) {
     const original = it.title;
     it.titleEn = original;
+    it.title = original;
     try {
-      const ko = await translateToKorean(original);
-      it.title = preferNewsTitle(original, ko);
-      if (it.title === original && ko && ko !== original) it.titleKo = ko;
-    } catch { /* 원문 유지 */ }
-  }));
+      const ko = await translateAxiosHeadline(original);
+      if (ko) it.title = ko;
+    } catch { /* 영어 원문 유지 */ }
+  }
   const result = { ok: items.length > 0, source: "Axios", items, updatedAt: new Date().toISOString() };
   if (result.ok) axiosNewsCache = { at: Date.now(), data: result };
   return result;
@@ -299,6 +361,8 @@ module.exports = {
   finalizeNewsItems,
   isGarbledKoTranslation,
   preferNewsTitle,
+  prepareHeadlineForTranslate,
+  assembleKoHeadline,
   isFreshNewsItem,
   __resetNewsCacheForTest,
 };
