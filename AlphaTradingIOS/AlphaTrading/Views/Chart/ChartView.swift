@@ -35,7 +35,7 @@ struct ChartView: View {
             .padding(.top, 10)
 
             learnChipRow
-            SignalBannerView(signals: chartSignals) { signal in
+            SignalBannerPair(signals: chartSignals, showEmptySections: false) { signal in
                 NotificationRouter.shared.openSignal(signal)
             }
 

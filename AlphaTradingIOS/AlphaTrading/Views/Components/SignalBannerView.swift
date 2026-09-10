@@ -1,85 +1,101 @@
 import SwiftUI
 
+/// 대시보드·차트에서 쓰는 단일 알림 섹션 (`위험` 또는 `기회`).
 struct SignalBannerView: View {
+    let title: String
     let signals: [PersonalSignal]
+    var tint: Color
+    var emptyText: String
+    var showsWhenEmpty: Bool = true
     var onSelect: ((PersonalSignal) -> Void)?
 
-    private var riskSignals: [PersonalSignal] { signals.filter { !$0.opportunity } }
-    private var opportunitySignals: [PersonalSignal] { signals.filter { $0.opportunity } }
-
     var body: some View {
-        if signals.isEmpty {
+        if signals.isEmpty && !showsWhenEmpty {
             EmptyView()
         } else {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Image(systemName: "bell.badge.fill")
-                        .foregroundStyle(AppTheme.accent)
-                    Text("위험 · 기회 알림")
-                        .font(.paperlogy(14, weight: .semibold))
+                    Image(systemName: title == "기회" ? "lightbulb.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(tint)
+                    Text(title)
+                        .font(.paperlogy(16, weight: .semibold))
                         .foregroundStyle(AppTheme.textPrimary)
+                    Text("\(signals.count)")
+                        .font(.paperlogy(11, weight: .bold))
+                        .foregroundStyle(AppTheme.textSecondary)
                     Spacer()
                     Text("관심종목 · 분석 전용")
                         .font(.paperlogy(10))
                         .foregroundStyle(AppTheme.textSecondary)
                 }
-                signalGroup(title: "위험", tint: AppTheme.down, rows: riskSignals)
-                signalGroup(title: "기회", tint: AppTheme.up, rows: opportunitySignals)
+                if signals.isEmpty {
+                    Text(emptyText)
+                        .font(.paperlogy(12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                } else {
+                    ForEach(signals.prefix(6)) { signal in
+                        Button {
+                            onSelect?(signal)
+                        } label: {
+                            HStack(alignment: .top, spacing: 8) {
+                                Text(signal.kind.label)
+                                    .font(.paperlogy(11, weight: .bold))
+                                    .foregroundStyle(tint)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(tint.opacity(0.15))
+                                    .clipShape(Capsule())
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(signal.title)
+                                        .font(.paperlogy(13, weight: .semibold))
+                                        .foregroundStyle(AppTheme.textPrimary)
+                                        .multilineTextAlignment(.leading)
+                                    Text(signal.detail)
+                                        .font(.paperlogy(11))
+                                        .foregroundStyle(AppTheme.textSecondary)
+                                        .lineLimit(2)
+                                }
+                                Spacer()
+                                Text(signal.severity.label)
+                                    .font(.paperlogy(10, weight: .medium))
+                                    .foregroundStyle(signal.severity == .high ? AppTheme.down : AppTheme.textSecondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
             .padding(14)
             .background(AppTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
     }
+}
 
-    @ViewBuilder
-    private func signalGroup(title: String, tint: Color, rows: [PersonalSignal]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(title)
-                    .font(.paperlogy(12, weight: .semibold))
-                    .foregroundStyle(tint)
-                Text("\(rows.count)")
-                    .font(.paperlogy(11, weight: .bold))
-                    .foregroundStyle(AppTheme.textSecondary)
-                Spacer()
-            }
-            if rows.isEmpty {
-                Text("해당 없음")
-                    .font(.paperlogy(11))
-                    .foregroundStyle(AppTheme.textSecondary)
-            } else {
-                ForEach(rows.prefix(4)) { signal in
-                    Button {
-                        onSelect?(signal)
-                    } label: {
-                        HStack(alignment: .top, spacing: 8) {
-                            Text(signal.kind.label)
-                                .font(.paperlogy(11, weight: .bold))
-                                .foregroundStyle(signal.opportunity ? AppTheme.up : AppTheme.down)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background((signal.opportunity ? AppTheme.up : AppTheme.down).opacity(0.15))
-                                .clipShape(Capsule())
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(signal.title)
-                                    .font(.paperlogy(13, weight: .semibold))
-                                    .foregroundStyle(AppTheme.textPrimary)
-                                    .multilineTextAlignment(.leading)
-                                Text(signal.detail)
-                                    .font(.paperlogy(11))
-                                    .foregroundStyle(AppTheme.textSecondary)
-                                    .lineLimit(2)
-                            }
-                            Spacer()
-                            Text(signal.severity.label)
-                                .font(.paperlogy(10, weight: .medium))
-                                .foregroundStyle(signal.severity == .high ? AppTheme.down : AppTheme.textSecondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
+/// 위험 / 기회를 서로 다른 카드로 나란히 표시한다. 대시보드는 빈 섹션도 유지한다.
+struct SignalBannerPair: View {
+    let signals: [PersonalSignal]
+    var showEmptySections: Bool = true
+    var onSelect: ((PersonalSignal) -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            SignalBannerView(
+                title: "위험",
+                signals: PersonalSignal.riskSignals(in: signals),
+                tint: AppTheme.down,
+                emptyText: "급락·탐욕·위험 뉴스가 있으면 여기에 표시됩니다.",
+                showsWhenEmpty: showEmptySections,
+                onSelect: onSelect
+            )
+            SignalBannerView(
+                title: "기회",
+                signals: PersonalSignal.opportunitySignals(in: signals),
+                tint: AppTheme.up,
+                emptyText: "돌파·공포 역발상·기회 뉴스가 있으면 여기에 표시됩니다.",
+                showsWhenEmpty: showEmptySections,
+                onSelect: onSelect
+            )
         }
     }
 }

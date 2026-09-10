@@ -58,6 +58,14 @@ struct PersonalSignal: Identifiable, Codable, Equatable {
     var createdAt: TimeInterval
     var opportunity: Bool
 
+    static func riskSignals(in signals: [PersonalSignal]) -> [PersonalSignal] {
+        signals.filter { !$0.opportunity }
+    }
+
+    static func opportunitySignals(in signals: [PersonalSignal]) -> [PersonalSignal] {
+        signals.filter { $0.opportunity }
+    }
+
     init(
         id: String = UUID().uuidString,
         code: String,

@@ -160,6 +160,41 @@ final class AlphaTradingTests: XCTestCase {
         XCTAssertEqual(SignalInbox.ingest([first], now: t0 + MarketSignalEngine.cooldownSeconds + 1).count, 1)
     }
 
+    func testPersonalSignalsSplitIntoRiskAndOpportunitySections() {
+        let crash = PersonalSignal(
+            code: "005930",
+            name: "테스트전자",
+            kind: .crash,
+            severity: .high,
+            title: "급락",
+            detail: "위험",
+            opportunity: false
+        )
+        let breakout = PersonalSignal(
+            code: "005930",
+            name: "테스트전자",
+            kind: .breakout,
+            severity: .high,
+            title: "돌파",
+            detail: "기회",
+            opportunity: true
+        )
+        let greed = PersonalSignal(
+            code: "005930",
+            name: "테스트전자",
+            kind: .fearGreed,
+            severity: .medium,
+            title: "탐욕",
+            detail: "위험",
+            opportunity: false
+        )
+        let mixed = [crash, breakout, greed]
+        XCTAssertEqual(PersonalSignal.riskSignals(in: mixed).map(\.kind), [.crash, .fearGreed])
+        XCTAssertEqual(PersonalSignal.opportunitySignals(in: mixed).map(\.kind), [.breakout])
+        XCTAssertTrue(PersonalSignal.riskSignals(in: mixed).allSatisfy { !$0.opportunity })
+        XCTAssertTrue(PersonalSignal.opportunitySignals(in: mixed).allSatisfy(\.opportunity))
+    }
+
     func testMultiTimeframeSummaryUsesMovingAverages() {
         let candles = (0..<60).map { i in
             ChartCandle(

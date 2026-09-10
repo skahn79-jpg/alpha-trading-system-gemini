@@ -121,7 +121,7 @@ struct StockDetailView: View {
             Text("차트")
                 .font(.paperlogy(16, weight: .semibold))
                 .foregroundStyle(AppTheme.textPrimary)
-            SignalBannerView(signals: inbox.signals.filter { $0.code == stock.code }) { signal in
+            SignalBannerPair(signals: inbox.signals.filter { $0.code == stock.code }, showEmptySections: false) { signal in
                 NotificationRouter.shared.openSignal(signal)
             }
             ChartView(code: stock.code, kind: stock.kind)

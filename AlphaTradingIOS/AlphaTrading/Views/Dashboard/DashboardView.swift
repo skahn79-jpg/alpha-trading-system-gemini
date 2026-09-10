@@ -21,7 +21,7 @@ struct DashboardView: View {
                         .font(.paperlogy(22, weight: .bold))
                         .foregroundStyle(AppTheme.textPrimary)
 
-                    SignalBannerView(signals: inbox.signals) { signal in
+                    SignalBannerPair(signals: inbox.signals, showEmptySections: true) { signal in
                         NotificationRouter.shared.openSignal(signal)
                     }
 
