@@ -667,7 +667,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\nAPP=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\"\nmkdir -p \"${APP}\"\nif [ ! -f \"${APP}/Info.plist\" ]; then\n  cat > \"${APP}/Info.plist\" <<'PLIST'\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n<key>CFBundleDisplayName</key><string>ALPHA</string>\n<key>CFBundleExecutable</key><string>AlphaTradingWatch</string>\n<key>CFBundleIdentifier</key><string>com.alpha.trading.ios.watchkitapp</string>\n<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>\n<key>CFBundleName</key><string>AlphaTradingWatch</string>\n<key>CFBundlePackageType</key><string>APPL</string>\n<key>CFBundleShortVersionString</key><string>1.0.0</string>\n<key>CFBundleVersion</key><string>75</string>\n<key>WKApplication</key><true/>\n<key>WKCompanionAppBundleIdentifier</key><string>com.alpha.trading.ios</string>\n</dict></plist>\nPLIST\nfi\n";
+			shellScript = "set -e\nAPP=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\"\nmkdir -p \"${APP}\"\nif [ ! -f \"${APP}/Info.plist\" ]; then\n  cat > \"${APP}/Info.plist\" <<'PLIST'\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n<key>CFBundleDisplayName</key><string>ALPHA</string>\n<key>CFBundleExecutable</key><string>AlphaTradingWatch</string>\n<key>CFBundleIdentifier</key><string>com.alpha.trading.ios.watchkitapp</string>\n<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>\n<key>CFBundleName</key><string>AlphaTradingWatch</string>\n<key>CFBundlePackageType</key><string>APPL</string>\n<key>CFBundleShortVersionString</key><string>1.0.0</string>\n<key>CFBundleVersion</key><string>126</string>\n<key>WKApplication</key><true/>\n<key>WKCompanionAppBundleIdentifier</key><string>com.alpha.trading.ios</string>\n</dict></plist>\nPLIST\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -889,7 +889,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 75;
+				CURRENT_PROJECT_VERSION = 126;
 				DEVELOPMENT_TEAM = VWAZ3CVW5Z;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -908,7 +908,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 75;
+				CURRENT_PROJECT_VERSION = 126;
 				DEVELOPMENT_TEAM = VWAZ3CVW5Z;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -929,7 +929,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 75;
+				CURRENT_PROJECT_VERSION = 126;
 				DEVELOPMENT_TEAM = VWAZ3CVW5Z;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = AlphaTradingWatch/Info.plist;
@@ -960,7 +960,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 75;
+				CURRENT_PROJECT_VERSION = 126;
 				DEVELOPMENT_TEAM = VWAZ3CVW5Z;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = AlphaTradingWatch/Info.plist;
