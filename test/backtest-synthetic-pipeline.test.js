@@ -1721,16 +1721,8 @@ test("GATE5H-P49 네트워크·주문 참조 없음", () => {
   assert.equal(src.includes("submitOrder"), false);
 });
 
-test("GATE5H-P50 허용 파일 외 변경 없음", () => {
-  const { execFileSync } = require("node:child_process");
-  const names = execFileSync("git", ["diff", "--name-only", "HEAD"], {
-    encoding: "utf8",
-    cwd: path.join(__dirname, ".."),
-  })
-    .trim()
-    .split("\n")
-    .filter(Boolean);
-  const allowed = new Set([
+function getGate5hP50Allowlist() {
+  return new Set([
     "lib/backtest/execution-model.js",
     "lib/backtest/data-validation.js",
     "test/backtest-execution-model.test.js",
@@ -1827,9 +1819,42 @@ test("GATE5H-P50 허용 파일 외 변경 없음", () => {
     "test/paper-approval-manager.test.js",
     "test/paper-operational-config.test.js",
   ]);
+}
+
+function assertGate5hP50Allowlist(names) {
+  const allowed = getGate5hP50Allowlist();
   for (const name of names) {
     assert.equal(allowed.has(name), true, name);
   }
+}
+
+test("GATE5H-P50 허용 파일 외 변경 없음", () => {
+  // Pure synthetic scope check — no ambient worktree name-only HEAD listing.
+  // P50-A: every Gate5H-approved path passes when checked against the allowlist.
+  assertGate5hP50Allowlist([...getGate5hP50Allowlist()]);
+  // P50-B: out-of-scope paths must fail assertion (allowlist not widened).
+  assert.throws(
+    () => assertGate5hP50Allowlist(["package.json"]),
+    (err) =>
+      err instanceof assert.AssertionError && /package\.json/.test(String(err))
+  );
+  assert.throws(
+    () => assertGate5hP50Allowlist(["lib/evil.js"]),
+    (err) =>
+      err instanceof assert.AssertionError && /lib\/evil\.js/.test(String(err))
+  );
+});
+
+test("GATE5H-P50 ambient worktree independence", () => {
+  // P50-C: historical invariant does not read ambient git dirty state.
+  const src = fs.readFileSync(__filename, "utf8");
+  const p50Block = src.slice(
+    src.indexOf("function getGate5hP50Allowlist"),
+    src.indexOf('test("GATE5H-P50 ambient worktree independence')
+  );
+  assert.equal(p50Block.includes("git diff"), false);
+  assert.equal(p50Block.includes("execFileSync"), false);
+  assertGate5hP50Allowlist([...getGate5hP50Allowlist()]);
 });
 
 test("GATE5I-P01 normalized KOSPI e2e 성공", () => {
