@@ -30,6 +30,7 @@ const { buildMacroReport } = require("./macro.js");
 const { volumeProfile, patternOutlook, buildCommentary } = require("./chartlab.js");
 const cryptoReport = require("./crypto-report.js");
 const apns = require("./apns.js");
+const { scoreMosOpportunity, V11: MOS_V11, PAPER_LIVE: MOS_PAPER_LIVE } = require("./lib/alerts");
 const { buildLiqMap } = require("./liqmap.js");
 const evolver = require("./evolve.js");
 const dartFund = require("./dart-fund.js");
@@ -3088,6 +3089,42 @@ app.delete("/api/alerts/:id", (req, res) => {
   res.json({ ok: true, deleted: alerts.length - next.length, count: next.length });
 });
 
+// ── MOS A′ v1.1 balanced + research (alerts/scoring only; Paper/Live OFF) ──
+// POST /api/alerts/mos/score  { ticker, sectorId, d, ...research/psychology/spike }
+// GET  /api/alerts/mos/meta   locked config summary
+app.get("/api/alerts/mos/meta", (req, res) => {
+  res.json({
+    ok: true,
+    version: MOS_V11.version,
+    paperLive: MOS_PAPER_LIVE,
+    lockedAt: MOS_V11.lockedAt,
+    deltaStarBySector: MOS_V11.deltaStarBySector,
+    krMinSF: MOS_V11.krMinSF,
+    note: "Alerts/scoring only. wouldExecEnter is always false while paperLive is false.",
+  });
+});
+
+app.post("/api/alerts/mos/score", (req, res) => {
+  try {
+    const body = req.body || {};
+    if (body.d == null && body.discount == null) {
+      return res.status(400).json({ ok: false, error: "d (3y discount) required" });
+    }
+    const scored = scoreMosOpportunity({
+      ...body,
+      d: body.d != null ? Number(body.d) : Number(body.discount),
+      ticker: body.ticker || body.code || "",
+      sectorId: body.sectorId || body.sector || "UNKNOWN",
+    });
+    res.json({ ok: true, paperLive: MOS_PAPER_LIVE, scored });
+  } catch (err) {
+    console.error("[mos/score]", err.message);
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+
+
 // ── 자체 발굴 기법 (유전 알고리즘 진화) ──
 // GET /api/evolve/strategies — 현재 세대의 우수 발굴 기법 목록
 app.get("/api/evolve/strategies", (req, res) => {
@@ -3932,6 +3969,8 @@ if (require.main === module) {
 ║  GET /api/alerts                  서버 알림 목록      ║
 ║  POST /api/alerts                 서버 알림 등록      ║
 ║  GET /api/alerts/check            조건 감시/텔레그램  ║
+║  GET /api/alerts/mos/meta         MOS 설정 요약         ║
+║  POST /api/alerts/mos/score       MOS 기회 스코어       ║
 ║                                                      ║
 ║  [국민연금 - DART]                                   ║
 ║  GET /api/nps?days=60             국민연금 변동 종목  ║
