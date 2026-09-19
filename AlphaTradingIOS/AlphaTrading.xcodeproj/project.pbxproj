@@ -17,6 +17,7 @@
 		A10000000000000000000008 /* Quote.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* Quote.swift */; };
 		A10000000000000000000009 /* Stock.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* Stock.swift */; };
 		A1000000000000000000000A /* ChartViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A /* ChartViewModel.swift */; };
+		A1000000000000000000003F /* MosOpportunity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003F /* MosOpportunity.swift */; };
 		A1000000000000000000000B /* DashboardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000B /* DashboardViewModel.swift */; };
 		A1000000000000000000000C /* PortfolioViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000C /* PortfolioViewModel.swift */; };
 		A1000000000000000000000D /* StockListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000D /* StockListViewModel.swift */; };
@@ -119,6 +120,7 @@
 		A20000000000000000000008 /* Quote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Quote.swift; sourceTree = "<group>"; };
 		A20000000000000000000009 /* Stock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Stock.swift; sourceTree = "<group>"; };
 		A2000000000000000000000A /* ChartViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartViewModel.swift; sourceTree = "<group>"; };
+		A2000000000000000000003F /* MosOpportunity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MosOpportunity.swift; sourceTree = "<group>"; };
 		A2000000000000000000000B /* DashboardViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViewModel.swift; sourceTree = "<group>"; };
 		A2000000000000000000000C /* PortfolioViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioViewModel.swift; sourceTree = "<group>"; };
 		A2000000000000000000000D /* StockListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockListViewModel.swift; sourceTree = "<group>"; };
@@ -277,6 +279,7 @@
 		A50000000000000000000007 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				A2000000000000000000003F /* MosOpportunity.swift */,
 				A20000000000000000000006 /* ChartCandle.swift */,
 				A20000000000000000000007 /* MarketIndex.swift */,
 				A20000000000000000000008 /* Quote.swift */,
@@ -579,6 +582,7 @@
 				A10000000000000000000008 /* Quote.swift in Sources */,
 				A10000000000000000000009 /* Stock.swift in Sources */,
 				A1000000000000000000000A /* ChartViewModel.swift in Sources */,
+				A1000000000000000000003F /* MosOpportunity.swift in Sources */,
 				A1000000000000000000000B /* DashboardViewModel.swift in Sources */,
 				A1000000000000000000000C /* PortfolioViewModel.swift in Sources */,
 				A1000000000000000000000D /* StockListViewModel.swift in Sources */,
@@ -763,7 +767,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 75;
+				CURRENT_PROJECT_VERSION = 131;
 				DEVELOPMENT_TEAM = VWAZ3CVW5Z;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -782,7 +786,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 75;
+				CURRENT_PROJECT_VERSION = 131;
 				DEVELOPMENT_TEAM = VWAZ3CVW5Z;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;

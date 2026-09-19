@@ -3125,6 +3125,109 @@ app.post("/api/alerts/mos/score", (req, res) => {
 
 
 
+
+// GET /api/alerts/mos/board — Dashboard MOS opportunity strip (KR watchlist, alerts only)
+const MOS_BOARD_CACHE = { at: 0, data: null };
+const MOS_BOARD_TTL_MS = 5 * 60 * 1000;
+const MOS_BOARD_WATCHLIST = [
+  { code: "005930", name: "삼성전자", sectorId: "KR_SEMIS_IT", market: "KR" },
+  { code: "000660", name: "SK하이닉스", sectorId: "KR_SEMIS_IT", market: "KR" },
+  { code: "005380", name: "현대차", sectorId: "KR_AUTO_BATT", market: "KR" },
+  { code: "051910", name: "LG화학", sectorId: "KR_CHEM", market: "KR" },
+  { code: "097950", name: "CJ제일제당", sectorId: "KR_FOOD_BEV", market: "KR" },
+  { code: "105560", name: "KB금융", sectorId: "KR_FINANCIALS", market: "KR" },
+];
+
+function mosDiscountFromCandles(candles) {
+  if (!Array.isArray(candles) || candles.length < 30) return null;
+  let max = 0;
+  let last = null;
+  for (const c of candles) {
+    const h = Number(c.high ?? c.close);
+    const cl = Number(c.close);
+    if (Number.isFinite(h)) max = Math.max(max, h);
+    if (Number.isFinite(cl)) last = cl;
+  }
+  if (!last || max <= 0) return null;
+  return Math.max(0, 1 - last / max);
+}
+
+function mosR20FromCandles(candles) {
+  if (!Array.isArray(candles) || candles.length < 21) return null;
+  const sorted = [...candles].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const last = Number(sorted[sorted.length - 1]?.close);
+  const prev = Number(sorted[sorted.length - 21]?.close);
+  if (!last || !prev) return null;
+  return last / prev - 1;
+}
+
+async function buildMosBoard() {
+  const items = [];
+  for (const row of MOS_BOARD_WATCHLIST) {
+    try {
+      const candles = await fetchDailyCandles(row.code, 780);
+      const d = mosDiscountFromCandles(candles);
+      const r20 = mosR20FromCandles(candles);
+      if (d == null) continue;
+      const scored = scoreMosOpportunity({
+        ticker: `${row.code}.KS`,
+        code: row.code,
+        name: row.name,
+        sectorId: row.sectorId,
+        market: row.market,
+        d,
+        r20,
+        sessionOverride: "regular",
+      });
+      items.push({
+        code: row.code,
+        name: row.name,
+        sectorId: row.sectorId,
+        d,
+        r20,
+        Enter: !!scored.Enter,
+        f: scored.f,
+        severity: scored.psychology?.severity || "normal",
+        S_F_mkt: scored.S_F_mkt,
+        deltaStar: scored.deltaStar,
+        blockReasons: scored.blockReasons || [],
+        researchNotes: scored.research?.notes || [],
+      });
+    } catch (err) {
+      console.warn("[mos/board]", row.code, err.message);
+    }
+  }
+  items.sort((a, b) => Number(b.Enter) - Number(a.Enter) || (b.f || 0) - (a.f || 0) || (b.d || 0) - (a.d || 0));
+  return {
+    ok: true,
+    paperLive: MOS_PAPER_LIVE,
+    version: MOS_V11.version,
+    generatedAt: new Date().toISOString(),
+    count: items.length,
+    enterCount: items.filter((i) => i.Enter).length,
+    items,
+    disclaimer: "알림/스코어 참고용. Paper/Live OFF. 투자 권유 아님.",
+  };
+}
+
+app.get("/api/alerts/mos/board", async (req, res) => {
+  try {
+    const force = String(req.query.refresh || "") === "1";
+    const stale = Date.now() - MOS_BOARD_CACHE.at > MOS_BOARD_TTL_MS;
+    if (!force && MOS_BOARD_CACHE.data && !stale) {
+      return res.json({ ...MOS_BOARD_CACHE.data, cached: true });
+    }
+    const data = await buildMosBoard();
+    MOS_BOARD_CACHE.at = Date.now();
+    MOS_BOARD_CACHE.data = data;
+    res.json({ ...data, cached: false });
+  } catch (err) {
+    console.error("[mos/board]", err.message);
+    res.status(502).json({ ok: false, error: err.message });
+  }
+});
+
+
 // ── 자체 발굴 기법 (유전 알고리즘 진화) ──
 // GET /api/evolve/strategies — 현재 세대의 우수 발굴 기법 목록
 app.get("/api/evolve/strategies", (req, res) => {
@@ -3971,6 +4074,7 @@ if (require.main === module) {
 ║  GET /api/alerts/check            조건 감시/텔레그램  ║
 ║  GET /api/alerts/mos/meta         MOS 설정 요약         ║
 ║  POST /api/alerts/mos/score       MOS 기회 스코어       ║
+║  GET /api/alerts/mos/board        MOS 대시보드 보드     ║
 ║                                                      ║
 ║  [국민연금 - DART]                                   ║
 ║  GET /api/nps?days=60             국민연금 변동 종목  ║
