@@ -8,6 +8,7 @@ struct DashboardView: View {
     @State private var trumpNews: TrumpNewsResponse?
     @State private var fx: FxResponse?
     @State private var sectorTrends: SectorTrendsResponse?
+    @State private var mosBoard: MosBoardResponse?
     // 환율 실시간 갱신 (30초)
     private let fxTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
@@ -34,8 +35,11 @@ struct DashboardView: View {
                         }
                     }
 
+                    // 요약(위): 지수 → MOS → 환율 → 수출입
+                    mosOpportunitySection
                     fxSection
                     tradeSummarySection
+                    // 세부(아래): 특징 종목 → 업종 → 뉴스
                     featuredSection
                     sectorTrendsSection
                     axiosNewsSection
@@ -65,6 +69,7 @@ struct DashboardView: View {
         async let trumpTask = try? APIClient.shared.get("/api/news/trump") as TrumpNewsResponse
         async let fxTask = try? APIClient.shared.get("/api/fx") as FxResponse
         async let sectorTask = try? APIClient.shared.get("/api/sector/trends") as SectorTrendsResponse
+        async let mosTask = try? APIClient.shared.get("/api/alerts/mos/board") as MosBoardResponse
         _ = await indexTask
         tradeReport = await tradeTask
         featured = await featuredTask
@@ -72,6 +77,89 @@ struct DashboardView: View {
         trumpNews = await trumpTask
         fx = await fxTask
         sectorTrends = await sectorTask
+        mosBoard = await mosTask
+    }
+
+    // MARK: - MOS 기회 (요약)
+
+    @ViewBuilder
+    private var mosOpportunitySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "target")
+                    .foregroundStyle(AppTheme.accent)
+                Text("MOS 기회")
+                    .font(.paperlogy(16, weight: .semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                if let board = mosBoard {
+                    Text("후보 \(board.enterCount ?? 0)")
+                        .font(.paperlogy(11, weight: .bold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(AppTheme.accent.opacity(0.2))
+                        .foregroundStyle(AppTheme.accent)
+                        .clipShape(Capsule())
+                }
+                Spacer()
+                Text("알림 전용")
+                    .font(.paperlogy(10, weight: .medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            if mosBoard == nil {
+                Text("불러오는 중…")
+                    .font(.paperlogy(12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            } else if let items = mosBoard?.items, !items.isEmpty {
+                ForEach(items.prefix(4)) { item in
+                    NavigationLink(value: item.asStock) {
+                        HStack(spacing: 8) {
+                            Text(item.enterLabel)
+                                .font(.paperlogy(10, weight: .bold))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(((item.Enter == true) ? AppTheme.up : AppTheme.textSecondary).opacity(0.2))
+                                .foregroundStyle((item.Enter == true) ? AppTheme.up : AppTheme.textSecondary)
+                                .clipShape(Capsule())
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.name)
+                                    .font(.paperlogy(14, weight: .semibold))
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                HStack(spacing: 6) {
+                                    Text(item.discountText)
+                                    Text("·")
+                                    Text(item.sizeText)
+                                    if let sf = item.S_F_mkt {
+                                        Text("·")
+                                        Text("S_F \(sf)")
+                                    }
+                                }
+                                .font(.paperlogy(10))
+                                .foregroundStyle(AppTheme.textSecondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                if let note = mosBoard?.disclaimer, !note.isEmpty {
+                    Text(note)
+                        .font(.paperlogy(9))
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .lineLimit(2)
+                }
+            } else {
+                Text("현재 워치리스트 후보 없음 (Paper/Live OFF)")
+                    .font(.paperlogy(12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+        }
+        .padding(16)
+        .background(AppTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     // MARK: - 실시간 환율

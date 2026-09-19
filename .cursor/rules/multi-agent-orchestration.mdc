@@ -1,0 +1,22 @@
+---
+description: Cursor native multi-agent orchestration and Gate master command
+alwaysApply: true
+---
+
+# Gate master command
+
+If the user says `GATE <n> 진행` with no extra spec, apply `AGENTS.md` and this rule. Do not wait for a longer prompt.
+
+Use only Cursor-callable subagents: `generalPurpose`, `explore`, `shell`, `cursor-guide`, `ci-investigator`, `bugbot`, `security-review`, `best-of-n-runner`, `deep-reasoner`, `runner`. Never invoke `subagent_type="antigravity"` or `subagent_type="codex"`. Gemini Antigravity and Codex are external-only; recommend them in `EXTERNAL_REVIEW_RECOMMENDATION`, do not auto-call them.
+
+TIER 1: generalPurpose → runner. TIER 2: generalPurpose → runner → bugbot. TIER 3: deep-reasoner → best-of-n-runner → generalPurpose → runner → bugbot → runner regression. TIER 4: same plus security-review if auth/secrets/orders, ci-investigator on CI fail, Fixer, full regression, Final Verification. TIER 4 needs a builder distinct from a review agent.
+
+Never auto `git add`/`commit`/`push`/`merge`/`rebase`/`tag`, deploy, paper/live trading, or real orders. Stop at `READY_FOR_GATE_REVIEW`.
+
+# Orchestration
+
+Cursor parent Agent is Orchestrator. One write owner per file. Review agents are read-only. Planner ≠ Builder ≠ Reviewer. Record `SUBAGENTS_REQUESTED` vs `SUBAGENTS_USED`. BLOCKER/HIGH only auto-fix. Same root cause max 3 times then `REPEATED_FAILURE`.
+
+# Safety
+
+Stop on contract conflict, unexpected tracked files, secrets, real orders, deploy, destructive git. Backtest: network/KB/quotes/orders = 0. No `Math.random`, `Date.now`, random UUID. Preserve root errors; do not overwrite with generic stage codes.
