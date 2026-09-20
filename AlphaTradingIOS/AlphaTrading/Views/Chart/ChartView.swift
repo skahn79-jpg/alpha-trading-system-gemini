@@ -8,8 +8,16 @@ struct ChartView: View {
     // 주봉/월봉 = 시트의 사이클 판단 타임프레임 (커뮤니티 앱에서는 구독 기능)
     @State private var period = "D"
 
-    // 표시 구간: 최근 60봉 (MA/볼린저 계산은 전체 데이터 사용)
-    private let displayCount = 60
+    // 표시 구간 (MA/볼린저 계산은 전체 데이터, 화면만 윈도우)
+    private let defaultVisible = 60
+    private let minVisible = 20
+    private let maxVisible = 180
+    /// 화면에 보이는 봉 수 (핀치 줌)
+    @State private var visibleCount = 60
+    /// 윈도우 끝 인덱스(exclusive). nil이면 최신봉에 고정
+    @State private var windowEnd: Int? = nil
+    @State private var dragStartEnd: Int? = nil
+    @State private var pinchStartCount: Int? = nil
 
     // 학습 모드: 켜진 오버레이 집합 (비어 있으면 기존 차트와 동일)
     @State private var learnModes: Set<LearnMode> = []
@@ -55,7 +63,13 @@ struct ChartView: View {
         }
         .background(AppTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .task(id: "\(code)-\(period)-\(kind.rawValue)") { await viewModel.load(code: code, period: period, kind: kind) }
+        .task(id: "\(code)-\(period)-\(kind.rawValue)") {
+            visibleCount = defaultVisible
+            windowEnd = nil
+            dragStartEnd = nil
+            pinchStartCount = nil
+            await viewModel.load(code: code, period: period, kind: kind)
+        }
     }
 
     // MARK: - 가격 차트 (캔들 + MA + 볼린저밴드)
@@ -116,12 +130,17 @@ struct ChartView: View {
         // 등장 순서 기준으로 뒤쪽 날짜가 앞에 등록되어 주봉/월봉 차트가 뒤엉킴
         .chartXScale(domain: xDomain)
         .chartXAxis {
+            // automatic 금지 — 전 구간 라벨이 겹쳐 "글씨 뭉개짐" 발생
             AxisMarks(values: xAxisDates) { value in
-                AxisGridLine()
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.4))
                 AxisValueLabel {
                     if let raw = value.as(String.self) {
                         Text(Self.shortDateLabel(raw))
-                            .font(.paperlogy(10))
+                            .font(.paperlogy(9))
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
             }
@@ -129,6 +148,62 @@ struct ChartView: View {
         .frame(height: 260)
         .padding(.horizontal, 8)
         .padding(.top, 8)
+        .contentShape(Rectangle())
+        .gesture(chartDragGesture)
+        .simultaneousGesture(chartPinchGesture)
+        .overlay(alignment: .bottomTrailing) {
+            Text("좌우 드래그 · 핀치 줌")
+                .font(.paperlogy(9))
+                .foregroundStyle(AppTheme.textSecondary.opacity(0.7))
+                .padding(.trailing, 12)
+                .padding(.bottom, 2)
+        }
+    }
+
+    private var chartDragGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                // 세로 스크롤과 충돌 줄이기: 가로 이동이 더 클 때만
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                let total = viewModel.candles.count
+                guard total > visibleCount else { return }
+                if dragStartEnd == nil {
+                    dragStartEnd = clampedEnd(windowEnd ?? total)
+                }
+                let start = dragStartEnd ?? total
+                // 오른쪽 드래그 → 과거로 (end 감소)
+                let bars = Int((value.translation.width / 8).rounded())
+                windowEnd = clampedEnd(start - bars)
+            }
+            .onEnded { _ in
+                dragStartEnd = nil
+            }
+    }
+
+    private var chartPinchGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { scale in
+                let total = viewModel.candles.count
+                guard total > minVisible else { return }
+                if pinchStartCount == nil {
+                    pinchStartCount = visibleCount
+                }
+                let base = pinchStartCount ?? defaultVisible
+                let next = Int((Double(base) / Double(scale)).rounded())
+                let capped = min(maxVisible, max(minVisible, min(total, next)))
+                let end = clampedEnd(windowEnd ?? total)
+                visibleCount = capped
+                windowEnd = clampedEnd(end) // keep right edge stable-ish
+            }
+            .onEnded { _ in
+                pinchStartCount = nil
+            }
+    }
+
+    private func clampedEnd(_ end: Int) -> Int {
+        let total = viewModel.candles.count
+        if total <= visibleCount { return total }
+        return min(total, max(visibleCount, end))
     }
 
     private var legend: some View {
@@ -160,6 +235,7 @@ struct ChartView: View {
             )
             .foregroundStyle((candle.isUp ? AppTheme.up : AppTheme.down).opacity(0.6))
         }
+        .chartXScale(domain: xDomain)
         .chartXAxis(.hidden)
         .chartYAxis {
             AxisMarks(values: .automatic(desiredCount: 2))
@@ -167,12 +243,20 @@ struct ChartView: View {
         .frame(height: 56)
         .padding(.horizontal, 8)
         .padding(.bottom, 8)
+        .contentShape(Rectangle())
+        .gesture(chartDragGesture)
+        .simultaneousGesture(chartPinchGesture)
     }
 
     // MARK: - 계산 (candles는 과거→현재 순)
 
     private var displayCandles: [ChartCandle] {
-        Array(viewModel.candles.suffix(displayCount))
+        let all = viewModel.candles
+        guard !all.isEmpty else { return [] }
+        let count = min(max(minVisible, visibleCount), max(minVisible, all.count))
+        let end = clampedEnd(windowEnd ?? all.count)
+        let start = max(0, end - count)
+        return Array(all[start..<end])
     }
 
     private var displayDateSet: Set<String> {
@@ -252,20 +336,29 @@ struct ChartView: View {
         return (minLow - padding)...(maxHigh + padding)
     }
 
-    /// 카테고리 X축에 전체 날짜 라벨이 겹쳐 그려지지 않도록 4개만 고르게 표시
+    /// X축 라벨은 최대 3개(처음·중간·끝) — 전 봉 라벨 시 하단 글씨 겹침
     private var xAxisDates: [String] {
         let dates = displayCandles.map(\.date)
-        guard dates.count > 4 else { return dates }
-        let step = max(1, dates.count / 4)
-        return Swift.stride(from: 0, to: dates.count, by: step).map { dates[$0] }
+        guard !dates.isEmpty else { return [] }
+        if dates.count <= 3 { return dates }
+        let mid = dates.count / 2
+        var out = [dates[0], dates[mid], dates[dates.count - 1]]
+        // 중복 제거(짧은 윈도우)
+        var seen = Set<String>()
+        return out.filter { seen.insert($0).inserted }
     }
 
-    /// "20260702" → "7/2"
+    /// "20260702" / ISO → "26/7/2" 짧게
     private static func shortDateLabel(_ raw: String) -> String {
-        guard raw.count == 8, let month = Int(raw.dropFirst(4).prefix(2)), let day = Int(raw.suffix(2)) else {
-            return raw
+        let digits = raw.filter { $0.isNumber }
+        if digits.count >= 8 {
+            let y = digits.prefix(4).suffix(2)
+            let m = Int(digits.dropFirst(4).prefix(2)) ?? 0
+            let d = Int(digits.dropFirst(6).prefix(2)) ?? 0
+            return "\(y)/\(m)/\(d)"
         }
-        return "\(month)/\(day)"
+        if raw.count > 8 { return String(raw.suffix(5)) }
+        return raw
     }
 
     // MARK: - 학습 모드 (기술적 분석 시각화)
