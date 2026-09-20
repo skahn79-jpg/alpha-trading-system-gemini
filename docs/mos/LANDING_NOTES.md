@@ -29,3 +29,8 @@ Formula prime, rates/bonds/news corr, factcheck, earnings/flows/liq, leveraged E
 - Macro fill: Enter 0→20/24 on Shorts hits; retail still blocked
 - Slice TierB +20d ~+3%/win60% → remain PARKED alert-only
 - AUTO_BATT dominates; retail δ* null kept
+
+## 2026-09-20 — macro snapshot wired (alerts only)
+- `lib/alerts/mosMacroSnapshot.js` — Yahoo VIX / KRW=X / KS11 / SPY → C_vix,C_fx,C_kr (+ ρ60 on board)
+- `GET /api/alerts/mos/macro`, board+score auto-fill missing macro fields
+- Paper/Live remain FALSE; no orders

@@ -30,7 +30,14 @@ const { buildMacroReport } = require("./macro.js");
 const { volumeProfile, patternOutlook, buildCommentary } = require("./chartlab.js");
 const cryptoReport = require("./crypto-report.js");
 const apns = require("./apns.js");
-const { scoreMosOpportunity, V11: MOS_V11, PAPER_LIVE: MOS_PAPER_LIVE } = require("./lib/alerts");
+const {
+  scoreMosOpportunity,
+  V11: MOS_V11,
+  PAPER_LIVE: MOS_PAPER_LIVE,
+  getMosMacroSnapshot,
+  applyMacroToScoreInput,
+  rho60VsIndex,
+} = require("./lib/alerts");
 const { buildLiqMap } = require("./liqmap.js");
 const evolver = require("./evolve.js");
 const dartFund = require("./dart-fund.js");
@@ -3100,23 +3107,54 @@ app.get("/api/alerts/mos/meta", (req, res) => {
     lockedAt: MOS_V11.lockedAt,
     deltaStarBySector: MOS_V11.deltaStarBySector,
     krMinSF: MOS_V11.krMinSF,
-    note: "Alerts/scoring only. wouldExecEnter is always false while paperLive is false.",
+    macroBits: ["C_vix", "C_fx", "C_kr", "C_corr"],
+    endpoints: {
+      macro: "GET /api/alerts/mos/macro",
+      board: "GET /api/alerts/mos/board",
+      score: "POST /api/alerts/mos/score",
+    },
+    note: "Alerts/scoring only. Board/score auto-fill VIX/FX/KR-US gap (+ρ60 on board). wouldExecEnter always false while paperLive is false.",
   });
 });
 
-app.post("/api/alerts/mos/score", (req, res) => {
+app.post("/api/alerts/mos/score", async (req, res) => {
   try {
     const body = req.body || {};
     if (body.d == null && body.discount == null) {
-      return res.status(400).json({ ok: false, error: "d (3y discount) required" });
+      return res.status(400).json({ ok: false, error: "d (drawdown/discount) required" });
     }
-    const scored = scoreMosOpportunity({
-      ...body,
-      d: body.d != null ? Number(body.d) : Number(body.discount),
-      ticker: body.ticker || body.code || "",
-      sectorId: body.sectorId || body.sector || "UNKNOWN",
+    let macro = null;
+    try {
+      macro = await getMosMacroSnapshot();
+    } catch (err) {
+      console.warn("[mos/score] macro snapshot skipped:", err.message);
+    }
+    const input = applyMacroToScoreInput(
+      {
+        ...body,
+        d: body.d != null ? Number(body.d) : Number(body.discount),
+        ticker: body.ticker || body.code || "",
+        sectorId: body.sectorId || body.sector || "UNKNOWN",
+      },
+      macro
+    );
+    const scored = scoreMosOpportunity(input);
+    res.json({
+      ok: true,
+      paperLive: MOS_PAPER_LIVE,
+      macroFilled: !!macro,
+      macro: macro
+        ? {
+            asOf: macro.asOf,
+            bits: macro.bits,
+            vix: macro.vix,
+            dFx5d: macro.dFx5d,
+            krUsDdGap: macro.krUsDdGap,
+            cached: macro.cached,
+          }
+        : null,
+      scored,
     });
-    res.json({ ok: true, paperLive: MOS_PAPER_LIVE, scored });
   } catch (err) {
     console.error("[mos/score]", err.message);
     res.status(400).json({ ok: false, error: err.message });
@@ -3162,6 +3200,13 @@ function mosR20FromCandles(candles) {
 }
 
 async function buildMosBoard() {
+  let macro = null;
+  try {
+    macro = await getMosMacroSnapshot();
+  } catch (err) {
+    console.warn("[mos/board] macro snapshot skipped:", err.message);
+  }
+
   const items = [];
   for (const row of MOS_BOARD_WATCHLIST) {
     try {
@@ -3169,26 +3214,35 @@ async function buildMosBoard() {
       const d = mosDiscountFromCandles(candles);
       const r20 = mosR20FromCandles(candles);
       if (d == null) continue;
-      const scored = scoreMosOpportunity({
-        ticker: `${row.code}.KS`,
-        code: row.code,
-        name: row.name,
-        sectorId: row.sectorId,
-        market: row.market,
-        d,
-        r20,
-        sessionOverride: "regular",
-      });
+      const rho60 = macro ? rho60VsIndex(candles, macro.kospi) : null;
+      const scored = scoreMosOpportunity(
+        applyMacroToScoreInput(
+          {
+            ticker: `${row.code}.KS`,
+            code: row.code,
+            name: row.name,
+            sectorId: row.sectorId,
+            market: row.market,
+            d,
+            r20,
+            rho60,
+            sessionOverride: "regular",
+          },
+          macro
+        )
+      );
       items.push({
         code: row.code,
         name: row.name,
         sectorId: row.sectorId,
         d,
         r20,
+        rho60,
         Enter: !!scored.Enter,
         f: scored.f,
         severity: scored.psychology?.severity || "normal",
         S_F_mkt: scored.S_F_mkt,
+        bits: scored.bits,
         deltaStar: scored.deltaStar,
         blockReasons: scored.blockReasons || [],
         researchNotes: scored.research?.notes || [],
@@ -3205,8 +3259,22 @@ async function buildMosBoard() {
     generatedAt: new Date().toISOString(),
     count: items.length,
     enterCount: items.filter((i) => i.Enter).length,
+    macro: macro
+      ? {
+          asOf: macro.asOf,
+          bits: macro.bits,
+          vix: macro.vix,
+          dVix5d: macro.dVix5d,
+          dFx5d: macro.dFx5d,
+          usdKrw: macro.usdKrw,
+          dKospi: macro.dKospi,
+          dSpy: macro.dSpy,
+          krUsDdGap: macro.krUsDdGap,
+          cached: macro.cached,
+        }
+      : null,
     items,
-    disclaimer: "알림/스코어 참고용. Paper/Live OFF. 투자 권유 아님.",
+    disclaimer: "알림/스코어 참고용. Paper/Live OFF. 투자 권유 아님. 매크로 비트 자동 채움.",
   };
 }
 
@@ -4073,6 +4141,7 @@ if (require.main === module) {
 ║  POST /api/alerts                 서버 알림 등록      ║
 ║  GET /api/alerts/check            조건 감시/텔레그램  ║
 ║  GET /api/alerts/mos/meta         MOS 설정 요약         ║
+║  GET /api/alerts/mos/macro        MOS 매크로 스냅샷     ║
 ║  POST /api/alerts/mos/score       MOS 기회 스코어       ║
 ║  GET /api/alerts/mos/board        MOS 대시보드 보드     ║
 ║                                                      ║
